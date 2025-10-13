@@ -11,6 +11,7 @@
 
 #include <EntropyCore.h>
 #include "../Core/NetworkTypes.h"
+#include "../Core/ConnectionTypes.h"
 #include "../Core/ErrorCodes.h"
 #include <vector>
 #include <functional>
@@ -18,27 +19,6 @@
 #include <memory>
 
 namespace EntropyEngine::Networking {
-
-enum class ConnectionState {
-    Disconnected,
-    Connecting,
-    Connected,
-    Disconnecting,
-    Failed
-};
-
-enum class ConnectionType {
-    UnixSocket,
-    WebRTC
-};
-
-struct ConnectionStats {
-    uint64_t bytesSent{0};
-    uint64_t bytesReceived{0};
-    uint64_t messagesSent{0};
-    uint64_t messagesReceived{0};
-    uint64_t lastActivityTime{0};
-};
 
 /**
  * NetworkConnection - Represents a network connection to a peer

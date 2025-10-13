@@ -37,7 +37,7 @@ public:
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
 
     ConnectionState getState() const override { return _state.load(); }
-    ConnectionType getType() const override { return ConnectionType::UnixSocket; }
+    ConnectionType getType() const override { return ConnectionType::Local; }
     ConnectionStats getStats() const override;
 
 private:

@@ -27,7 +27,10 @@ set(NETWORKING_SOURCES
     src/Networking/Transport/UnixSocketConnection.cpp
     src/Networking/Transport/WebRTCConnection.cpp
     src/Networking/Transport/ConnectionManager.cpp
+    src/Networking/Transport/ConnectionHandle.cpp
     src/Networking/Session/NetworkSession.cpp
+    src/Networking/Session/SessionHandle.cpp
+    src/Networking/Session/SessionManager.cpp
     src/Networking/Session/BatchManager.cpp
     ${CAPNP_SRCS}
 )

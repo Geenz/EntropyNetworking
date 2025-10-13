@@ -29,7 +29,7 @@ TEST(WebRTCConnectionTests, CreateConnection) {
 
     WebRTCConnection connection(config, callbacks);
 
-    EXPECT_EQ(connection.getType(), ConnectionType::WebRTC);
+    EXPECT_EQ(connection.getType(), ConnectionType::Remote);
     EXPECT_EQ(connection.getState(), ConnectionState::Disconnected);
     EXPECT_FALSE(connection.isConnected());
 }
@@ -140,7 +140,7 @@ TEST(WebRTCConnectionTests, DISABLED_StateCallback) {
 }
 
 TEST(WebRTCConnectionTests, ConnectionManagerIntegration) {
-    ConnectionManager manager;
+    ConnectionManager manager(64);
 
     WebRTCConfig config;
     config.iceServers = {"stun:stun.l.google.com:19302"};
@@ -149,17 +149,11 @@ TEST(WebRTCConnectionTests, ConnectionManagerIntegration) {
     callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
     callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
 
-    auto result = manager.createWebRTCConnection(config, callbacks);
-    ASSERT_TRUE(result.success());
+    auto handle = manager.openRemoteConnection("", config, callbacks);
+    ASSERT_TRUE(handle.valid());
 
-    ConnectionId id = result.value;
-    auto* connection = manager.getConnection(id);
-
-    ASSERT_NE(connection, nullptr);
-    EXPECT_EQ(connection->getType(), ConnectionType::WebRTC);
-    EXPECT_EQ(connection->getState(), ConnectionState::Disconnected);
-
-    connection->release();
+    EXPECT_EQ(handle.getType(), ConnectionType::Remote);
+    EXPECT_EQ(handle.getState(), ConnectionState::Disconnected);
 }
 
 // Integration test - requires network and takes time

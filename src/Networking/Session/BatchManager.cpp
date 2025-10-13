@@ -1,15 +1,21 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
 
 #include "BatchManager.h"
-#include "NetworkSession.h"
+#include "SessionHandle.h"
+#include "SessionManager.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
 #include <capnp/message.h>
 
 namespace EntropyEngine::Networking {
 
-BatchManager::BatchManager(NetworkSession* session, uint32_t batchIntervalMs)
+BatchManager::BatchManager(SessionHandle session, uint32_t batchIntervalMs)
     : _session(session)
     , _batchIntervalMs(batchIntervalMs)
     , _dynamicIntervalMs(batchIntervalMs)
@@ -161,8 +167,8 @@ void BatchManager::processBatch() {
             return;
         }
 
-        // Send on unreliable channel
-        auto result = _session->sendPropertyUpdateBatch(serialized.value);
+        // Send on unreliable channel (via session handle)
+        auto result = _session.sendPropertyUpdateBatch(serialized.value);
 
         _pendingBatchCount--;
 

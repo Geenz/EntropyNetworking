@@ -7,6 +7,7 @@
 #include "../Core/PropertyHash.h"
 #include "../Core/PropertyTypes.h"
 #include "../Core/ErrorCodes.h"
+#include "SessionHandle.h"
 #include <EntropyCore.h>
 #include <unordered_map>
 #include <vector>
@@ -15,9 +16,6 @@
 #include <chrono>
 
 namespace EntropyEngine::Networking {
-
-// Forward declaration
-class NetworkSession;
 
 /**
  * @brief Batches high-frequency property updates for efficient network transmission
@@ -32,26 +30,30 @@ class NetworkSession;
  *
  * Usage:
  * @code
- * auto batcher = std::make_shared<BatchManager>(session.get());
+ * ConnectionManager connMgr(1024);
+ * SessionManager sessMgr(&connMgr, 512);
+ * auto session = sessMgr.createSession(connection);
+ *
+ * auto batcher = std::make_shared<BatchManager>(session);
  *
  * // Caller computes hash from entity metadata
  * auto hash = computePropertyHash(entityId, appId, typeName, "transform.position");
  * batcher->updateProperty(hash, PropertyType::Vec3, position);
  *
- * // BatchManager automatically sends batches every 16ms via WorkContract
+ * // Application calls processBatch() periodically via WorkContract
  * @endcode
  */
 class BatchManager {
 public:
     /**
      * @brief Construct a batch manager for a network session
-     * @param session The session to send batches through
+     * @param session The session handle to send batches through
      * @param batchIntervalMs Batch interval in milliseconds (default 16ms = 60Hz)
      *
      * Note: The application is responsible for calling processBatch() periodically,
      * typically by scheduling work contracts in a loop.
      */
-    explicit BatchManager(NetworkSession* session, uint32_t batchIntervalMs = 16);
+    explicit BatchManager(SessionHandle session, uint32_t batchIntervalMs = 16);
     ~BatchManager();
 
     /**
@@ -119,7 +121,7 @@ private:
 
     void adjustBatchRate();
 
-    NetworkSession* _session; // Not owned
+    SessionHandle _session;          // Session handle
 
     // Pending updates (keyed by property hash)
     std::unordered_map<PropertyHash128, PendingUpdate> _pendingUpdates;

@@ -1,0 +1,112 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#pragma once
+
+#include <string>
+#include <optional>
+#include <vector>
+#include <functional>
+
+namespace EntropyEngine::Networking {
+
+/**
+ * @brief High-level connection type abstraction
+ *
+ * Represents platform-agnostic connection categories:
+ * - Local: In-process or local IPC (Unix socket, Named pipe, XPC)
+ * - Remote: Network connections (WebRTC, future: QUIC, WebTransport)
+ */
+enum class ConnectionType {
+    Local,   ///< Local IPC - platform selects appropriate backend
+    Remote   ///< Remote network connection - uses WebRTC
+};
+
+/**
+ * @brief Explicit backend selection (advanced use)
+ *
+ * Allows overriding platform auto-selection for specific backend choice.
+ * Use Auto for typical cases - platform picks the best backend.
+ */
+enum class ConnectionBackend {
+    Auto,           ///< Automatic selection based on platform
+    UnixSocket,     ///< Force Unix domain socket (Linux/macOS)
+    NamedPipe,      ///< Force named pipe (Windows)
+    XPC,            ///< Force XPC connection (macOS)
+    WebRTC          ///< Force WebRTC data channel (all platforms)
+};
+
+/**
+ * @brief Connection state during lifecycle
+ */
+enum class ConnectionState {
+    Disconnected,   ///< Initial state or after disconnect
+    Connecting,     ///< Connection in progress
+    Connected,      ///< Fully connected and ready
+    Disconnecting,  ///< Graceful disconnect in progress
+    Failed          ///< Connection failed
+};
+
+/**
+ * @brief Connection statistics
+ */
+struct ConnectionStats {
+    uint64_t bytesSent = 0;
+    uint64_t bytesReceived = 0;
+    uint64_t messagesSent = 0;
+    uint64_t messagesReceived = 0;
+    uint64_t connectTime = 0;  ///< Timestamp of connection establishment
+};
+
+/**
+ * @brief WebRTC-specific configuration
+ */
+struct WebRTCConfig {
+    std::vector<std::string> iceServers;
+    std::string proxyServer;
+    std::string bindAddress;
+    uint16_t portRangeBegin = 0;
+    uint16_t portRangeEnd = 0;
+    int maxMessageSize = 256 * 1024;  // 256 KB default
+    bool enableIceTcp = false;
+};
+
+/**
+ * @brief WebRTC signaling callbacks
+ *
+ * The application must provide these callbacks to handle WebRTC signaling.
+ * Typically, these would send data over WebSocket or another signaling channel.
+ */
+struct SignalingCallbacks {
+    using LocalDescriptionCallback = std::function<void(const std::string& type, const std::string& sdp)>;
+    using LocalCandidateCallback = std::function<void(const std::string& candidate, const std::string& mid)>;
+
+    LocalDescriptionCallback onLocalDescription;
+    LocalCandidateCallback onLocalCandidate;
+};
+
+/**
+ * @brief Unified connection configuration
+ *
+ * Supports both simple (Local/Remote) and advanced (explicit backend) use cases.
+ * Use the high-level helpers (openLocalConnection, openRemoteConnection) for
+ * typical scenarios, or populate this struct for advanced control.
+ */
+struct ConnectionConfig {
+    ConnectionType type = ConnectionType::Local;
+    ConnectionBackend backend = ConnectionBackend::Auto;
+
+    // Common fields
+    std::string endpoint;  ///< Path, pipe name, or signaling server URL
+
+    // WebRTC-specific (only for Remote/WebRTC)
+    WebRTCConfig webrtcConfig;
+    SignalingCallbacks signalingCallbacks;
+    std::string dataChannelLabel = "entropy-data";
+
+    // Platform-specific options
+    std::optional<std::string> xpcServiceName;  ///< macOS XPC service identifier
+};
+
+} // namespace EntropyEngine::Networking

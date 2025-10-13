@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "../src/Networking/Session/NetworkSession.h"
-#include "../src/Networking/Session/BatchManager.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/WebRTCConnection.h"
+#include "../src/Networking/Session/SessionManager.h"
+#include "../src/Networking/Session/BatchManager.h"
+#include "../src/Networking/Core/ConnectionTypes.h"
 #include <EntropyCore.h>
 #include <Concurrency/WorkService.h>
 #include <Concurrency/WorkContractGroup.h>
@@ -24,6 +26,10 @@ using namespace EntropyEngine::Core::Concurrency;
 int main() {
     try {
         cout << "Starting EntropyNetworking Batch Demo Server" << endl;
+
+        // Create managers
+        ConnectionManager connMgr(64);
+        SessionManager sessMgr(&connMgr, 64);
 
         // Create WorkService for executing work contracts
         WorkService::Config workConfig;
@@ -45,38 +51,47 @@ int main() {
         rtc::WebSocketServer wsServer(wsConfig);
         cout << "WebSocket signaling server listening on port 8080" << endl;
 
-        shared_ptr<NetworkSession> session;
+        SessionHandle session;
         shared_ptr<BatchManager> batchManager;
 
         // Handle incoming WebSocket connections
         wsServer.onClient([&](shared_ptr<rtc::WebSocket> ws) {
             cout << "Client connected to signaling server" << endl;
 
-            // Create WebRTC connection
-            WebRTCConfig config;
-            SignalingCallbacks callbacks;
+            // Create connection with WebRTC backend
+            ConnectionConfig config;
+            config.type = ConnectionType::Remote;
+            config.backend = ConnectionBackend::WebRTC;
 
-            callbacks.onLocalDescription = [ws](const string& type, const string& sdp) {
+            config.signalingCallbacks.onLocalDescription = [ws](const string& type, const string& sdp) {
                 cout << "Sending " << type << " to client" << endl;
                 ws->send(sdp);
             };
 
-            callbacks.onLocalCandidate = [ws](const string& candidate, const string& mid) {
+            config.signalingCallbacks.onLocalCandidate = [ws](const string& candidate, const string& mid) {
                 cout << "Sending ICE candidate to client" << endl;
                 ws->send(candidate + "|" + mid);
             };
 
-            auto* webrtcConn = new WebRTCConnection(config, callbacks);
+            auto conn = connMgr.openConnection(config);
+            if (!conn.valid()) {
+                cerr << "Failed to create connection" << endl;
+                return;
+            }
 
-            // Create network session
-            session = make_shared<NetworkSession>(webrtcConn);
+            // Create session
+            session = sessMgr.createSession(conn);
+            if (!session.valid()) {
+                cerr << "Failed to create session" << endl;
+                return;
+            }
 
             // Create BatchManager
-            batchManager = make_shared<BatchManager>(session.get(), 16); // 16ms = 60Hz
+            batchManager = make_shared<BatchManager>(session, 16); // 16ms = 60Hz
 
             // Set up protocol message callbacks
-            session->setEntityCreatedCallback([](uint64_t entityId, const string& appId,
-                                                  const string& typeName, uint64_t parentId) {
+            sessMgr.setEntityCreatedCallback(session, [](uint64_t entityId, const string& appId,
+                                                          const string& typeName, uint64_t parentId) {
                 cout << "Server received EntityCreated:" << endl;
                 cout << "  Entity ID: " << entityId << endl;
                 cout << "  App ID: " << appId << endl;
@@ -84,12 +99,12 @@ int main() {
                 cout << "  Parent ID: " << parentId << endl;
             });
 
-            session->setErrorCallback([](NetworkError error, const string& message) {
+            sessMgr.setErrorCallback(session, [](NetworkError error, const string& message) {
                 cout << "Error: " << message << endl;
             });
 
-            // Connect via session to set up data channel handlers
-            auto connectResult = session->connect();
+            // Connect
+            auto connectResult = conn.connect();
             if (connectResult.failed()) {
                 cerr << "Failed to initialize WebRTC connection: " << connectResult.errorMessage << endl;
                 return;
@@ -98,9 +113,12 @@ int main() {
             cout << "WebRTC connection initiated" << endl;
 
             // Handle signaling messages
-            ws->onMessage([webrtcConn](auto data) {
+            ws->onMessage([&connMgr, conn](auto data) {
                 if (holds_alternative<string>(data)) {
                     string msg = get<string>(data);
+
+                    auto* webrtcConn = dynamic_cast<WebRTCConnection*>(connMgr.getConnectionPointer(conn));
+                    if (!webrtcConn) return;
 
                     size_t separator = msg.find('|');
                     if (separator != string::npos) {
@@ -119,7 +137,7 @@ int main() {
         // Simulate multiple entities with frequently updating properties
         thread simulationThread([&]() {
             // Wait for connection
-            while (!session || !session->isConnected()) {
+            while (!session.valid() || !session.isConnected()) {
                 this_thread::sleep_for(chrono::milliseconds(100));
             }
 
@@ -143,7 +161,7 @@ int main() {
 
             // Update properties rapidly (200 Hz) to demonstrate batching
             for (int frame = 0; frame < 300; frame++) {
-                if (!session || !session->isConnected()) break;
+                if (!session.valid() || !session.isConnected()) break;
 
                 for (int i = 0; i < NUM_ENTITIES; i++) {
                     // Compute property hashes for position and rotation

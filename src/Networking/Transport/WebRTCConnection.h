@@ -16,33 +16,6 @@
 namespace EntropyEngine::Networking {
 
     /**
-     * @brief Configuration for WebRTC connection
-     */
-    struct WebRTCConfig {
-        std::vector<std::string> iceServers;
-        std::string proxyServer;
-        std::string bindAddress;
-        uint16_t portRangeBegin = 0;
-        uint16_t portRangeEnd = 0;
-        int maxMessageSize = 256 * 1024; // 256 KB default
-        bool enableIceTcp = false;
-    };
-
-    /**
-     * @brief Signaling callbacks for WebRTC connection
-     *
-     * The application must provide these callbacks to handle signaling.
-     * Typically, these would send data over WebSocket or another signaling channel.
-     */
-    struct SignalingCallbacks {
-        using LocalDescriptionCallback = std::function<void(const std::string& type, const std::string& sdp)>;
-        using LocalCandidateCallback = std::function<void(const std::string& candidate, const std::string& mid)>;
-
-        LocalDescriptionCallback onLocalDescription;
-        LocalCandidateCallback onLocalCandidate;
-    };
-
-    /**
      * @brief WebRTC-based network connection using data channels
      *
      * Implements NetworkConnection interface using libdatachannel for WebRTC data channels.
@@ -75,7 +48,7 @@ namespace EntropyEngine::Networking {
         Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
 
         ConnectionState getState() const override;
-        ConnectionType getType() const override { return ConnectionType::WebRTC; }
+        ConnectionType getType() const override { return ConnectionType::Remote; }
         ConnectionStats getStats() const override;
 
         /**

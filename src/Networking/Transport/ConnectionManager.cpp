@@ -1,115 +1,322 @@
-/*
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * Copyright (c) 2025 Jonathan "Geenz" Goodman
- * This file is part of the Entropy Networking project.
- */
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ConnectionManager.h"
 #include "UnixSocketConnection.h"
 #include "WebRTCConnection.h"
+#include <format>
+#include <stdexcept>
 
 namespace EntropyEngine::Networking {
 
+ConnectionManager::ConnectionManager(size_t capacity)
+    : _capacity(capacity)
+    , _connectionSlots(capacity)
+{
+    // Initialize lock-free free list
+    for (size_t i = 0; i < _capacity - 1; ++i) {
+        _connectionSlots[i].nextFree.store(static_cast<uint32_t>(i + 1), std::memory_order_relaxed);
+    }
+    _connectionSlots[_capacity - 1].nextFree.store(INVALID_INDEX, std::memory_order_relaxed);
+    _freeListHead.store(0, std::memory_order_relaxed);
+}
+
 ConnectionManager::~ConnectionManager() {
-    disconnectAll();
+    // Disconnect all connections
+    for (auto& slot : _connectionSlots) {
+        if (slot.connection) {
+            slot.connection->disconnect();
+        }
+    }
 }
 
-Result<ConnectionId> ConnectionManager::createUnixSocketConnection(const std::string& socketPath) {
-    auto* connection = new UnixSocketConnection(socketPath);
-    connection->retain(); // Initial ref count for the manager
+uint32_t ConnectionManager::allocateSlot() {
+    auto packHead = [](uint32_t idx, uint32_t tag) -> uint64_t {
+        return (static_cast<uint64_t>(tag) << 32) | static_cast<uint64_t>(idx);
+    };
+    auto headIndex = [](uint64_t h) -> uint32_t { return static_cast<uint32_t>(h & 0xFFFFFFFFull); };
+    auto headTag = [](uint64_t h) -> uint32_t { return static_cast<uint32_t>(h >> 32); };
 
-    ConnectionId id = generateConnectionId();
+    uint64_t head = _freeListHead.load(std::memory_order_acquire);
+    for (;;) {
+        uint32_t idx = headIndex(head);
+        if (idx == INVALID_INDEX) {
+            return INVALID_INDEX;  // No free slots
+        }
+        uint32_t next = _connectionSlots[idx].nextFree.load(std::memory_order_acquire);
+        uint64_t newHead = packHead(next, headTag(head) + 1);
+        if (_freeListHead.compare_exchange_weak(head, newHead,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire)) {
+            _activeCount.fetch_add(1, std::memory_order_acq_rel);
+            return idx;
+        }
+    }
+}
 
-    {
-        std::unique_lock lock(_mutex);
-        _connections[id] = connection;
+void ConnectionManager::returnSlotToFreeList(uint32_t index) {
+    auto& slot = _connectionSlots[index];
+
+    // Increment generation
+    slot.generation.fetch_add(1, std::memory_order_acq_rel);
+
+    // Clear connection
+    slot.connection.reset();
+
+    // Decrement active count
+    _activeCount.fetch_sub(1, std::memory_order_acq_rel);
+
+    // Push back to free list
+    auto packHead = [](uint32_t idx, uint32_t tag) -> uint64_t {
+        return (static_cast<uint64_t>(tag) << 32) | static_cast<uint64_t>(idx);
+    };
+    auto headIndex = [](uint64_t h) -> uint32_t { return static_cast<uint32_t>(h & 0xFFFFFFFFull); };
+    auto headTag = [](uint64_t h) -> uint32_t { return static_cast<uint32_t>(h >> 32); };
+
+    uint64_t old = _freeListHead.load(std::memory_order_acquire);
+    for (;;) {
+        uint32_t oldIdx = headIndex(old);
+        slot.nextFree.store(oldIdx, std::memory_order_release);
+        uint64_t newH = packHead(index, headTag(old) + 1);
+        if (_freeListHead.compare_exchange_weak(old, newH,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire)) {
+            break;
+        }
+    }
+}
+
+std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const ConnectionConfig& config) {
+    if (config.backend == ConnectionBackend::Auto) {
+#if defined(__unix__) || defined(__APPLE__)
+        return std::make_unique<UnixSocketConnection>(config.endpoint);
+#elif defined(_WIN32)
+        throw std::runtime_error("Named pipe backend not yet implemented");
+#else
+        throw std::runtime_error("No local backend available for this platform");
+#endif
     }
 
-    return Result<ConnectionId>::ok(id);
+    switch (config.backend) {
+        case ConnectionBackend::UnixSocket:
+#if defined(__unix__) || defined(__APPLE__)
+            return std::make_unique<UnixSocketConnection>(config.endpoint);
+#else
+            throw std::runtime_error("Unix sockets not supported on this platform");
+#endif
+
+        case ConnectionBackend::NamedPipe:
+            throw std::runtime_error("Named pipe backend not yet implemented");
+
+        case ConnectionBackend::XPC:
+            throw std::runtime_error("XPC backend not yet implemented");
+
+        default:
+            throw std::runtime_error("Invalid backend for local connection");
+    }
 }
 
-Result<ConnectionId> ConnectionManager::createWebRTCConnection(
-    const WebRTCConfig& config,
-    const SignalingCallbacks& callbacks,
-    const std::string& dataChannelLabel
+std::unique_ptr<NetworkConnection> ConnectionManager::createRemoteBackend(const ConnectionConfig& config) {
+    return std::make_unique<WebRTCConnection>(
+        config.webrtcConfig,
+        config.signalingCallbacks,
+        config.dataChannelLabel
+    );
+}
+
+ConnectionHandle ConnectionManager::openLocalConnection(const std::string& endpoint) {
+    ConnectionConfig config;
+    config.type = ConnectionType::Local;
+    config.endpoint = endpoint;
+    return openConnection(config);
+}
+
+ConnectionHandle ConnectionManager::openRemoteConnection(
+    const std::string& signalingServer,
+    WebRTCConfig config,
+    SignalingCallbacks callbacks
 ) {
-    auto* connection = new WebRTCConnection(config, callbacks, dataChannelLabel);
-    connection->retain(); // Initial ref count for the manager
+    ConnectionConfig connConfig;
+    connConfig.type = ConnectionType::Remote;
+    connConfig.endpoint = signalingServer;
+    connConfig.webrtcConfig = std::move(config);
+    connConfig.signalingCallbacks = std::move(callbacks);
+    return openConnection(connConfig);
+}
 
-    ConnectionId id = generateConnectionId();
-
-    {
-        std::unique_lock lock(_mutex);
-        _connections[id] = connection;
+ConnectionHandle ConnectionManager::openConnection(ConnectionConfig config) {
+    uint32_t index = allocateSlot();
+    if (index == INVALID_INDEX) {
+        return ConnectionHandle();  // Full - return invalid handle
     }
 
-    return Result<ConnectionId>::ok(id);
+    auto& slot = _connectionSlots[index];
+    uint32_t generation = slot.generation.load(std::memory_order_acquire);
+
+    try {
+        // Create backend based on type
+        if (config.type == ConnectionType::Local) {
+            slot.connection = createLocalBackend(config);
+        } else {
+            slot.connection = createRemoteBackend(config);
+        }
+
+        slot.type = config.type;
+        slot.state.store(ConnectionState::Disconnected, std::memory_order_release);
+
+        return ConnectionHandle(this, index, generation);
+    } catch (const std::exception& e) {
+        // Failed to create backend - return slot to free list
+        returnSlotToFreeList(index);
+        return ConnectionHandle();  // Return invalid handle
+    }
 }
 
-NetworkConnection* ConnectionManager::getConnection(ConnectionId id) {
-    std::shared_lock lock(_mutex);
+bool ConnectionManager::validateHandle(const ConnectionHandle& handle) const noexcept {
+    if (handle.handleOwner() != static_cast<const void*>(this)) return false;
 
-    auto it = _connections.find(id);
-    if (it == _connections.end()) {
-        return nullptr;
+    uint32_t index = handle.handleIndex();
+    if (index >= _capacity) return false;
+
+    uint32_t currentGen = _connectionSlots[index].generation.load(std::memory_order_acquire);
+    return currentGen == handle.handleGeneration();
+}
+
+bool ConnectionManager::isValidHandle(const ConnectionHandle& handle) const noexcept {
+    return validateHandle(handle);
+}
+
+Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
     }
 
-    auto* connection = it->second;
-    connection->tryRetain(); // Caller must release when done
-    return connection;
-}
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
 
-Result<void> ConnectionManager::removeConnection(ConnectionId id) {
-    std::unique_lock lock(_mutex);
+    std::lock_guard<std::mutex> lock(slot.mutex);
 
-    auto it = _connections.find(id);
-    if (it == _connections.end()) {
-        return Result<void>::err(NetworkError::EntityNotFound, "Connection not found");
+    if (!slot.connection) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Connection not initialized");
     }
 
-    auto* connection = it->second;
-    connection->disconnect();
-    connection->release(); // Release manager's ref count
-
-    _connections.erase(it);
-
-    return Result<void>::ok();
-}
-
-void ConnectionManager::disconnectAll() {
-    std::unique_lock lock(_mutex);
-
-    for (auto& [id, connection] : _connections) {
-        connection->disconnect();
-        connection->release();
+    auto result = slot.connection->connect();
+    if (result.success()) {
+        slot.state.store(ConnectionState::Connected, std::memory_order_release);
     }
 
-    _connections.clear();
+    return result;
 }
 
-size_t ConnectionManager::getConnectionCount() const {
-    std::shared_lock lock(_mutex);
-    return _connections.size();
-}
-
-std::vector<ConnectionId> ConnectionManager::getAllConnectionIds() const {
-    std::shared_lock lock(_mutex);
-
-    std::vector<ConnectionId> ids;
-    ids.reserve(_connections.size());
-
-    for (const auto& [id, _] : _connections) {
-        ids.push_back(id);
+Result<void> ConnectionManager::disconnect(const ConnectionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
     }
 
-    return ids;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.connection) {
+        return Result<void>::ok();  // Already disconnected
+    }
+
+    auto result = slot.connection->disconnect();
+    slot.state.store(ConnectionState::Disconnected, std::memory_order_release);
+
+    return result;
 }
 
-ConnectionId ConnectionManager::generateConnectionId() {
-    return _nextConnectionId.fetch_add(1, std::memory_order_relaxed);
+Result<void> ConnectionManager::send(const ConnectionHandle& handle, const std::vector<uint8_t>& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.connection) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Connection not initialized");
+    }
+
+    return slot.connection->send(data);
+}
+
+Result<void> ConnectionManager::sendUnreliable(const ConnectionHandle& handle, const std::vector<uint8_t>& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.connection) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Connection not initialized");
+    }
+
+    return slot.connection->sendUnreliable(data);
+}
+
+bool ConnectionManager::isConnected(const ConnectionHandle& handle) const {
+    if (!validateHandle(handle)) return false;
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    if (!slot.connection) return false;
+    return slot.connection->isConnected();
+}
+
+ConnectionState ConnectionManager::getState(const ConnectionHandle& handle) const {
+    if (!validateHandle(handle)) return ConnectionState::Disconnected;
+
+    uint32_t index = handle.handleIndex();
+    return _connectionSlots[index].state.load(std::memory_order_acquire);
+}
+
+ConnectionStats ConnectionManager::getStats(const ConnectionHandle& handle) const {
+    if (!validateHandle(handle)) return ConnectionStats{};
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    if (!slot.connection) return ConnectionStats{};
+    return slot.connection->getStats();
+}
+
+ConnectionType ConnectionManager::getConnectionType(const ConnectionHandle& handle) const {
+    if (!validateHandle(handle)) return ConnectionType::Local;
+
+    uint32_t index = handle.handleIndex();
+    return _connectionSlots[index].type;
+}
+
+NetworkConnection* ConnectionManager::getConnectionPointer(const ConnectionHandle& handle) {
+    if (!validateHandle(handle)) return nullptr;
+
+    uint32_t index = handle.handleIndex();
+    return _connectionSlots[index].connection.get();
+}
+
+uint64_t ConnectionManager::classHash() const noexcept {
+    static const uint64_t hash = static_cast<uint64_t>(
+        Core::TypeSystem::createTypeId<ConnectionManager>().id
+    );
+    return hash;
+}
+
+std::string ConnectionManager::toString() const {
+    return std::format("{}@{}(cap={}, active={})",
+                       className(),
+                       static_cast<const void*>(this),
+                       _capacity,
+                       _activeCount.load(std::memory_order_relaxed));
 }
 
 } // namespace EntropyEngine::Networking

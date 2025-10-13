@@ -145,9 +145,6 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
 
     _stats.bytesSent += FRAME_HEADER_SIZE + data.size();
     _stats.messagesSent++;
-    _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
 
     return Result<void>::ok();
 }
@@ -175,9 +172,6 @@ void UnixSocketConnection::receiveLoop() {
         }
 
         _stats.bytesReceived += received;
-        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count();
 
         // Process received data
         size_t offset = 0;

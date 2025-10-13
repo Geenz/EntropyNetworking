@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "../src/Networking/Session/NetworkSession.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/WebRTCConnection.h"
+#include "../src/Networking/Session/SessionManager.h"
+#include "../src/Networking/Core/ConnectionTypes.h"
 #include <rtc/rtc.hpp>
 #include <iostream>
 #include <memory>
@@ -17,17 +19,24 @@ int main() {
     try {
         cout << "Starting EntropyNetworking Protocol Client" << endl;
 
+        // Create managers
+        ConnectionManager connMgr(64);
+        SessionManager sessMgr(&connMgr, 64);
+
         // Connect to signaling server
         auto ws = make_shared<rtc::WebSocket>();
         cout << "Connecting to signaling server at ws://localhost:8080" << endl;
 
-        shared_ptr<WebRTCConnection> webrtcConn;
-        shared_ptr<NetworkSession> session;
+        ConnectionHandle conn;
+        SessionHandle session;
 
         // Handle signaling messages
-        ws->onMessage([&webrtcConn](auto data) {
+        ws->onMessage([&connMgr, &conn](auto data) {
             if (holds_alternative<string>(data)) {
                 string msg = get<string>(data);
+
+                auto* webrtcConn = dynamic_cast<WebRTCConnection*>(connMgr.getConnectionPointer(conn));
+                if (!webrtcConn) return;
 
                 size_t separator = msg.find('|');
                 if (separator != string::npos) {
@@ -45,28 +54,37 @@ int main() {
         ws->onOpen([&]() {
             cout << "Connected to signaling server" << endl;
 
-            // Create WebRTC connection
-            WebRTCConfig config;
-            SignalingCallbacks callbacks;
+            // Create connection with WebRTC backend
+            ConnectionConfig config;
+            config.type = ConnectionType::Remote;
+            config.backend = ConnectionBackend::WebRTC;
 
-            callbacks.onLocalDescription = [ws](const string& type, const string& sdp) {
+            config.signalingCallbacks.onLocalDescription = [ws](const string& type, const string& sdp) {
                 cout << "Sending " << type << " to server" << endl;
                 ws->send(sdp);
             };
 
-            callbacks.onLocalCandidate = [ws](const string& candidate, const string& mid) {
+            config.signalingCallbacks.onLocalCandidate = [ws](const string& candidate, const string& mid) {
                 cout << "Sending ICE candidate to server" << endl;
                 ws->send(candidate + "|" + mid);
             };
 
-            webrtcConn = make_shared<WebRTCConnection>(config, callbacks);
+            conn = connMgr.openConnection(config);
+            if (!conn.valid()) {
+                cerr << "Failed to create connection" << endl;
+                return;
+            }
 
-            // Create network session
-            session = make_shared<NetworkSession>(webrtcConn.get());
+            // Create session
+            session = sessMgr.createSession(conn);
+            if (!session.valid()) {
+                cerr << "Failed to create session" << endl;
+                return;
+            }
 
             // Set up protocol message callbacks
-            session->setEntityCreatedCallback([](uint64_t entityId, const string& appId,
-                                                  const string& typeName, uint64_t parentId) {
+            sessMgr.setEntityCreatedCallback(session, [](uint64_t entityId, const string& appId,
+                                                          const string& typeName, uint64_t parentId) {
                 cout << "Client received EntityCreated:" << endl;
                 cout << "  Entity ID: " << entityId << endl;
                 cout << "  App ID: " << appId << endl;
@@ -74,16 +92,16 @@ int main() {
                 cout << "  Parent ID: " << parentId << endl;
             });
 
-            session->setEntityDestroyedCallback([](uint64_t entityId) {
+            sessMgr.setEntityDestroyedCallback(session, [](uint64_t entityId) {
                 cout << "Client received EntityDestroyed: " << entityId << endl;
             });
 
-            session->setErrorCallback([](NetworkError error, const string& message) {
+            sessMgr.setErrorCallback(session, [](NetworkError error, const string& message) {
                 cout << "Error: " << message << endl;
             });
 
-            // Connect via session (which will call webrtcConn->connect())
-            auto connectResult = session->connect();
+            // Connect
+            auto connectResult = conn.connect();
             if (connectResult.failed()) {
                 cerr << "Failed to initialize WebRTC connection: " << connectResult.errorMessage << endl;
                 return;
@@ -94,9 +112,9 @@ int main() {
             // Send an EntityCreated message after a delay
             thread([session]() {
                 this_thread::sleep_for(chrono::seconds(5));
-                if (session && session->isConnected()) {
+                if (session.valid() && session.isConnected()) {
                     cout << "Sending EntityCreated message to server..." << endl;
-                    auto result = session->sendEntityCreated(
+                    auto result = session.sendEntityCreated(
                         67890,                  // entityId
                         "com.entropy.client",   // appId
                         "ClientNode",           // typeName
