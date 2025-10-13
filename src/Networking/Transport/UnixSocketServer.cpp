@@ -5,6 +5,14 @@
 #include "UnixSocketServer.h"
 #include "UnixSocketConnection.h"
 #include "ConnectionManager.h"
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+#include "XPCServer.h"
+#endif
+#endif
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -180,7 +188,16 @@ std::unique_ptr<LocalServer> createLocalServer(
     ConnectionManager* connMgr,
     const std::string& endpoint
 ) {
-#if defined(__unix__) || defined(__APPLE__)
+#if defined(__APPLE__)
+    #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+        // iOS family - use XPC (Unix sockets unavailable)
+        return std::make_unique<XPCServer>(connMgr, endpoint);
+    #else
+        // macOS - use Unix sockets
+        return std::make_unique<UnixSocketServer>(connMgr, endpoint);
+    #endif
+#elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
+    // Linux/Android - use Unix sockets
     return std::make_unique<UnixSocketServer>(connMgr, endpoint);
 #elif defined(_WIN32)
     throw std::runtime_error("Named pipe server not yet implemented");

@@ -5,6 +5,12 @@
 #include "ConnectionManager.h"
 #include "UnixSocketConnection.h"
 #include "WebRTCConnection.h"
+
+#if defined(__APPLE__)
+#include "XPCConnection.h"
+#include <TargetConditionals.h>
+#endif
+
 #include <format>
 #include <stdexcept>
 
@@ -89,7 +95,17 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
 
 std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const ConnectionConfig& config) {
     if (config.backend == ConnectionBackend::Auto) {
-#if defined(__unix__) || defined(__APPLE__)
+        // Automatic platform detection
+#if defined(__APPLE__)
+        #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+            // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
+            return std::make_unique<XPCConnection>(config.endpoint);
+        #else
+            // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
+            return std::make_unique<UnixSocketConnection>(config.endpoint);
+        #endif
+#elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
+        // Linux/Android - use Unix sockets
         return std::make_unique<UnixSocketConnection>(config.endpoint);
 #elif defined(_WIN32)
         throw std::runtime_error("Named pipe backend not yet implemented");
@@ -110,7 +126,11 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
             throw std::runtime_error("Named pipe backend not yet implemented");
 
         case ConnectionBackend::XPC:
-            throw std::runtime_error("XPC backend not yet implemented");
+#if defined(__APPLE__)
+            return std::make_unique<XPCConnection>(config.endpoint);
+#else
+            throw std::runtime_error("XPC not supported on this platform");
+#endif
 
         default:
             throw std::runtime_error("Invalid backend for local connection");
@@ -192,8 +212,28 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
 
     // Initialize state snapshot and callback wiring
     slot.state.store(slot.connection->getState(), std::memory_order_release);
+
+    // Manager-owned state callback: update slot.state and fan out to user callback
     slot.connection->setStateCallback([this, index](ConnectionState newState) {
+        // Update slot state atomically
         _connectionSlots[index].state.store(newState, std::memory_order_release);
+        // Fan out to user callback without holding the lock during invocation
+        std::function<void(ConnectionState)> cb;
+        {
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
+            cb = _connectionSlots[index].userStateCb;
+        }
+        if (cb) cb(newState);
+    });
+
+    // Manager-owned message callback: fan out to user callback
+    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+        std::function<void(const std::vector<uint8_t>&)> cb;
+        {
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
+            cb = _connectionSlots[index].userMessageCb;
+        }
+        if (cb) cb(data);
     });
 
     return ConnectionHandle(this, index, generation);
@@ -233,10 +273,26 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
     // For WebRTC this will be Connecting; for Unix socket it may be Connected or Connecting
     slot.state.store(slot.connection->getState(), std::memory_order_release);
 
-    // Wire up state callback to keep manager's state synchronized
+    // Wire up manager-owned callbacks to keep state synchronized and fan-out to user callbacks
     slot.connection->setStateCallback([this, index](ConnectionState newState) {
         // Update slot state atomically
         _connectionSlots[index].state.store(newState, std::memory_order_release);
+        // Fan out to user callback without holding the lock during invocation
+        std::function<void(ConnectionState)> cb;
+        {
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
+            cb = _connectionSlots[index].userStateCb;
+        }
+        if (cb) cb(newState);
+    });
+
+    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+        std::function<void(const std::vector<uint8_t>&)> cb;
+        {
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
+            cb = _connectionSlots[index].userMessageCb;
+        }
+        if (cb) cb(data);
     });
 
     return result;
@@ -364,11 +420,9 @@ void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
+    // Store user callback; backend remains bound to manager-owned fan-out
     std::lock_guard<std::mutex> lock(slot.mutex);
-
-    if (slot.connection) {
-        slot.connection->setMessageCallback(std::move(callback));
-    }
+    slot.userMessageCb = std::move(callback);
 }
 
 void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) {
@@ -377,11 +431,9 @@ void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::fu
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
+    // Store user callback; backend remains bound to manager-owned fan-out
     std::lock_guard<std::mutex> lock(slot.mutex);
-
-    if (slot.connection) {
-        slot.connection->setStateCallback(std::move(callback));
-    }
+    slot.userStateCb = std::move(callback);
 }
 
 uint64_t ConnectionManager::classHash() const noexcept {

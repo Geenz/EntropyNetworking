@@ -36,8 +36,21 @@ set(NETWORKING_SOURCES
     ${CAPNP_SRCS}
 )
 
+# Add platform-specific sources
+if(APPLE)
+    list(APPEND NETWORKING_SOURCES
+        src/Networking/Transport/XPCConnection.cpp
+        src/Networking/Transport/XPCServer.cpp
+    )
+endif()
+
 # Create library
 add_library(EntropyNetworking ${NETWORKING_SOURCES})
+
+# Apple-specific compile options (required for XPC/Blocks)
+if(APPLE)
+    target_compile_options(EntropyNetworking PRIVATE -fblocks)
+endif()
 
 target_link_libraries(EntropyNetworking
     PUBLIC
@@ -104,3 +117,4 @@ option(BUILD_EXAMPLES "Build example applications" ON)
 if(BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
+

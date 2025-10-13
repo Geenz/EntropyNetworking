@@ -13,6 +13,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <functional>
 
 namespace EntropyEngine::Networking {
 
@@ -238,6 +239,11 @@ private:
         std::unique_ptr<NetworkConnection> connection;
         ConnectionType type;
         std::atomic<uint32_t> nextFree{INVALID_INDEX};
+
+        // User-provided callbacks (set via ConnectionHandle); accessed under mutex
+        std::function<void(const std::vector<uint8_t>&)> userMessageCb;
+        std::function<void(ConnectionState)> userStateCb;
+
         std::mutex mutex;  // Per-slot mutex for connection operations
     };
 
