@@ -48,6 +48,7 @@ XPCConnection::XPCConnection(xpc_connection_t connection, std::string peerInfo)
 
     // Now safe to mark as Connected (connection is active and event handler is set)
     _state = ConnectionState::Connected;
+    onStateChanged(ConnectionState::Connected);
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
@@ -165,6 +166,85 @@ Result<void> XPCConnection::send(const std::vector<uint8_t>& data) {
 Result<void> XPCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
     // XPC doesn't have unreliable messaging - fall back to reliable
     return send(data);
+}
+
+Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint8_t>& data,
+                                                          std::chrono::milliseconds timeout) {
+#if !defined(__APPLE__)
+    (void)data; (void)timeout;
+    return Result<std::vector<uint8_t>>::err(NetworkError::InvalidParameter, "XPC not supported on this platform");
+#else
+    if (!isConnected() || !_connection) {
+        return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    // Create request
+    xpc_object_t message = xpc_dictionary_create(nullptr, nullptr, 0);
+    if (!message) {
+        return Result<std::vector<uint8_t>>::err(NetworkError::InvalidMessage, "Failed to create XPC message");
+    }
+    xpc_dictionary_set_data(message, "payload", data.data(), data.size());
+
+    // Use async reply with semaphore for timeout
+    __block xpc_object_t replyObj = nullptr;
+    __block bool replied = false;
+
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    xpc_connection_send_message_with_reply(_connection, message, _queue, ^(xpc_object_t reply) {
+        replyObj = reply;
+        if (replyObj) xpc_retain(replyObj);
+        replied = true;
+        dispatch_semaphore_signal(sem);
+    });
+
+    // release the original message
+    xpc_release(message);
+
+    // Wait with timeout
+    int64_t ns = static_cast<int64_t>(timeout.count()) * 1000000LL;
+    long waitRes = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, ns));
+    dispatch_release(sem);
+
+    if (waitRes != 0) {
+        // timed out
+        return Result<std::vector<uint8_t>>::err(NetworkError::Timeout, "XPC reply timed out");
+    }
+
+    if (!replied || !replyObj) {
+        return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "No reply received");
+    }
+
+    // Process reply without capturing __block vars in a C++ lambda
+    xpc_type_t t = xpc_get_type(replyObj);
+    if (t == XPC_TYPE_DICTIONARY) {
+        size_t length = 0;
+        const void* bytes = xpc_dictionary_get_data(replyObj, "payload", &length);
+        if (!bytes) {
+            xpc_release(replyObj);
+            return Result<std::vector<uint8_t>>::err(NetworkError::InvalidMessage, "Reply missing payload");
+        }
+        std::vector<uint8_t> out(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + length);
+        _bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _bytesReceived.fetch_add(length, std::memory_order_relaxed);
+        _messagesReceived.fetch_add(1, std::memory_order_relaxed);
+        xpc_release(replyObj);
+        return Result<std::vector<uint8_t>>::ok(std::move(out));
+    } else if (t == XPC_TYPE_ERROR) {
+        if (replyObj == XPC_ERROR_CONNECTION_INTERRUPTED) {
+            xpc_release(replyObj);
+            return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "XPC interrupted");
+        }
+        if (replyObj == XPC_ERROR_CONNECTION_INVALID) {
+            xpc_release(replyObj);
+            return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "XPC invalid connection");
+        }
+        xpc_release(replyObj);
+        return Result<std::vector<uint8_t>>::err(NetworkError::InvalidMessage, "XPC error reply");
+    }
+    xpc_release(replyObj);
+    return Result<std::vector<uint8_t>>::err(NetworkError::InvalidMessage, "Unexpected XPC reply type");
+#endif
 }
 
 ConnectionState XPCConnection::getState() const {

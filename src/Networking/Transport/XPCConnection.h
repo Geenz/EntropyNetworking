@@ -9,6 +9,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 #if defined(__APPLE__)
 #include <xpc/xpc.h>
@@ -73,6 +74,12 @@ public:
     ConnectionState getState() const override;
     ConnectionType getType() const override { return ConnectionType::Local; }
     ConnectionStats getStats() const override;
+
+    // XPC-specific request/response API (Apple-only)
+#if defined(__APPLE__)
+    Result<std::vector<uint8_t>> sendWithReply(const std::vector<uint8_t>& data,
+                                               std::chrono::milliseconds timeout);
+#endif
 
     // EntropyObject interface
     const char* className() const noexcept override { return "XPCConnection"; }

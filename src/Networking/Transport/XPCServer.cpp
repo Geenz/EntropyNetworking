@@ -148,6 +148,16 @@ void XPCServer::setupListener() {
 void XPCServer::handleNewConnection(xpc_connection_t connection) {
     if (!connection) return;
 
+    // If validator is set, obtain peer pid and validate
+    if (_peerValidator) {
+        pid_t pid = xpc_connection_get_pid(connection);
+        if (!_peerValidator(pid)) {
+            // Reject connection
+            xpc_connection_cancel(connection);
+            return;
+        }
+    }
+
     // Retain the connection
     xpc_retain(connection);
 
