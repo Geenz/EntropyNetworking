@@ -300,15 +300,27 @@ namespace EntropyEngine::Networking {
 
             if (isReliableChannel) {
                 std::lock_guard<std::mutex> lock(_mutex);
-                _state = ConnectionState::Connected;
-                onStateChanged(ConnectionState::Connected);
+                // Only transition to Connected if we're not already there
+                // This is the definitive source for Connected state
+                if (_state != ConnectionState::Connected) {
+                    _state = ConnectionState::Connected;
+
+                    // Record connection time
+                    auto now = std::chrono::system_clock::now();
+                    _stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now.time_since_epoch()
+                    ).count();
+
+                    onStateChanged(ConnectionState::Connected);
+                }
             }
         });
 
         channel->onClosed([this, isReliableChannel]() {
             if (isReliableChannel) {
                 std::lock_guard<std::mutex> lock(_mutex);
-                if (_state != ConnectionState::Disconnected) {
+                // Only transition to Disconnected if we're not already there
+                if (_state != ConnectionState::Disconnected && _state != ConnectionState::Failed) {
                     _state = ConnectionState::Disconnected;
                     onStateChanged(ConnectionState::Disconnected);
                 }
@@ -346,33 +358,43 @@ namespace EntropyEngine::Networking {
     void WebRTCConnection::updateConnectionState(rtc::PeerConnection::State state) {
         std::lock_guard<std::mutex> lock(_mutex);
 
+        ConnectionState newState = _state;  // Track if state actually changes
+
         switch (state) {
             case rtc::PeerConnection::State::New:
-                _state = ConnectionState::Connecting;
-                break;
-
             case rtc::PeerConnection::State::Connecting:
-                _state = ConnectionState::Connecting;
+                // Only update to Connecting if we haven't reached Connected yet
+                if (_state != ConnectionState::Connected) {
+                    newState = ConnectionState::Connecting;
+                }
                 break;
 
             case rtc::PeerConnection::State::Connected:
-                // State will be set to Connected when data channel opens
+                // Don't set Connected here - wait for data channel to open
+                // Data channel opening is the definitive signal that we're ready
                 break;
 
             case rtc::PeerConnection::State::Disconnected:
-                _state = ConnectionState::Disconnected;
+                // Peer connection disconnected - mark as such
+                newState = ConnectionState::Disconnected;
                 break;
 
             case rtc::PeerConnection::State::Failed:
-                _state = ConnectionState::Disconnected;
+                // Connection failed - mark as failed
+                newState = ConnectionState::Failed;
                 break;
 
             case rtc::PeerConnection::State::Closed:
-                _state = ConnectionState::Disconnected;
+                // Connection closed - mark as disconnected
+                newState = ConnectionState::Disconnected;
                 break;
         }
 
-        onStateChanged(_state);
+        // Only fire state change event if state actually changed
+        if (newState != _state) {
+            _state = newState;
+            onStateChanged(_state);
+        }
     }
 
 } // namespace EntropyEngine::Networking

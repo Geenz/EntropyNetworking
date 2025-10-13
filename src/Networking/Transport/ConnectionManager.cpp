@@ -173,6 +173,32 @@ ConnectionHandle ConnectionManager::openConnection(ConnectionConfig config) {
     }
 }
 
+ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConnection> backend, ConnectionType type) {
+    if (!backend) {
+        return ConnectionHandle();  // Invalid backend
+    }
+
+    uint32_t index = allocateSlot();
+    if (index == INVALID_INDEX) {
+        return ConnectionHandle();  // Full - return invalid handle
+    }
+
+    auto& slot = _connectionSlots[index];
+    uint32_t generation = slot.generation.load(std::memory_order_acquire);
+
+    // Install backend
+    slot.connection = std::move(backend);
+    slot.type = type;
+
+    // Initialize state snapshot and callback wiring
+    slot.state.store(slot.connection->getState(), std::memory_order_release);
+    slot.connection->setStateCallback([this, index](ConnectionState newState) {
+        _connectionSlots[index].state.store(newState, std::memory_order_release);
+    });
+
+    return ConnectionHandle(this, index, generation);
+}
+
 bool ConnectionManager::validateHandle(const ConnectionHandle& handle) const noexcept {
     if (handle.handleOwner() != static_cast<const void*>(this)) return false;
 
@@ -202,9 +228,16 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
     }
 
     auto result = slot.connection->connect();
-    if (result.success()) {
-        slot.state.store(ConnectionState::Connected, std::memory_order_release);
-    }
+
+    // Update state to match backend's actual state
+    // For WebRTC this will be Connecting; for Unix socket it may be Connected or Connecting
+    slot.state.store(slot.connection->getState(), std::memory_order_release);
+
+    // Wire up state callback to keep manager's state synchronized
+    slot.connection->setStateCallback([this, index](ConnectionState newState) {
+        // Update slot state atomically
+        _connectionSlots[index].state.store(newState, std::memory_order_release);
+    });
 
     return result;
 }
@@ -227,6 +260,30 @@ Result<void> ConnectionManager::disconnect(const ConnectionHandle& handle) {
     slot.state.store(ConnectionState::Disconnected, std::memory_order_release);
 
     return result;
+}
+
+Result<void> ConnectionManager::closeConnection(const ConnectionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    {
+        std::lock_guard<std::mutex> lock(slot.mutex);
+
+        // Disconnect if still connected
+        if (slot.connection) {
+            slot.connection->disconnect();
+            slot.state.store(ConnectionState::Disconnected, std::memory_order_release);
+        }
+    }
+
+    // Return slot to free list (outside the lock to avoid deadlock)
+    returnSlotToFreeList(index);
+
+    return Result<void>::ok();
 }
 
 Result<void> ConnectionManager::send(const ConnectionHandle& handle, const std::vector<uint8_t>& data) {
@@ -267,10 +324,7 @@ bool ConnectionManager::isConnected(const ConnectionHandle& handle) const {
     if (!validateHandle(handle)) return false;
 
     uint32_t index = handle.handleIndex();
-    auto& slot = _connectionSlots[index];
-
-    if (!slot.connection) return false;
-    return slot.connection->isConnected();
+    return _connectionSlots[index].state.load(std::memory_order_acquire) == ConnectionState::Connected;
 }
 
 ConnectionState ConnectionManager::getState(const ConnectionHandle& handle) const {
@@ -302,6 +356,32 @@ NetworkConnection* ConnectionManager::getConnectionPointer(const ConnectionHandl
 
     uint32_t index = handle.handleIndex();
     return _connectionSlots[index].connection.get();
+}
+
+void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) {
+    if (!validateHandle(handle)) return;
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (slot.connection) {
+        slot.connection->setMessageCallback(std::move(callback));
+    }
+}
+
+void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) {
+    if (!validateHandle(handle)) return;
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (slot.connection) {
+        slot.connection->setStateCallback(std::move(callback));
+    }
 }
 
 uint64_t ConnectionManager::classHash() const noexcept {

@@ -25,6 +25,7 @@ set(NETWORKING_SOURCES
     src/Networking/Core/PropertyTypes.cpp
     src/Networking/Protocol/MessageSerializer.cpp
     src/Networking/Transport/UnixSocketConnection.cpp
+    src/Networking/Transport/UnixSocketServer.cpp
     src/Networking/Transport/WebRTCConnection.cpp
     src/Networking/Transport/ConnectionManager.cpp
     src/Networking/Transport/ConnectionHandle.cpp

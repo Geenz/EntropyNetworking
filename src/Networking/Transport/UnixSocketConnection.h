@@ -25,7 +25,12 @@ namespace EntropyEngine::Networking {
  */
 class UnixSocketConnection : public NetworkConnection {
 public:
+    // Client-side constructor: connects to endpoint
     UnixSocketConnection(std::string socketPath);
+
+    // Server-side constructor: wraps already-connected socket fd
+    UnixSocketConnection(int connectedSocketFd, std::string peerInfo);
+
     ~UnixSocketConnection() override;
 
     // NetworkConnection interface
@@ -52,7 +57,13 @@ private:
     std::atomic<bool> _shouldStop{false};
 
     mutable std::mutex _sendMutex;
-    ConnectionStats _stats;
+
+    // Atomic stats to avoid data races between send/receive threads
+    std::atomic<uint64_t> _bytesSent{0};
+    std::atomic<uint64_t> _bytesReceived{0};
+    std::atomic<uint64_t> _messagesSent{0};
+    std::atomic<uint64_t> _messagesReceived{0};
+    std::atomic<uint64_t> _connectTime{0};
 };
 
 } // namespace EntropyEngine::Networking

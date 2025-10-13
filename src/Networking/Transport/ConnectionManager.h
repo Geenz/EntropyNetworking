@@ -101,6 +101,17 @@ public:
      */
     ConnectionHandle openConnection(ConnectionConfig config);
 
+    /**
+     * @brief Adopts a pre-constructed NetworkConnection backend
+     *
+     * Used by LocalServer to wrap accepted connections. Allocates a slot,
+     * installs the backend, and wires up state synchronization.
+     * @param backend Already-constructed connection (e.g., from accept())
+     * @param type Connection type (Local or Remote)
+     * @return ConnectionHandle for operations, or invalid if full
+     */
+    ConnectionHandle adoptConnection(std::unique_ptr<NetworkConnection> backend, ConnectionType type);
+
     // Internal operations called by ConnectionHandle
 
     /**
@@ -116,6 +127,16 @@ public:
      * @return Result indicating success or failure
      */
     Result<void> disconnect(const ConnectionHandle& handle);
+
+    /**
+     * @brief Closes connection and frees slot (called by handle.close())
+     *
+     * Disconnects the connection (if connected) and returns the slot to the free list.
+     * After calling this, the handle becomes invalid and the slot can be reused.
+     * @param handle Connection handle
+     * @return Result indicating success or failure
+     */
+    Result<void> closeConnection(const ConnectionHandle& handle);
 
     /**
      * @brief Sends data over reliable channel (called by handle.send())
@@ -167,6 +188,20 @@ public:
      * @return true if handle is valid and refers to allocated connection
      */
     bool isValidHandle(const ConnectionHandle& handle) const noexcept;
+
+    /**
+     * @brief Sets message callback (called by handle.setMessageCallback())
+     * @param handle Connection handle
+     * @param callback Function called when messages are received
+     */
+    void setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback);
+
+    /**
+     * @brief Sets state callback (called by handle.setStateCallback())
+     * @param handle Connection handle
+     * @param callback Function called when connection state changes
+     */
+    void setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback);
 
     /**
      * @brief Gets active connection count

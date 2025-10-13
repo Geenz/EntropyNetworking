@@ -122,9 +122,19 @@ public:
      * @brief Disconnects from the endpoint
      *
      * Gracefully closes the connection and transitions to Disconnected state.
+     * Does NOT free the slot - use close() for that.
      * @return Result indicating success or failure reason
      */
     Result<void> disconnect();
+
+    /**
+     * @brief Closes connection and frees the slot
+     *
+     * Disconnects (if connected) and returns the slot to the free list.
+     * After calling close(), valid() will return false and the handle cannot be reused.
+     * @return Result indicating success or failure reason
+     */
+    Result<void> close();
 
     /**
      * @brief Sends data over the reliable channel
@@ -179,6 +189,26 @@ public:
      * @return true if handle is valid and refers to an allocated connection
      */
     bool valid() const;
+
+    // Callback setters
+
+    /**
+     * @brief Sets callback for incoming messages
+     *
+     * Convenience method that delegates to ConnectionManager. Avoids exposing
+     * NetworkConnection backend directly.
+     * @param callback Function called when messages are received
+     */
+    void setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback);
+
+    /**
+     * @brief Sets callback for connection state changes
+     *
+     * Convenience method that delegates to ConnectionManager. Avoids exposing
+     * NetworkConnection backend directly.
+     * @param callback Function called when connection state changes
+     */
+    void setStateCallback(std::function<void(ConnectionState)> callback);
 
     // EntropyObject interface
     const char* className() const noexcept override { return "ConnectionHandle"; }

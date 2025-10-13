@@ -28,6 +28,14 @@ Result<void> ConnectionHandle::disconnect() {
     return mgr->disconnect(*this);
 }
 
+Result<void> ConnectionHandle::close() {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid handle");
+    }
+    return mgr->closeConnection(*this);
+}
+
 Result<void> ConnectionHandle::send(const std::vector<uint8_t>& data) {
     auto* mgr = manager();
     if (!mgr) {
@@ -72,6 +80,20 @@ bool ConnectionHandle::valid() const {
     auto* mgr = manager();
     if (!mgr) return false;
     return mgr->isValidHandle(*this);
+}
+
+void ConnectionHandle::setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback) {
+    auto* mgr = manager();
+    if (mgr) {
+        mgr->setMessageCallback(*this, std::move(callback));
+    }
+}
+
+void ConnectionHandle::setStateCallback(std::function<void(ConnectionState)> callback) {
+    auto* mgr = manager();
+    if (mgr) {
+        mgr->setStateCallback(*this, std::move(callback));
+    }
 }
 
 uint64_t ConnectionHandle::classHash() const noexcept {

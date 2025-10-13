@@ -22,3 +22,10 @@ target_link_libraries(entropy_batch_demo_server PRIVATE EntropyNetworking LibDat
 
 add_executable(entropy_batch_demo_client batch_demo_client.cpp)
 target_link_libraries(entropy_batch_demo_client PRIVATE EntropyNetworking LibDataChannel::LibDataChannel EntropyCore::Core)
+
+# Local connection examples (using Unix sockets)
+add_executable(entropy_local_server local_server.cpp)
+target_link_libraries(entropy_local_server PRIVATE EntropyNetworking EntropyCore::Core)
+
+add_executable(entropy_local_client local_client.cpp)
+target_link_libraries(entropy_local_client PRIVATE EntropyNetworking EntropyCore::Core)

@@ -12,8 +12,12 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <arpa/inet.h>
 #include <cstring>
+#include <cstddef>
 #include <chrono>
+#include <cerrno>
 
 namespace EntropyEngine::Networking {
 
@@ -24,6 +28,38 @@ static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024; // 16MB
 UnixSocketConnection::UnixSocketConnection(std::string socketPath)
     : _socketPath(std::move(socketPath))
 {
+}
+
+UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string peerInfo)
+    : _socketPath(std::move(peerInfo))
+    , _socket(connectedSocketFd)
+{
+    // Socket is already connected - set it up for our use
+
+    // Set non-blocking
+    int flags = fcntl(_socket, F_GETFL, 0);
+    fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
+    fcntl(_socket, F_SETFD, FD_CLOEXEC);
+
+#ifdef SO_NOSIGPIPE
+    // macOS: prevent SIGPIPE on this socket
+    int set = 1;
+    setsockopt(_socket, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set));
+#endif
+
+    // Mark as connected
+    _state = ConnectionState::Connected;
+
+    // Record connection time
+    auto now = std::chrono::system_clock::now();
+    _connectTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
+
+    // Start receive thread
+    _shouldStop = false;
+    _receiveThread = std::thread([this]() { receiveLoop(); });
 }
 
 UnixSocketConnection::~UnixSocketConnection() {
@@ -38,35 +74,117 @@ Result<void> UnixSocketConnection::connect() {
     _state = ConnectionState::Connecting;
     onStateChanged(ConnectionState::Connecting);
 
-    // Create socket
+    // Create socket with non-blocking and close-on-exec flags when available
+#if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
+    _socket = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+#else
     _socket = socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+
     if (_socket < 0) {
         _state = ConnectionState::Failed;
         onStateChanged(ConnectionState::Failed);
-        return Result<void>::err(NetworkError::ConnectionClosed, "Failed to create socket");
+        return Result<void>::err(NetworkError::ConnectionClosed,
+            std::string("Failed to create socket: ") + strerror(errno));
     }
 
-    // Set non-blocking
+#if !defined(SOCK_NONBLOCK) || !defined(SOCK_CLOEXEC)
+    // Set non-blocking and close-on-exec if not set at creation
     int flags = fcntl(_socket, F_GETFL, 0);
     fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
+    fcntl(_socket, F_SETFD, FD_CLOEXEC);
+#endif
+
+#ifdef SO_NOSIGPIPE
+    // macOS: prevent SIGPIPE on this socket
+    int set = 1;
+    setsockopt(_socket, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set));
+#endif
 
     // Connect
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
+
+    // Validate path length
+    if (_socketPath.length() >= sizeof(addr.sun_path)) {
+        close(_socket);
+        _socket = -1;
+        _state = ConnectionState::Failed;
+        onStateChanged(ConnectionState::Failed);
+        return Result<void>::err(NetworkError::InvalidParameter, "Socket path too long");
+    }
+
     strncpy(addr.sun_path, _socketPath.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (::connect(_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        if (errno != EINPROGRESS) {
+    // Use BSD-portable sockaddr length for better portability
+    socklen_t addrlen = static_cast<socklen_t>(
+        offsetof(sockaddr_un, sun_path) + std::strlen(addr.sun_path)
+    );
+
+    if (::connect(_socket, reinterpret_cast<sockaddr*>(&addr), addrlen) < 0) {
+        if (errno == EINPROGRESS) {
+            // Wait for connection to complete
+            pollfd pfd;
+            pfd.fd = _socket;
+            pfd.events = POLLOUT;
+
+            int ret = poll(&pfd, 1, 5000); // 5 second timeout
+            if (ret < 0) {
+                close(_socket);
+                _socket = -1;
+                _state = ConnectionState::Failed;
+                onStateChanged(ConnectionState::Failed);
+                return Result<void>::err(NetworkError::ConnectionClosed,
+                    std::string("Poll failed: ") + strerror(errno));
+            }
+
+            if (ret == 0) {
+                close(_socket);
+                _socket = -1;
+                _state = ConnectionState::Failed;
+                onStateChanged(ConnectionState::Failed);
+                return Result<void>::err(NetworkError::Timeout, "Connection timeout");
+            }
+
+            // Check if connection succeeded
+            int error = 0;
+            socklen_t len = sizeof(error);
+            if (getsockopt(_socket, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
+                close(_socket);
+                _socket = -1;
+                _state = ConnectionState::Failed;
+                onStateChanged(ConnectionState::Failed);
+                return Result<void>::err(NetworkError::ConnectionClosed,
+                    std::string("getsockopt failed: ") + strerror(errno));
+            }
+
+            if (error != 0) {
+                close(_socket);
+                _socket = -1;
+                _state = ConnectionState::Failed;
+                onStateChanged(ConnectionState::Failed);
+                return Result<void>::err(NetworkError::ConnectionClosed,
+                    std::string("Connection failed: ") + strerror(error));
+            }
+        } else {
             close(_socket);
             _socket = -1;
             _state = ConnectionState::Failed;
             onStateChanged(ConnectionState::Failed);
-            return Result<void>::err(NetworkError::ConnectionClosed, "Failed to connect");
+            return Result<void>::err(NetworkError::ConnectionClosed,
+                std::string("Failed to connect: ") + strerror(errno));
         }
     }
 
     _state = ConnectionState::Connected;
     onStateChanged(ConnectionState::Connected);
+
+    // Record connection time
+    auto now = std::chrono::system_clock::now();
+    _connectTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
 
     // Start receive thread
     _shouldStop = false;
@@ -89,8 +207,10 @@ Result<void> UnixSocketConnection::disconnect() {
         _receiveThread.join();
     }
 
-    // Close socket
+    // Gracefully shutdown and close socket
     if (_socket >= 0) {
+        // shutdown() helps unblock any pending operations
+        ::shutdown(_socket, SHUT_RDWR);
         close(_socket);
         _socket = -1;
     }
@@ -121,30 +241,84 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
 
     std::lock_guard<std::mutex> lock(_sendMutex);
 
-    // Send frame header (message length)
+    // Send flags: use MSG_NOSIGNAL on Linux to prevent SIGPIPE
+    int sendFlags = 0;
+#ifdef MSG_NOSIGNAL
+    sendFlags |= MSG_NOSIGNAL;
+#endif
+
+    // Send frame header (message length) with EAGAIN handling
     uint32_t length = static_cast<uint32_t>(data.size());
     uint32_t lengthBE = htonl(length);
+    const uint8_t* hdrPtr = reinterpret_cast<const uint8_t*>(&lengthBE);
+    size_t hdrSent = 0;
+    int retryCount = 0;
+    const int MAX_RETRIES = 100;
+    ssize_t sent; // Declare outside both loops
 
-    ssize_t sent = ::send(_socket, &lengthBE, sizeof(lengthBE), 0);
-    if (sent != sizeof(lengthBE)) {
-        return Result<void>::err(NetworkError::ConnectionClosed, "Failed to send frame header");
-    }
-
-    // Send payload
-    size_t totalSent = 0;
-    while (totalSent < data.size()) {
-        sent = ::send(_socket, data.data() + totalSent, data.size() - totalSent, 0);
+    while (hdrSent < sizeof(lengthBE)) {
+        sent = ::send(_socket, hdrPtr + hdrSent, sizeof(lengthBE) - hdrSent, sendFlags);
         if (sent < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Wait for socket to become writable
+                pollfd pfd;
+                pfd.fd = _socket;
+                pfd.events = POLLOUT;
+
+                int ret = poll(&pfd, 1, 1000); // 1 second timeout
+                if (ret < 0) {
+                    return Result<void>::err(NetworkError::ConnectionClosed,
+                        std::string("Poll failed during header send: ") + strerror(errno));
+                }
+                if (ret == 0) {
+                    if (++retryCount > MAX_RETRIES) {
+                        return Result<void>::err(NetworkError::Timeout, "Send timeout (header)");
+                    }
+                }
                 continue;
             }
-            return Result<void>::err(NetworkError::ConnectionClosed, "Failed to send data");
+            return Result<void>::err(NetworkError::ConnectionClosed,
+                std::string("Failed to send frame header: ") + strerror(errno));
         }
-        totalSent += sent;
+        hdrSent += static_cast<size_t>(sent);
+        retryCount = 0; // Reset retry count on successful send
     }
 
-    _stats.bytesSent += FRAME_HEADER_SIZE + data.size();
-    _stats.messagesSent++;
+    // Send payload with proper EAGAIN handling
+    size_t totalSent = 0;
+    retryCount = 0; // Reset for payload send
+
+    while (totalSent < data.size()) {
+        sent = ::send(_socket, data.data() + totalSent, data.size() - totalSent, sendFlags);
+        if (sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Wait for socket to become writable
+                pollfd pfd;
+                pfd.fd = _socket;
+                pfd.events = POLLOUT;
+
+                int ret = poll(&pfd, 1, 1000); // 1 second timeout
+                if (ret < 0) {
+                    return Result<void>::err(NetworkError::ConnectionClosed,
+                        std::string("Poll failed during send: ") + strerror(errno));
+                }
+                if (ret == 0) {
+                    if (++retryCount > MAX_RETRIES) {
+                        return Result<void>::err(NetworkError::Timeout, "Send timeout");
+                    }
+                }
+                continue;
+            }
+            return Result<void>::err(NetworkError::ConnectionClosed,
+                std::string("Failed to send data: ") + strerror(errno));
+        }
+        totalSent += sent;
+        retryCount = 0; // Reset retry count on successful send
+    }
+
+    // Update stats atomically
+    _bytesSent.fetch_add(FRAME_HEADER_SIZE + data.size(), std::memory_order_relaxed);
+    _messagesSent.fetch_add(1, std::memory_order_relaxed);
 
     return Result<void>::ok();
 }
@@ -159,19 +333,25 @@ void UnixSocketConnection::receiveLoop() {
         ssize_t received = recv(_socket, buffer.data(), buffer.size(), 0);
 
         if (received < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                // EAGAIN/EWOULDBLOCK: no data available yet
+                // EINTR: interrupted by signal - retry
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
-            break;
+            // Receive error
+            _state = ConnectionState::Failed;
+            onStateChanged(ConnectionState::Failed);
+            return;
         }
 
         if (received == 0) {
-            // Connection closed
+            // Connection closed by peer
             break;
         }
 
-        _stats.bytesReceived += received;
+        // Update bytes received atomically
+        _bytesReceived.fetch_add(received, std::memory_order_relaxed);
 
         // Process received data
         size_t offset = 0;
@@ -193,8 +373,9 @@ void UnixSocketConnection::receiveLoop() {
                     expectedLength = ntohl(lengthBE);
 
                     if (expectedLength > MAX_MESSAGE_SIZE) {
-                        // Invalid message length
+                        // Invalid message length - protocol error
                         _state = ConnectionState::Failed;
+                        onStateChanged(ConnectionState::Failed);
                         return;
                     }
 
@@ -214,7 +395,7 @@ void UnixSocketConnection::receiveLoop() {
 
                 if (messageBuffer.size() == expectedLength) {
                     // Complete message received
-                    _stats.messagesReceived++;
+                    _messagesReceived.fetch_add(1, std::memory_order_relaxed);
                     onMessageReceived(messageBuffer);
 
                     messageBuffer.clear();
@@ -233,7 +414,14 @@ void UnixSocketConnection::receiveLoop() {
 }
 
 ConnectionStats UnixSocketConnection::getStats() const {
-    return _stats;
+    // Create snapshot of atomic stats
+    ConnectionStats stats;
+    stats.bytesSent = _bytesSent.load(std::memory_order_relaxed);
+    stats.bytesReceived = _bytesReceived.load(std::memory_order_relaxed);
+    stats.messagesSent = _messagesSent.load(std::memory_order_relaxed);
+    stats.messagesReceived = _messagesReceived.load(std::memory_order_relaxed);
+    stats.connectTime = _connectTime.load(std::memory_order_relaxed);
+    return stats;
 }
 
 } // namespace EntropyEngine::Networking
