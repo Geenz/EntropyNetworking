@@ -1,6 +1,19 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
+
+/**
+ * @file ConnectionHandle.h
+ * @brief Generation-stamped handle for network connections
+ *
+ * This file contains ConnectionHandle, which provides the primary API for connection
+ * operations. Follows the WorkContractHandle pattern with safe handle invalidation.
+ */
 
 #pragma once
 
@@ -205,7 +218,7 @@ public:
      * NetworkConnection backend directly.
      * @param callback Function called when messages are received
      */
-    void setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback);
+    void setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback) noexcept;
 
     /**
      * @brief Sets callback for connection state changes
@@ -214,7 +227,7 @@ public:
      * NetworkConnection backend directly.
      * @param callback Function called when connection state changes
      */
-    void setStateCallback(std::function<void(ConnectionState)> callback);
+    void setStateCallback(std::function<void(ConnectionState)> callback) noexcept;
 
     // EntropyObject interface
     const char* className() const noexcept override { return "ConnectionHandle"; }

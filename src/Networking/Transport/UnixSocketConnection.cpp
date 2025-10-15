@@ -68,7 +68,7 @@ UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string pe
     setsockopt(_socket, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set));
 #endif
 
-    // Mark as connected
+    // Mark as connected (manager adoption will publish state)
     _state = ConnectionState::Connected;
 
     // Record connection time
@@ -239,19 +239,25 @@ Result<void> UnixSocketConnection::connect() {
 }
 
 Result<void> UnixSocketConnection::disconnect() {
+    // Always ensure the receive thread is joined to avoid std::terminate on destruction
+    _shouldStop = true;
+    if (_receiveThread.joinable()) {
+        _receiveThread.join();
+    }
+
     if (_state == ConnectionState::Disconnected) {
+        // Ensure socket is closed if any
+        if (_socket >= 0) {
+            ::shutdown(_socket, SHUT_RDWR);
+            close(_socket);
+            _socket = -1;
+        }
         return Result<void>::ok();
     }
 
     _state = ConnectionState::Disconnecting;
     onStateChanged(ConnectionState::Disconnecting);
     ENTROPY_LOG_INFO("Disconnecting Unix socket");
-
-    // Stop receive thread
-    _shouldStop = true;
-    if (_receiveThread.joinable()) {
-        _receiveThread.join();
-    }
 
     // Gracefully shutdown and close socket
     if (_socket >= 0) {

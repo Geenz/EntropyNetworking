@@ -7,6 +7,14 @@
  * This file is part of the Entropy Networking project.
  */
 
+/**
+ * @file SessionManager.h
+ * @brief Slot-based session manager for protocol-level operations
+ *
+ * This file contains SessionManager, which manages protocol sessions with entity/property
+ * synchronization. Builds on ConnectionManager to provide high-level messaging.
+ */
+
 #pragma once
 
 #include <EntropyCore.h>
@@ -40,7 +48,8 @@ namespace EntropyEngine::Networking {
  * - Sessions maintain PropertyRegistry for entity tracking
  * - Callbacks can be set for incoming protocol messages
  *
- * Thread-safe: All operations are lock-free or use minimal locking.
+ * Thread Safety: All public methods are thread-safe. Operations use minimal
+ * per-slot locking for session access.
  *
  * @code
  * ConnectionManager connMgr(1024);

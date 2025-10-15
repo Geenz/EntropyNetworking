@@ -63,8 +63,8 @@ private:
 
     // Configurable parameters (initialized from ConnectionConfig or defaults)
     int _connectTimeoutMs{5000};
-    int _sendPollTimeoutMs{1000};
-    int _sendMaxPolls{100};
+    int _sendPollTimeoutMs{100};
+    int _sendMaxPolls{20};
     int _recvIdlePollMs{-1};
     size_t _maxMessageSize{16ull * 1024ull * 1024ull};
     int _socketSendBuf{0};

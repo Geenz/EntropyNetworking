@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  linux-build-test:
+    name: Linux ${{ matrix.compiler }} (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, RelWithDebInfo]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ${{ matrix.compiler == 'clang' && '-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++' || '' }}
+      - name: Build
+        run: |
+          cmake --build build --target EntropyNetworking
+          cmake --build build --target EntropyNetworkingTests
+      - name: Run tests
+        run: |
+          ctest --test-dir build -V
+
+  linux-sanitizers:
+    name: Linux Sanitizers (clang, ASan+UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+      - name: Configure (ASan+UBSan)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Build (sanitizers)
+        run: |
+          cmake --build build-asan --target EntropyNetworkingTests
+      - name: Run tests (sanitizers)
+        env:
+          ASAN_OPTIONS: detect_leaks=1:allocator_may_return_null=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          ctest --test-dir build-asan -V
+
+  linux-tsan:
+    name: Linux ThreadSanitizer (clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+      - name: Configure (TSan)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+      - name: Build (tsan)
+        run: |
+          cmake --build build-tsan --target EntropyNetworkingTests
+      - name: Run tests (tsan)
+        env:
+          TSAN_OPTIONS: suppressions=/dev/null
+        run: |
+          ctest --test-dir build-tsan -V
+
+  macos-build-test:
+    name: macOS AppleClang (${{ matrix.build_type }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, RelWithDebInfo]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Build
+        run: |
+          cmake --build build --target EntropyNetworking
+          cmake --build build --target EntropyNetworkingTests
+      - name: Run tests
+        run: |
+          ctest --test-dir build -V
+
+  macos-sanitizers:
+    name: macOS Sanitizers (ASan+UBSan)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (ASan+UBSan)
+        run: |
+          cmake -S . -B build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Build (sanitizers)
+        run: |
+          cmake --build build-asan --target EntropyNetworkingTests
+      - name: Run tests (sanitizers)
+        env:
+          ASAN_OPTIONS: detect_leaks=1:allocator_may_return_null=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          ctest --test-dir build-asan -V
+
+  fuzzing:
+    name: Fuzz (libFuzzer) ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+      - name: Configure fuzzing (Clang + libFuzzer)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-fuzz -G Ninja \
+            -DENABLE_FUZZING=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined"
+      - name: Build fuzzers
+        run: |
+          cmake --build build-fuzz --target entropy_unix_frame_fuzz
+      - name: Run fuzzers (short run)
+        run: |
+          ./build-fuzz/tests/entropy_unix_frame_fuzz -runs=50000 -max_total_time=60 || true

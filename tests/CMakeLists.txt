@@ -9,6 +9,10 @@ add_executable(EntropyNetworkingTests
     PropertyTypesTests.cpp
     ConnectionManagerTests.cpp
     WebRTCConnectionTests.cpp
+    LocalIpcTests.cpp
+    CallbackFanoutTests.cpp
+    ConnectionManagerLifecycleTests.cpp
+    ManagerMetricsTests.cpp
 )
 
 target_link_libraries(EntropyNetworkingTests
@@ -21,3 +25,22 @@ target_link_libraries(EntropyNetworkingTests
 # Enable testing
 include(GoogleTest)
 gtest_discover_tests(EntropyNetworkingTests)
+
+
+# Fuzzing target (optional)
+option(ENABLE_FUZZING "Build fuzzing targets (requires Clang/libFuzzer)" OFF)
+
+if(ENABLE_FUZZING)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_executable(entropy_unix_frame_fuzz
+            FuzzUnixFrame.cpp
+        )
+        # Do not add heavy dependencies; fuzz harness is standalone
+        target_compile_options(entropy_unix_frame_fuzz PRIVATE -O1)
+        # Link flags will be provided by CI; keep target simple here
+        set_target_properties(entropy_unix_frame_fuzz PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+    else()
+        message(WARNING "ENABLE_FUZZING is ON but compiler is not Clang; skipping fuzz target.")
+    endif()
+endif()

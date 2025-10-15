@@ -7,6 +7,14 @@
  * This file is part of the Entropy Networking project.
  */
 
+/**
+ * @file SessionHandle.h
+ * @brief Generation-stamped handle for protocol-level network sessions
+ *
+ * This file contains SessionHandle, which provides the primary API for entity and
+ * property synchronization operations over network connections.
+ */
+
 #pragma once
 
 #include <EntropyCore.h>

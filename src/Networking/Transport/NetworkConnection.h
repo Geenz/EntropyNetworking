@@ -54,19 +54,19 @@ public:
     virtual ConnectionStats getStats() const = 0;
 
     // Callbacks
-    void setMessageCallback(MessageCallback callback) { _messageCallback = std::move(callback); }
-    void setStateCallback(StateCallback callback) { _stateCallback = std::move(callback); }
+    void setMessageCallback(MessageCallback callback) noexcept { _messageCallback = std::move(callback); }
+    void setStateCallback(StateCallback callback) noexcept { _stateCallback = std::move(callback); }
 
 protected:
     NetworkConnection() = default;
 
-    void onMessageReceived(const std::vector<uint8_t>& data) {
+    void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
         if (_messageCallback) {
             _messageCallback(data);
         }
     }
 
-    void onStateChanged(ConnectionState state) {
+    void onStateChanged(ConnectionState state) noexcept {
         if (_stateCallback) {
             _stateCallback(state);
         }

@@ -1,0 +1,81 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+#include <gtest/gtest.h>
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/LocalServer.h"
+#include <thread>
+#include <atomic>
+#include <chrono>
+
+using namespace EntropyEngine::Networking;
+
+// Integration-ish test validating aggregate manager metrics and trySend semantics.
+TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
+#if defined(__APPLE__) || defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
+    const std::string socketPath = "/tmp/entropy_metrics_test.sock";
+
+    ConnectionManager serverMgr(8);
+    auto server = createLocalServer(&serverMgr, socketPath);
+    ASSERT_TRUE(server->listen().success());
+
+    std::atomic<bool> serverAccepted{false};
+    std::thread serverThread([&]{
+        auto conn = server->accept();
+        if (!conn.valid()) return;
+        serverAccepted = true;
+        // Echo back any payloads
+        conn.setMessageCallback([conn](const std::vector<uint8_t>& data) mutable {
+            (void)conn.send(data);
+        });
+        while (conn.isConnected()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        (void)conn.close();
+        (void)server->close();
+    });
+
+    ConnectionManager clientMgr(8);
+    auto client = clientMgr.openLocalConnection(socketPath);
+    ASSERT_TRUE(client.valid());
+
+    // Connect client
+    ASSERT_TRUE(client.connect().success());
+    // Wait up to 1s to be connected
+    for (int i=0; i<100 && !client.isConnected(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_TRUE(client.isConnected());
+
+    // Ensure server accepted
+    for (int i=0; i<100 && !serverAccepted.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_TRUE(serverAccepted.load());
+
+    // Send a message
+    std::vector<uint8_t> payload{'p','i','n','g'};
+    ASSERT_TRUE(client.send(payload).success());
+
+    // Give it a moment for echo and metric increments
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Manager metrics should show activity
+    auto cm = clientMgr.getManagerMetrics();
+    EXPECT_GE(cm.totalBytesSent, 1u);
+    EXPECT_GE(cm.totalMessagesSent, 1u);
+
+    auto sm = serverMgr.getManagerMetrics();
+    EXPECT_GE(sm.totalBytesReceived, 1u);
+    EXPECT_GE(sm.totalMessagesReceived, 1u);
+
+    // Unix trySend currently returns WouldBlock by design (no partial non-blocking writes)
+    auto tr = client.trySend(payload);
+    EXPECT_FALSE(tr.success());
+    EXPECT_EQ(tr.error, NetworkError::WouldBlock);
+
+    (void)client.disconnect();
+    if (serverThread.joinable()) serverThread.join();
+#else
+    GTEST_SKIP() << "Local Unix sockets not supported on this platform";
+#endif
+}

@@ -1,6 +1,11 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
 
 #include "ConnectionManager.h"
 #include "UnixSocketConnection.h"
@@ -21,6 +26,12 @@ ConnectionManager::ConnectionManager(size_t capacity)
     , _connectionSlots(capacity)
 {
     // Initialize lock-free free list
+    if (_capacity == 0) {
+        // Set free list head to INVALID_INDEX to indicate no available slots
+        uint64_t headVal = (static_cast<uint64_t>(0) << 32) | static_cast<uint64_t>(INVALID_INDEX);
+        _freeListHead.store(headVal, std::memory_order_relaxed);
+        return;
+    }
     for (size_t i = 0; i < _capacity - 1; ++i) {
         _connectionSlots[i].nextFree.store(static_cast<uint32_t>(i + 1), std::memory_order_relaxed);
     }
@@ -69,6 +80,8 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
 
     // Clear connection
     slot.connection.reset();
+    // Reset published state for next allocation
+    slot.lastPublishedState.store(ConnectionState::Disconnected, std::memory_order_release);
 
     // Decrement active count
     _activeCount.fetch_sub(1, std::memory_order_acq_rel);
@@ -89,6 +102,39 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
                                                 std::memory_order_acq_rel,
                                                 std::memory_order_acquire)) {
             break;
+        }
+    }
+}
+
+void ConnectionManager::handleStatePublish(uint32_t index, ConnectionState newState) noexcept {
+    auto& slot = _connectionSlots[index];
+    // Publish latest state for queries
+    slot.state.store(newState, std::memory_order_release);
+
+    // Deduplicate metrics on actual transitions only
+    for (;;) {
+        ConnectionState prev = slot.lastPublishedState.load(std::memory_order_acquire);
+        if (prev == newState) {
+            return; // no change
+        }
+        if (slot.lastPublishedState.compare_exchange_weak(
+                prev, newState,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            switch (newState) {
+                case ConnectionState::Connected:
+                    _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                case ConnectionState::Failed:
+                    _metrics.connectionsFailed.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                case ConnectionState::Disconnected:
+                    _metrics.connectionsClosed.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                default:
+                    break;
+            }
+            return;
         }
     }
 }
@@ -210,50 +256,36 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
     slot.connection = std::move(backend);
     slot.type = type;
 
-    // Initialize state snapshot and callback wiring
-    auto initialState = slot.connection->getState();
-    slot.state.store(initialState, std::memory_order_release);
-    if (initialState == ConnectionState::Connected) {
-        _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    // Manager-owned state callback: update slot.state and fan out to user callback
-    slot.connection->setStateCallback([this, index](ConnectionState newState) {
-        // Update slot state atomically
-        _connectionSlots[index].state.store(newState, std::memory_order_release);
-        // Update aggregate metrics based on transition
-        switch (newState) {
-            case ConnectionState::Connected:
-                _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
-                break;
-            case ConnectionState::Failed:
-                _metrics.connectionsFailed.fetch_add(1, std::memory_order_relaxed);
-                break;
-            case ConnectionState::Disconnected:
-                _metrics.connectionsClosed.fetch_add(1, std::memory_order_relaxed);
-                break;
-            default: break;
+    // Wire manager-owned callbacks BEFORE taking the initial state snapshot
+    slot.connection->setStateCallback([this, index](ConnectionState newState) noexcept {
+        // Publish state and update metrics on real transitions only
+        this->handleStatePublish(index, newState);
+        // Fan out to user callback using atomic_load on shared_ptr (no slot mutex)
+        auto cbptr = std::atomic_load(&_connectionSlots[index].userStateCb);
+        if (cbptr && *cbptr) {
+            (*cbptr)(newState);
         }
-        // Fan out to user callback without holding the lock during invocation
-        std::function<void(ConnectionState)> cb;
-        {
-            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
-            cb = _connectionSlots[index].userStateCb;
-        }
-        if (cb) cb(newState);
     });
 
     // Manager-owned message callback: increment metrics and fan out to user callback
-    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) noexcept {
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
-        std::function<void(const std::vector<uint8_t>&)> cb;
-        {
-            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
-            cb = _connectionSlots[index].userMessageCb;
+        auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
+        if (cbptr && *cbptr) {
+            (*cbptr)(data);
         }
-        if (cb) cb(data);
     });
+
+    // Take and publish current state snapshot after wiring callbacks to avoid races
+    {
+        ConnectionState st = slot.connection->getState();
+        handleStatePublish(index, st);
+        auto cbptr2 = std::atomic_load(&_connectionSlots[index].userStateCb);
+        if (cbptr2 && *cbptr2) {
+            (*cbptr2)(st);
+        }
+    }
 
     return ConnectionHandle(this, index, generation);
 }
@@ -280,58 +312,52 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
-    std::lock_guard<std::mutex> lock(slot.mutex);
-
-    if (!slot.connection) {
-        return Result<void>::err(NetworkError::InvalidParameter, "Connection not initialized");
-    }
-
-    auto result = slot.connection->connect();
-
-    // Update state to match backend's actual state
-    // For WebRTC this will be Connecting; for Unix socket it may be Connected or Connecting
-    auto initialState = slot.connection->getState();
-    slot.state.store(initialState, std::memory_order_release);
-    if (initialState == ConnectionState::Connected) {
-        _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    // Wire up manager-owned callbacks to keep state synchronized and fan-out to user callbacks
-    slot.connection->setStateCallback([this, index](ConnectionState newState) {
-        // Update slot state atomically
-        _connectionSlots[index].state.store(newState, std::memory_order_release);
-        // Update aggregate metrics based on transition
-        switch (newState) {
-            case ConnectionState::Connected:
-                _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
-                break;
-            case ConnectionState::Failed:
-                _metrics.connectionsFailed.fetch_add(1, std::memory_order_relaxed);
-                break;
-            case ConnectionState::Disconnected:
-                _metrics.connectionsClosed.fetch_add(1, std::memory_order_relaxed);
-                break;
-            default: break;
+    // Check connection exists (with lock)
+    {
+        std::lock_guard<std::mutex> lock(slot.mutex);
+        if (!slot.connection) {
+            return Result<void>::err(NetworkError::InvalidParameter, "Connection not initialized");
         }
-        // Fan out to user callback without holding the lock during invocation
-        std::function<void(ConnectionState)> cb;
-        {
-            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
-            cb = _connectionSlots[index].userStateCb;
+    }
+    // Lock released - now safe to set up callbacks that may fire synchronously
+
+    // Wire up manager-owned callbacks BEFORE connecting to ensure we capture all state transitions
+    // This is critical for synchronous connections (Unix sockets) where connect() completes immediately
+    slot.connection->setStateCallback([this, index](ConnectionState newState) noexcept {
+        // Publish state and update metrics on real transitions only
+        this->handleStatePublish(index, newState);
+        // Fan out to user callback using atomic_load on shared_ptr (no slot mutex)
+        auto cbptr = std::atomic_load(&_connectionSlots[index].userStateCb);
+        if (cbptr && *cbptr) {
+            (*cbptr)(newState);
         }
-        if (cb) cb(newState);
     });
 
-    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) noexcept {
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
-        std::function<void(const std::vector<uint8_t>&)> cb;
-        {
-            std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
-            cb = _connectionSlots[index].userMessageCb;
+        auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
+        if (cbptr && *cbptr) {
+            (*cbptr)(data);
         }
-        if (cb) cb(data);
     });
+
+    // Now that callbacks are registered, initiate the connection
+    // State transitions will be captured by the callbacks above
+    auto result = slot.connection->connect();
+
+    // Sync initial state in case the callback hasn't fired yet or for immediate transitions
+    // For WebRTC this will be Connecting; for Unix socket it may be Connected
+    auto initialState = slot.connection->getState();
+    handleStatePublish(index, initialState);
+
+    // Fan out current state to user callback to avoid races with immediate transitions
+    {
+        auto cbptr = std::atomic_load(&_connectionSlots[index].userStateCb);
+        if (cbptr && *cbptr) {
+            (*cbptr)(initialState);
+        }
+    }
 
     return result;
 }
@@ -462,26 +488,26 @@ NetworkConnection* ConnectionManager::getConnectionPointer(const ConnectionHandl
     return _connectionSlots[index].connection.get();
 }
 
-void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) {
+void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
     // Store user callback; backend remains bound to manager-owned fan-out
-    std::lock_guard<std::mutex> lock(slot.mutex);
-    slot.userMessageCb = std::move(callback);
+    auto sp = std::make_shared<std::function<void(const std::vector<uint8_t>&)>>(std::move(callback));
+    std::atomic_store(&slot.userMessageCb, std::move(sp));
 }
 
-void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) {
+void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
     // Store user callback; backend remains bound to manager-owned fan-out
-    std::lock_guard<std::mutex> lock(slot.mutex);
-    slot.userStateCb = std::move(callback);
+    auto sp = std::make_shared<std::function<void(ConnectionState)>>(std::move(callback));
+    std::atomic_store(&slot.userStateCb, std::move(sp));
 }
 
 uint64_t ConnectionManager::classHash() const noexcept {
@@ -537,3 +563,4 @@ Result<void> ConnectionManager::trySend(const ConnectionHandle& handle, const st
 }
 
 } // namespace EntropyEngine::Networking
+

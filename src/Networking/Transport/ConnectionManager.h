@@ -1,6 +1,19 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
+
+/**
+ * @file ConnectionManager.h
+ * @brief Platform-agnostic connection manager with slot-based allocation
+ *
+ * This file contains ConnectionManager, the core of the transport layer. It provides
+ * lock-free connection management with generation-stamped handles for safe concurrent access.
+ */
 
 #pragma once
 
@@ -33,7 +46,9 @@ namespace EntropyEngine::Networking {
  * 3. Use handle for all operations (connect, send, etc.)
  * 4. Handle becomes invalid after disconnect or release
  *
- * Thread-safe: All operations are lock-free or use minimal locking.
+ * Thread Safety: All public methods are thread-safe. Internal operations use
+ * lock-free algorithms or minimal per-slot locking. Callbacks are invoked using
+ * lock-free atomic shared_ptr access to prevent deadlocks.
  *
  * @code
  * ConnectionManager connMgr(1024);  // capacity: 1024 connections
@@ -200,14 +215,14 @@ public:
      * @param handle Connection handle
      * @param callback Function called when messages are received
      */
-    void setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback);
+    void setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) noexcept;
 
     /**
      * @brief Sets state callback (called by handle.setStateCallback())
      * @param handle Connection handle
      * @param callback Function called when connection state changes
      */
-    void setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback);
+    void setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) noexcept;
 
     /**
      * @brief Gets active connection count
@@ -258,26 +273,30 @@ private:
      * @brief Internal storage for a connection slot
      */
     struct ConnectionSlot {
-        std::atomic<uint32_t> generation{1};
-        std::atomic<ConnectionState> state{ConnectionState::Disconnected};
-        std::unique_ptr<NetworkConnection> connection;
-        ConnectionType type;
-        std::atomic<uint32_t> nextFree{INVALID_INDEX};
+        std::atomic<uint32_t> generation{1};                                        ///< Generation counter for handle validation
+        std::atomic<ConnectionState> state{ConnectionState::Disconnected};          ///< Current connection state (query source)
+        std::atomic<ConnectionState> lastPublishedState{ConnectionState::Disconnected}; ///< Last state sent to metrics (dedup tracking)
+        std::unique_ptr<NetworkConnection> connection;                              ///< Backend implementation (Unix/WebRTC/XPC)
+        ConnectionType type;                                                        ///< Connection type (Local or Remote)
+        std::atomic<uint32_t> nextFree{INVALID_INDEX};                              ///< Next free slot index (free list)
 
-        // User-provided callbacks (set via ConnectionHandle); accessed under mutex
-        std::function<void(const std::vector<uint8_t>&)> userMessageCb;
-        std::function<void(ConnectionState)> userStateCb;
+        // User-provided callbacks (set via ConnectionHandle); accessed via atomic_load/atomic_store on shared_ptr for lock-free fanout
+        std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>> userMessageCb;  ///< User message callback
+        std::shared_ptr<std::function<void(ConnectionState)>> userStateCb;                ///< User state callback
 
-        std::mutex mutex;  // Per-slot mutex for connection operations
+        std::mutex mutex;  ///< Per-slot mutex for connection operations
     };
 
-    const size_t _capacity;
-    std::vector<ConnectionSlot> _connectionSlots;
-    std::atomic<uint64_t> _freeListHead{0};  // Packed: tag(32) | index(32)
-    std::atomic<size_t> _activeCount{0};
+    const size_t _capacity;                      ///< Maximum number of connections
+    std::vector<ConnectionSlot> _connectionSlots; ///< Pre-allocated connection slots
+    std::atomic<uint64_t> _freeListHead{0};      ///< Free list head (packed: tag(32) | index(32))
+    std::atomic<size_t> _activeCount{0};         ///< Currently allocated connections
 
     // Handle validation
     bool validateHandle(const ConnectionHandle& handle) const noexcept;
+
+    // Centralized state publish + metrics de-duplication
+    void handleStatePublish(uint32_t index, ConnectionState newState) noexcept;
 
     // Slot allocation
     uint32_t allocateSlot();
@@ -292,17 +311,17 @@ private:
 
     // Lightweight aggregate metrics counters (atomic)
     struct MetricsCounters {
-        std::atomic<uint64_t> totalBytesSent{0};
-        std::atomic<uint64_t> totalBytesReceived{0};
-        std::atomic<uint64_t> totalMessagesSent{0};
-        std::atomic<uint64_t> totalMessagesReceived{0};
-        std::atomic<uint64_t> connectionsOpened{0};
-        std::atomic<uint64_t> connectionsFailed{0};
-        std::atomic<uint64_t> connectionsClosed{0};
-        std::atomic<uint64_t> wouldBlockSends{0};
+        std::atomic<uint64_t> totalBytesSent{0};        ///< Total bytes sent across all connections
+        std::atomic<uint64_t> totalBytesReceived{0};    ///< Total bytes received across all connections
+        std::atomic<uint64_t> totalMessagesSent{0};     ///< Total messages sent
+        std::atomic<uint64_t> totalMessagesReceived{0}; ///< Total messages received
+        std::atomic<uint64_t> connectionsOpened{0};     ///< Count of successful connections
+        std::atomic<uint64_t> connectionsFailed{0};     ///< Count of failed connection attempts
+        std::atomic<uint64_t> connectionsClosed{0};     ///< Count of closed connections
+        std::atomic<uint64_t> wouldBlockSends{0};       ///< Count of WouldBlock from trySend()
     };
 
-    mutable MetricsCounters _metrics;
+    mutable MetricsCounters _metrics;  ///< Aggregate observability metrics
 };
 
 } // namespace EntropyEngine::Networking

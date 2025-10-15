@@ -1,6 +1,11 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
 
 #include "ConnectionHandle.h"
 #include "ConnectionManager.h"
@@ -90,14 +95,14 @@ bool ConnectionHandle::valid() const {
     return mgr->isValidHandle(*this);
 }
 
-void ConnectionHandle::setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback) {
+void ConnectionHandle::setMessageCallback(std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
     auto* mgr = manager();
     if (mgr) {
         mgr->setMessageCallback(*this, std::move(callback));
     }
 }
 
-void ConnectionHandle::setStateCallback(std::function<void(ConnectionState)> callback) {
+void ConnectionHandle::setStateCallback(std::function<void(ConnectionState)> callback) noexcept {
     auto* mgr = manager();
     if (mgr) {
         mgr->setStateCallback(*this, std::move(callback));
