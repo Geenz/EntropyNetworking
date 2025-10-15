@@ -1,0 +1,89 @@
+name: Pre-release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  create-prerelease:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get commit info
+      id: commit
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+        echo "commit_msg=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        run-id: ${{ github.event.workflow_run.id }}
+        github-token: ${{ github.token }}
+
+    - name: Create artifact archives
+      run: |
+        cd artifacts
+        for dir in */; do
+          dirname="${dir%/}"
+          tar -czf "${dirname}.tar.gz" -C "$dirname" .
+          zip -r "${dirname}.zip" "$dirname"
+        done
+        cd ..
+
+    - name: Delete existing pre-release
+      run: |
+        gh release delete latest --yes || true
+        git push origin :refs/tags/latest || true
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Create pre-release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest
+        name: "Development Build (latest)"
+        body: |
+          ## 🚀 Automated Development Build
+
+          **This is an automatic pre-release from the latest main branch.**
+
+          - **Commit**: ${{ steps.commit.outputs.sha_short }}
+          - **Date**: ${{ steps.commit.outputs.date }}
+          - **Message**: ${{ steps.commit.outputs.commit_msg }}
+
+          ### 📦 Available Builds
+
+          - **Linux GCC 14**: `EntropyNetworking-Linux-gcc-14.tar.gz` / `.zip`
+          - **Linux Clang 18**: `EntropyNetworking-Linux-clang-18.tar.gz` / `.zip`
+          - **macOS Universal**: `EntropyNetworking-macOS-universal.tar.gz` / `.zip` (Intel + Apple Silicon)
+
+          Each archive contains:
+          - **lib/**: Static library (`libEntropyNetworking.a`)
+          - **include/**: All C++ headers
+          - **lib/cmake/EntropyNetworking/**: CMake config files for easy integration
+
+          ### ⚠️ Warning
+          This is a development build and may be unstable. For production use, please use a [stable release](https://github.com/${{ github.repository }}/releases).
+
+          ### 📋 Recent Changes
+          See [commit history](https://github.com/${{ github.repository }}/commits/main) for details.
+        files: |
+          artifacts/*.tar.gz
+          artifacts/*.zip
+        prerelease: true
+        make_latest: false

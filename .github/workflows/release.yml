@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  # First, trigger builds for all platforms
+  build:
+    uses: ./.github/workflows/ci.yml
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Verify tag format
+      run: |
+        if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Error: Tag must be in format v*.*.* (e.g., v1.0.0)"
+          exit 1
+        fi
+
+    - name: Extract version info
+      id: version
+      run: |
+        VERSION="${{ github.ref_name }}"
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create artifact archives
+      run: |
+        cd artifacts
+        for dir in */; do
+          dirname="${dir%/}"
+          tar -czf "${dirname}.tar.gz" -C "$dirname" .
+          zip -r "${dirname}.zip" "$dirname"
+        done
+        cd ..
+
+    - name: Generate release notes
+      id: notes
+      run: |
+        # Get the previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
+
+        if [ -z "$PREV_TAG" ]; then
+          echo "This is the first release"
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${{ github.ref_name }})
+        else
+          echo "Changes since $PREV_TAG"
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..${{ github.ref_name }})
+        fi
+
+        # Save to file to handle multiline
+        cat > release_notes.md << 'EOF'
+        ## 📦 Release ${{ steps.version.outputs.version }}
+
+        ### Changes in this release
+
+        $CHANGELOG
+
+        ### 📦 Pre-built Binaries
+
+        Download the appropriate archive for your platform:
+
+        - **Linux GCC 14**: `EntropyNetworking-Linux-gcc-14.tar.gz` / `.zip`
+        - **Linux Clang 18**: `EntropyNetworking-Linux-clang-18.tar.gz` / `.zip`
+        - **macOS Universal**: `EntropyNetworking-macOS-universal.tar.gz` / `.zip` (Intel + Apple Silicon)
+
+        Each archive contains:
+        - **lib/**: Static library (`libEntropyNetworking.a`)
+        - **include/**: All C++ headers
+        - **lib/cmake/EntropyNetworking/**: CMake config files
+
+        Extract and use in your project:
+        ```cmake
+        find_package(EntropyNetworking REQUIRED PATHS /path/to/extracted/lib/cmake/EntropyNetworking)
+        target_link_libraries(YourTarget PRIVATE EntropyNetworking::Networking)
+        ```
+
+        ### 🔧 Building from Source
+
+        ```bash
+        # Clone the repository
+        git clone https://github.com/${{ github.repository }}.git
+        cd EntropyNetworking
+        git checkout ${{ github.ref_name }}
+
+        # Basic build
+        cmake -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
+        cmake --build build
+
+        # With tests
+        cmake -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+          -DBUILD_TESTS=ON
+        cmake --build build
+        ```
+
+        ### 📚 Documentation
+
+        See [README.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md) for complete documentation.
+
+        ### 🐛 Reporting Issues
+
+        Found a bug? [Open an issue](https://github.com/${{ github.repository }}/issues/new)
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: "Release ${{ steps.version.outputs.version }}"
+        body_path: release_notes.md
+        files: |
+          artifacts/*.tar.gz
+          artifacts/*.zip
+        draft: false
+        prerelease: false
+        make_latest: true
+        generate_release_notes: true
+
+    - name: Announce release
+      run: |
+        echo "✅ Release ${{ steps.version.outputs.version }} created successfully!"
+        echo "🔗 View at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
