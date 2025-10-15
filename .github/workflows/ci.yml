@@ -22,8 +22,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Install system dependencies
       run: |
@@ -44,7 +42,7 @@ jobs:
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
       with:
-        vcpkgGitCommitId: 'c8696863d371ab7f46e213d8f5ca923c4aef2a00'
+        vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
     - name: Configure CMake
       env:
@@ -68,8 +66,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Install dependencies
       run: |
@@ -78,7 +74,7 @@ jobs:
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
       with:
-        vcpkgGitCommitId: 'c8696863d371ab7f46e213d8f5ca923c4aef2a00'
+        vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
     - name: Configure CMake
       run: |
