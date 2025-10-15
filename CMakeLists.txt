@@ -71,12 +71,18 @@ target_include_directories(EntropyNetworking
 )
 
 # Installation rules
+include(GNUInstallDirs)
+
 install(TARGETS EntropyNetworking
     EXPORT EntropyNetworkingTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(DIRECTORY include/
+install(DIRECTORY src/
     DESTINATION include
+    FILES_MATCHING PATTERN "*.h"
 )
 
 install(EXPORT EntropyNetworkingTargets
