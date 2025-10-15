@@ -177,8 +177,8 @@ void BatchManager::processBatch() {
         if (result.success()) {
             _stats.totalBatchesSent++;
             _stats.totalUpdatesSent += updates.size();
-            _stats.averageBatchSize = static_cast<uint32_t>(
-                _stats.totalUpdatesSent / std::max(_stats.totalBatchesSent, 1ULL)
+            _stats.averageBatchSize = (uint32_t)(
+                _stats.totalUpdatesSent / std::max(_stats.totalBatchesSent, 1UL)
             );
         }
 
