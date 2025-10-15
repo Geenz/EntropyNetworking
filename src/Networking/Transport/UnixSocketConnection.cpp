@@ -39,6 +39,7 @@ UnixSocketConnection::UnixSocketConnection(std::string socketPath, const Connect
         _connectTimeoutMs = cfg->connectTimeoutMs;
         _sendPollTimeoutMs = cfg->sendPollTimeoutMs;
         _sendMaxPolls = cfg->sendMaxPolls;
+        _recvIdlePollMs = cfg->recvIdlePollMs;
         _maxMessageSize = cfg->maxMessageSize;
         _socketSendBuf = cfg->socketSendBuf;
         _socketRecvBuf = cfg->socketRecvBuf;
@@ -51,10 +52,15 @@ UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string pe
 {
     // Socket is already connected - set it up for our use
 
-    // Set non-blocking
+    // Set non-blocking and preserve FD flags (CLOEXEC)
     int flags = fcntl(_socket, F_GETFL, 0);
-    fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
-    fcntl(_socket, F_SETFD, FD_CLOEXEC);
+    if (flags != -1) {
+        (void)fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
+    }
+    int fdflags = fcntl(_socket, F_GETFD, 0);
+    if (fdflags != -1) {
+        (void)fcntl(_socket, F_SETFD, fdflags | FD_CLOEXEC);
+    }
 
 #ifdef SO_NOSIGPIPE
     // macOS: prevent SIGPIPE on this socket
@@ -68,6 +74,10 @@ UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string pe
     // Record connection time
     auto now = std::chrono::system_clock::now();
     _connectTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
+    _lastActivityTime.store(
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
         std::memory_order_release
     );
@@ -213,6 +223,10 @@ Result<void> UnixSocketConnection::connect() {
     // Record connection time
     auto now = std::chrono::system_clock::now();
     _connectTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
+    _lastActivityTime.store(
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
         std::memory_order_release
     );
@@ -367,6 +381,11 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
     // Update stats atomically
     _bytesSent.fetch_add(FRAME_HEADER_SIZE + data.size(), std::memory_order_relaxed);
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
+    auto now2 = std::chrono::system_clock::now();
+    _lastActivityTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now2.time_since_epoch()).count(),
+        std::memory_order_release
+    );
 
     return Result<void>::ok();
 }
@@ -382,10 +401,28 @@ void UnixSocketConnection::receiveLoop() {
 
         if (received < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                // EAGAIN/EWOULDBLOCK: no data available yet
-                // EINTR: interrupted by signal - retry
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
+                // Idle: either no data available yet or interrupted by signal
+                if (_recvIdlePollMs >= 0) {
+                    // Use poll-based idle strategy if configured
+                    pollfd pfd;
+                    pfd.fd = _socket;
+                    pfd.events = POLLIN;
+                    int pret = ::poll(&pfd, 1, _recvIdlePollMs);
+                    if (pret < 0) {
+                        if (errno == EINTR) {
+                            // Interrupted; retry
+                            continue;
+                        }
+                        // Treat other poll errors as transient and retry to avoid spurious failures
+                        continue;
+                    }
+                    // pret == 0: timeout, loop to check stop flag/state; pret > 0: try recv again
+                    continue;
+                } else {
+                    // Default: fixed short sleep to reduce CPU while idle
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
             }
             // Receive error
             _state = ConnectionState::Failed;
@@ -400,6 +437,13 @@ void UnixSocketConnection::receiveLoop() {
 
         // Update bytes received atomically
         _bytesReceived.fetch_add(received, std::memory_order_relaxed);
+        {
+            auto now3 = std::chrono::system_clock::now();
+            _lastActivityTime.store(
+                std::chrono::duration_cast<std::chrono::milliseconds>(now3.time_since_epoch()).count(),
+                std::memory_order_release
+            );
+        }
 
         // Process received data
         size_t offset = 0;
@@ -469,6 +513,7 @@ ConnectionStats UnixSocketConnection::getStats() const {
     stats.messagesSent = _messagesSent.load(std::memory_order_relaxed);
     stats.messagesReceived = _messagesReceived.load(std::memory_order_relaxed);
     stats.connectTime = _connectTime.load(std::memory_order_relaxed);
+    stats.lastActivityTime = _lastActivityTime.load(std::memory_order_relaxed);
     return stats;
 }
 

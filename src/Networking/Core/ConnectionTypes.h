@@ -56,7 +56,8 @@ struct ConnectionStats {
     uint64_t bytesReceived = 0;
     uint64_t messagesSent = 0;
     uint64_t messagesReceived = 0;
-    uint64_t connectTime = 0;  ///< Timestamp of connection establishment
+    uint64_t connectTime = 0;      ///< Timestamp of connection establishment (ms since epoch)
+    uint64_t lastActivityTime = 0; ///< Timestamp of last send/receive activity (ms since epoch)
 };
 
 /**
@@ -104,6 +105,7 @@ struct ConnectionConfig {
     int connectTimeoutMs = 5000;        ///< Connect timeout for blocking waits (Unix sockets)
     int sendPollTimeoutMs = 1000;       ///< Per-poll timeout during send retries (ms)
     int sendMaxPolls = 100;             ///< Max poll iterations before timing out a send
+    int recvIdlePollMs = -1;            ///< If >= 0, use poll(POLLIN, recvIdlePollMs) instead of fixed sleep when idle
     size_t maxMessageSize = 16ull * 1024ull * 1024ull; ///< Max message size for local transports
 
     // Socket buffer sizing (Unix); 0 = leave as OS default

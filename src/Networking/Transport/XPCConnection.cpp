@@ -11,6 +11,16 @@
 
 namespace EntropyEngine::Networking {
 
+// Diagnostic helper for XPC object descriptions
+static std::string xpcDescribe(xpc_object_t obj) {
+    if (!obj) return std::string();
+    char* d = xpc_copy_description(obj);
+    if (!d) return std::string();
+    std::string out(d);
+    free(d);
+    return out;
+}
+
 // Client-side constructor
 XPCConnection::XPCConnection(std::string serviceName)
     : _serviceName(std::move(serviceName))
@@ -70,6 +80,10 @@ XPCConnection::XPCConnection(xpc_connection_t connection, std::string peerInfo)
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
         std::memory_order_release
     );
+    _lastActivityTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
 }
 
 XPCConnection::~XPCConnection() {
@@ -126,6 +140,10 @@ Result<void> XPCConnection::connect() {
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
         std::memory_order_release
     );
+    _lastActivityTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        std::memory_order_release
+    );
 
     return Result<void>::ok();
 }
@@ -173,6 +191,13 @@ Result<void> XPCConnection::send(const std::vector<uint8_t>& data) {
     // Update statistics
     _bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
+    {
+        auto now = std::chrono::system_clock::now();
+        _lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+            std::memory_order_release
+        );
+    }
 
     return Result<void>::ok();
 }
@@ -221,10 +246,12 @@ Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint
 
     if (waitRes != 0) {
         // timed out
+        ENTROPY_LOG_WARNING(std::string("XPC reply timed out for service ") + _serviceName);
         return Result<std::vector<uint8_t>>::err(NetworkError::Timeout, "XPC reply timed out");
     }
 
     if (!replied || !replyObj) {
+        ENTROPY_LOG_WARNING(std::string("No XPC reply received for service ") + _serviceName);
         return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "No reply received");
     }
 
@@ -242,9 +269,19 @@ Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint
         _messagesSent.fetch_add(1, std::memory_order_relaxed);
         _bytesReceived.fetch_add(length, std::memory_order_relaxed);
         _messagesReceived.fetch_add(1, std::memory_order_relaxed);
+        {
+            auto now = std::chrono::system_clock::now();
+            _lastActivityTime.store(
+                std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                std::memory_order_release
+            );
+        }
         xpc_release(replyObj);
         return Result<std::vector<uint8_t>>::ok(std::move(out));
     } else if (t == XPC_TYPE_ERROR) {
+        std::string d = xpcDescribe(replyObj);
+        ENTROPY_LOG_ERROR(std::string("XPC reply error for service ") + _serviceName +
+                          (d.empty() ? std::string("") : std::string(": ") + d));
         if (replyObj == XPC_ERROR_CONNECTION_INTERRUPTED) {
             xpc_release(replyObj);
             return Result<std::vector<uint8_t>>::err(NetworkError::ConnectionClosed, "XPC interrupted");
@@ -272,6 +309,7 @@ ConnectionStats XPCConnection::getStats() const {
     stats.messagesSent = _messagesSent.load(std::memory_order_relaxed);
     stats.messagesReceived = _messagesReceived.load(std::memory_order_relaxed);
     stats.connectTime = _connectTime.load(std::memory_order_relaxed);
+    stats.lastActivityTime = _lastActivityTime.load(std::memory_order_relaxed);
     return stats;
 }
 
@@ -333,24 +371,49 @@ void XPCConnection::handleMessage(xpc_object_t message) {
     // Update statistics
     _bytesReceived.fetch_add(length, std::memory_order_relaxed);
     _messagesReceived.fetch_add(1, std::memory_order_relaxed);
+    {
+        auto now = std::chrono::system_clock::now();
+        _lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+            std::memory_order_release
+        );
+    }
 
     // Notify callback
     onMessageReceived(payload);
 }
 
 void XPCConnection::handleError(xpc_object_t error) {
+    // Gather diagnostics
+    pid_t pid = 0;
+    if (_connection) {
+        pid = xpc_connection_get_pid(_connection);
+    }
+    std::string desc = xpcDescribe(error);
+
     if (error == XPC_ERROR_CONNECTION_INVALID) {
         // Connection was cancelled or invalidated
-        ENTROPY_LOG_WARNING("XPC connection invalid");
+        ENTROPY_LOG_WARNING(std::string("XPC connection invalid: service=") + _serviceName +
+                            ", pid=" + std::to_string(pid) +
+                            (desc.empty() ? std::string("") : std::string(", detail=") + desc));
         setState(ConnectionState::Disconnected);
     } else if (error == XPC_ERROR_CONNECTION_INTERRUPTED) {
         // Connection interrupted (peer crashed or was killed)
-        ENTROPY_LOG_WARNING("XPC connection interrupted");
+        ENTROPY_LOG_WARNING(std::string("XPC connection interrupted: service=") + _serviceName +
+                            ", pid=" + std::to_string(pid) +
+                            (desc.empty() ? std::string("") : std::string(", detail=") + desc));
         setState(ConnectionState::Failed);
     } else if (error == XPC_ERROR_TERMINATION_IMMINENT) {
         // Process is about to exit
-        ENTROPY_LOG_INFO("XPC termination imminent");
+        ENTROPY_LOG_INFO(std::string("XPC termination imminent: service=") + _serviceName +
+                         ", pid=" + std::to_string(pid));
         setState(ConnectionState::Disconnected);
+    } else {
+        // Unknown XPC error object
+        ENTROPY_LOG_ERROR(std::string("XPC unknown error: service=") + _serviceName +
+                          ", pid=" + std::to_string(pid) +
+                          (desc.empty() ? std::string("") : std::string(", detail=") + desc));
+        setState(ConnectionState::Failed);
     }
 }
 

@@ -104,6 +104,8 @@ namespace EntropyEngine::Networking {
             _dataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
             _stats.bytesSent += data.size();
             _stats.messagesSent++;
+            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
             return Result<void>::ok();
         } catch (const std::exception& e) {
             return Result<void>::err(
@@ -143,6 +145,8 @@ namespace EntropyEngine::Networking {
                 _dataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
                 _stats.bytesSent += data.size();
                 _stats.messagesSent++;
+                _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
                 return Result<void>::ok();
             } catch (const std::exception& e) {
                 return Result<void>::err(
@@ -171,6 +175,8 @@ namespace EntropyEngine::Networking {
             _unreliableDataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
             _stats.bytesSent += data.size();
             _stats.messagesSent++;
+            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
             return Result<void>::ok();
         } catch (const std::exception& e) {
             return Result<void>::err(
@@ -351,6 +357,7 @@ namespace EntropyEngine::Networking {
                     _stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
                         now.time_since_epoch()
                     ).count();
+                    _stats.lastActivityTime = _stats.connectTime;
 
                     onStateChanged(ConnectionState::Connected);
                 }
@@ -386,6 +393,8 @@ namespace EntropyEngine::Networking {
                 std::lock_guard<std::mutex> lock(_mutex);
                 _stats.bytesReceived += message.size();
                 _stats.messagesReceived++;
+                _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
             }
 
             onMessageReceived(message);

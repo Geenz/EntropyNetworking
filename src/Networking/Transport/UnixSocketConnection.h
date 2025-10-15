@@ -65,6 +65,7 @@ private:
     int _connectTimeoutMs{5000};
     int _sendPollTimeoutMs{1000};
     int _sendMaxPolls{100};
+    int _recvIdlePollMs{-1};
     size_t _maxMessageSize{16ull * 1024ull * 1024ull};
     int _socketSendBuf{0};
     int _socketRecvBuf{0};
@@ -75,6 +76,7 @@ private:
     std::atomic<uint64_t> _messagesSent{0};
     std::atomic<uint64_t> _messagesReceived{0};
     std::atomic<uint64_t> _connectTime{0};
+    std::atomic<uint64_t> _lastActivityTime{0};
 };
 
 } // namespace EntropyEngine::Networking

@@ -109,6 +109,7 @@ private:
     std::atomic<uint64_t> _messagesSent{0};
     std::atomic<uint64_t> _messagesReceived{0};
     std::atomic<uint64_t> _connectTime{0};
+    std::atomic<uint64_t> _lastActivityTime{0};
 
     // Helper methods
     void setupEventHandler();
