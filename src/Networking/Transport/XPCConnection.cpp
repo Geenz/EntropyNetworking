@@ -5,6 +5,7 @@
 #include "XPCConnection.h"
 #include <chrono>
 #include <sstream>
+#include <Logging/Logger.h>
 
 #if defined(__APPLE__)
 
@@ -14,6 +15,19 @@ namespace EntropyEngine::Networking {
 XPCConnection::XPCConnection(std::string serviceName)
     : _serviceName(std::move(serviceName))
 {
+    // Create serial queue for XPC event handling
+    _queue = dispatch_queue_create("com.entropyengine.xpc.connection", DISPATCH_QUEUE_SERIAL);
+}
+
+// Client-side constructor with config
+XPCConnection::XPCConnection(std::string serviceName, const ConnectionConfig* cfg)
+    : _serviceName(std::move(serviceName))
+{
+    // Apply config if provided
+    if (cfg) {
+        _maxMessageSize = cfg->xpcMaxMessageSize;
+        _defaultReplyTimeoutMs = cfg->xpcReplyTimeoutMs;
+    }
     // Create serial queue for XPC event handling
     _queue = dispatch_queue_create("com.entropyengine.xpc.connection", DISPATCH_QUEUE_SERIAL);
 }
@@ -305,9 +319,7 @@ void XPCConnection::handleMessage(xpc_object_t message) {
     }
 
     // Message size validation (prevent excessive memory allocation)
-    // Max message size: 64 MB (reasonable for XPC, which supports large transfers)
-    constexpr size_t MAX_MESSAGE_SIZE = 64 * 1024 * 1024;
-    if (length > MAX_MESSAGE_SIZE) {
+    if (length > _maxMessageSize) {
         // Message too large - this could be malicious or corrupted
         // Transition to Failed state to signal the error
         setState(ConnectionState::Failed);
@@ -329,12 +341,15 @@ void XPCConnection::handleMessage(xpc_object_t message) {
 void XPCConnection::handleError(xpc_object_t error) {
     if (error == XPC_ERROR_CONNECTION_INVALID) {
         // Connection was cancelled or invalidated
+        ENTROPY_LOG_WARNING("XPC connection invalid");
         setState(ConnectionState::Disconnected);
     } else if (error == XPC_ERROR_CONNECTION_INTERRUPTED) {
         // Connection interrupted (peer crashed or was killed)
+        ENTROPY_LOG_WARNING("XPC connection interrupted");
         setState(ConnectionState::Failed);
     } else if (error == XPC_ERROR_TERMINATION_IMMINENT) {
         // Process is about to exit
+        ENTROPY_LOG_INFO("XPC termination imminent");
         setState(ConnectionState::Disconnected);
     }
 }

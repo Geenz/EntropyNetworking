@@ -6,6 +6,7 @@
 #include "XPCConnection.h"
 #include "ConnectionManager.h"
 #include <sstream>
+#include <Logging/Logger.h>
 
 #if defined(__APPLE__)
 
@@ -137,7 +138,7 @@ void XPCServer::setupListener() {
             handleNewConnection((xpc_connection_t)event);
         } else if (type == XPC_TYPE_ERROR) {
             // Listener error - log it
-            // For now, we'll just ignore errors
+            ENTROPY_LOG_WARNING("XPC listener error event");
         }
     });
 

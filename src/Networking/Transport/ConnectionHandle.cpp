@@ -44,6 +44,14 @@ Result<void> ConnectionHandle::send(const std::vector<uint8_t>& data) {
     return mgr->send(*this, data);
 }
 
+Result<void> ConnectionHandle::trySend(const std::vector<uint8_t>& data) {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid handle");
+    }
+    return mgr->trySend(*this, data);
+}
+
 Result<void> ConnectionHandle::sendUnreliable(const std::vector<uint8_t>& data) {
     auto* mgr = manager();
     if (!mgr) {

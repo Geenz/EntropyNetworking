@@ -27,6 +27,8 @@ class UnixSocketConnection : public NetworkConnection {
 public:
     // Client-side constructor: connects to endpoint
     UnixSocketConnection(std::string socketPath);
+    // Client-side constructor with configuration
+    UnixSocketConnection(std::string socketPath, const struct ConnectionConfig* cfg);
 
     // Server-side constructor: wraps already-connected socket fd
     UnixSocketConnection(int connectedSocketFd, std::string peerInfo);
@@ -40,6 +42,7 @@ public:
 
     Result<void> send(const std::vector<uint8_t>& data) override;
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
+    Result<void> trySend(const std::vector<uint8_t>& data) override;
 
     ConnectionState getState() const override { return _state.load(); }
     ConnectionType getType() const override { return ConnectionType::Local; }
@@ -57,6 +60,14 @@ private:
     std::atomic<bool> _shouldStop{false};
 
     mutable std::mutex _sendMutex;
+
+    // Configurable parameters (initialized from ConnectionConfig or defaults)
+    int _connectTimeoutMs{5000};
+    int _sendPollTimeoutMs{1000};
+    int _sendMaxPolls{100};
+    size_t _maxMessageSize{16ull * 1024ull * 1024ull};
+    int _socketSendBuf{0};
+    int _socketRecvBuf{0};
 
     // Atomic stats to avoid data races between send/receive threads
     std::atomic<uint64_t> _bytesSent{0};

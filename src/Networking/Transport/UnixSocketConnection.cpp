@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <chrono>
 #include <cerrno>
+#include "../Core/ConnectionTypes.h"
+#include <Logging/Logger.h>
 
 namespace EntropyEngine::Networking {
 
@@ -28,6 +30,19 @@ static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024; // 16MB
 UnixSocketConnection::UnixSocketConnection(std::string socketPath)
     : _socketPath(std::move(socketPath))
 {
+}
+
+UnixSocketConnection::UnixSocketConnection(std::string socketPath, const ConnectionConfig* cfg)
+    : _socketPath(std::move(socketPath))
+{
+    if (cfg) {
+        _connectTimeoutMs = cfg->connectTimeoutMs;
+        _sendPollTimeoutMs = cfg->sendPollTimeoutMs;
+        _sendMaxPolls = cfg->sendMaxPolls;
+        _maxMessageSize = cfg->maxMessageSize;
+        _socketSendBuf = cfg->socketSendBuf;
+        _socketRecvBuf = cfg->socketRecvBuf;
+    }
 }
 
 UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string peerInfo)
@@ -73,6 +88,7 @@ Result<void> UnixSocketConnection::connect() {
 
     _state = ConnectionState::Connecting;
     onStateChanged(ConnectionState::Connecting);
+    ENTROPY_LOG_INFO(std::string("Connecting to ") + _socketPath);
 
     // Create socket with non-blocking and close-on-exec flags when available
 #if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
@@ -84,6 +100,7 @@ Result<void> UnixSocketConnection::connect() {
     if (_socket < 0) {
         _state = ConnectionState::Failed;
         onStateChanged(ConnectionState::Failed);
+        ENTROPY_LOG_ERROR(std::string("Failed to create socket: ") + strerror(errno));
         return Result<void>::err(NetworkError::ConnectionClosed,
             std::string("Failed to create socket: ") + strerror(errno));
     }
@@ -100,6 +117,14 @@ Result<void> UnixSocketConnection::connect() {
     int set = 1;
     setsockopt(_socket, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set));
 #endif
+
+    // Optional socket buffer sizing
+    if (_socketSendBuf > 0) {
+        ::setsockopt(_socket, SOL_SOCKET, SO_SNDBUF, &_socketSendBuf, sizeof(_socketSendBuf));
+    }
+    if (_socketRecvBuf > 0) {
+        ::setsockopt(_socket, SOL_SOCKET, SO_RCVBUF, &_socketRecvBuf, sizeof(_socketRecvBuf));
+    }
 
     // Connect
     sockaddr_un addr{};
@@ -128,12 +153,13 @@ Result<void> UnixSocketConnection::connect() {
             pfd.fd = _socket;
             pfd.events = POLLOUT;
 
-            int ret = poll(&pfd, 1, 5000); // 5 second timeout
+            int ret = poll(&pfd, 1, _connectTimeoutMs);
             if (ret < 0) {
                 close(_socket);
                 _socket = -1;
                 _state = ConnectionState::Failed;
                 onStateChanged(ConnectionState::Failed);
+                ENTROPY_LOG_ERROR(std::string("Poll failed during connect: ") + strerror(errno));
                 return Result<void>::err(NetworkError::ConnectionClosed,
                     std::string("Poll failed: ") + strerror(errno));
             }
@@ -143,6 +169,7 @@ Result<void> UnixSocketConnection::connect() {
                 _socket = -1;
                 _state = ConnectionState::Failed;
                 onStateChanged(ConnectionState::Failed);
+                ENTROPY_LOG_WARNING("Unix socket connect timeout");
                 return Result<void>::err(NetworkError::Timeout, "Connection timeout");
             }
 
@@ -154,6 +181,7 @@ Result<void> UnixSocketConnection::connect() {
                 _socket = -1;
                 _state = ConnectionState::Failed;
                 onStateChanged(ConnectionState::Failed);
+                ENTROPY_LOG_ERROR(std::string("getsockopt(SO_ERROR) failed: ") + strerror(errno));
                 return Result<void>::err(NetworkError::ConnectionClosed,
                     std::string("getsockopt failed: ") + strerror(errno));
             }
@@ -163,6 +191,7 @@ Result<void> UnixSocketConnection::connect() {
                 _socket = -1;
                 _state = ConnectionState::Failed;
                 onStateChanged(ConnectionState::Failed);
+                ENTROPY_LOG_ERROR(std::string("Unix socket connect failed: ") + strerror(error));
                 return Result<void>::err(NetworkError::ConnectionClosed,
                     std::string("Connection failed: ") + strerror(error));
             }
@@ -171,6 +200,7 @@ Result<void> UnixSocketConnection::connect() {
             _socket = -1;
             _state = ConnectionState::Failed;
             onStateChanged(ConnectionState::Failed);
+            ENTROPY_LOG_ERROR(std::string("Failed to connect: ") + strerror(errno));
             return Result<void>::err(NetworkError::ConnectionClosed,
                 std::string("Failed to connect: ") + strerror(errno));
         }
@@ -178,6 +208,7 @@ Result<void> UnixSocketConnection::connect() {
 
     _state = ConnectionState::Connected;
     onStateChanged(ConnectionState::Connected);
+    ENTROPY_LOG_INFO(std::string("Connected to ") + _socketPath);
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
@@ -200,6 +231,7 @@ Result<void> UnixSocketConnection::disconnect() {
 
     _state = ConnectionState::Disconnecting;
     onStateChanged(ConnectionState::Disconnecting);
+    ENTROPY_LOG_INFO("Disconnecting Unix socket");
 
     // Stop receive thread
     _shouldStop = true;
@@ -230,12 +262,24 @@ Result<void> UnixSocketConnection::sendUnreliable(const std::vector<uint8_t>& da
     return sendInternal(data);
 }
 
+Result<void> UnixSocketConnection::trySend(const std::vector<uint8_t>& data) {
+    // Conservative non-blocking API: to avoid partial frame corruption without an internal send queue,
+    // we currently do not attempt partial writes. Always report backpressure unless fully supported.
+    if (_state != ConnectionState::Connected) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (data.size() > _maxMessageSize) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Message too large");
+    }
+    return Result<void>::err(NetworkError::WouldBlock, "Non-blocking send not yet supported for UnixSocketConnection");
+}
+
 Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data) {
     if (_state != ConnectionState::Connected) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
 
-    if (data.size() > MAX_MESSAGE_SIZE) {
+    if (data.size() > _maxMessageSize) {
         return Result<void>::err(NetworkError::InvalidParameter, "Message too large");
     }
 
@@ -265,13 +309,14 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
                 pfd.fd = _socket;
                 pfd.events = POLLOUT;
 
-                int ret = poll(&pfd, 1, 1000); // 1 second timeout
+                int ret = poll(&pfd, 1, _sendPollTimeoutMs);
                 if (ret < 0) {
                     return Result<void>::err(NetworkError::ConnectionClosed,
                         std::string("Poll failed during header send: ") + strerror(errno));
                 }
                 if (ret == 0) {
-                    if (++retryCount > MAX_RETRIES) {
+                    if (++retryCount > _sendMaxPolls) {
+                        ENTROPY_LOG_WARNING("Unix socket send timeout (header)");
                         return Result<void>::err(NetworkError::Timeout, "Send timeout (header)");
                     }
                 }
@@ -297,18 +342,21 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
                 pfd.fd = _socket;
                 pfd.events = POLLOUT;
 
-                int ret = poll(&pfd, 1, 1000); // 1 second timeout
+                int ret = poll(&pfd, 1, _sendPollTimeoutMs);
                 if (ret < 0) {
+                    ENTROPY_LOG_ERROR(std::string("Poll failed during send: ") + strerror(errno));
                     return Result<void>::err(NetworkError::ConnectionClosed,
                         std::string("Poll failed during send: ") + strerror(errno));
                 }
                 if (ret == 0) {
-                    if (++retryCount > MAX_RETRIES) {
+                    if (++retryCount > _sendMaxPolls) {
+                        ENTROPY_LOG_WARNING("Unix socket send timeout (payload)");
                         return Result<void>::err(NetworkError::Timeout, "Send timeout");
                     }
                 }
                 continue;
             }
+            ENTROPY_LOG_ERROR(std::string("Failed to send data: ") + strerror(errno));
             return Result<void>::err(NetworkError::ConnectionClosed,
                 std::string("Failed to send data: ") + strerror(errno));
         }
@@ -372,7 +420,7 @@ void UnixSocketConnection::receiveLoop() {
                     memcpy(&lengthBE, messageBuffer.data(), sizeof(lengthBE));
                     expectedLength = ntohl(lengthBE);
 
-                    if (expectedLength > MAX_MESSAGE_SIZE) {
+                    if (expectedLength > _maxMessageSize) {
                         // Invalid message length - protocol error
                         _state = ConnectionState::Failed;
                         onStateChanged(ConnectionState::Failed);

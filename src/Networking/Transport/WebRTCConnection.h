@@ -46,6 +46,7 @@ namespace EntropyEngine::Networking {
 
         Result<void> send(const std::vector<uint8_t>& data) override;
         Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
+        Result<void> trySend(const std::vector<uint8_t>& data) override;
 
         ConnectionState getState() const override;
         ConnectionType getType() const override { return ConnectionType::Remote; }

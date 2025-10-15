@@ -148,6 +148,11 @@ public:
     Result<void> send(const ConnectionHandle& handle, const std::vector<uint8_t>& data);
 
     /**
+     * @brief Non-blocking send that returns WouldBlock on backpressure
+     */
+    Result<void> trySend(const ConnectionHandle& handle, const std::vector<uint8_t>& data);
+
+    /**
      * @brief Sends data over unreliable channel (called by handle.sendUnreliable())
      * @param handle Connection handle
      * @param data Bytes to send
@@ -218,6 +223,25 @@ public:
      */
     size_t capacity() const noexcept { return _capacity; }
 
+    /**
+     * @brief Lightweight aggregate metrics snapshot for observability
+     */
+    struct ManagerMetrics {
+        uint64_t totalBytesSent = 0;
+        uint64_t totalBytesReceived = 0;
+        uint64_t totalMessagesSent = 0;
+        uint64_t totalMessagesReceived = 0;
+        uint64_t connectionsOpened = 0;
+        uint64_t connectionsFailed = 0;
+        uint64_t connectionsClosed = 0;
+        uint64_t wouldBlockSends = 0;
+    };
+
+    /**
+     * @brief Get a snapshot of aggregate metrics across all connections
+     */
+    ManagerMetrics getManagerMetrics() const noexcept;
+
     // EntropyObject interface
     const char* className() const noexcept override { return "ConnectionManager"; }
     uint64_t classHash() const noexcept override;
@@ -265,6 +289,20 @@ private:
 
     friend class ConnectionHandle;
     friend class SessionManager;
+
+    // Lightweight aggregate metrics counters (atomic)
+    struct MetricsCounters {
+        std::atomic<uint64_t> totalBytesSent{0};
+        std::atomic<uint64_t> totalBytesReceived{0};
+        std::atomic<uint64_t> totalMessagesSent{0};
+        std::atomic<uint64_t> totalMessagesReceived{0};
+        std::atomic<uint64_t> connectionsOpened{0};
+        std::atomic<uint64_t> connectionsFailed{0};
+        std::atomic<uint64_t> connectionsClosed{0};
+        std::atomic<uint64_t> wouldBlockSends{0};
+    };
+
+    mutable MetricsCounters _metrics;
 };
 
 } // namespace EntropyEngine::Networking

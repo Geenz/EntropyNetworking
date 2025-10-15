@@ -100,10 +100,24 @@ struct ConnectionConfig {
     // Common fields
     std::string endpoint;  ///< Path, pipe name, or signaling server URL
 
+    // Operational knobs (defaults preserve current behavior)
+    int connectTimeoutMs = 5000;        ///< Connect timeout for blocking waits (Unix sockets)
+    int sendPollTimeoutMs = 1000;       ///< Per-poll timeout during send retries (ms)
+    int sendMaxPolls = 100;             ///< Max poll iterations before timing out a send
+    size_t maxMessageSize = 16ull * 1024ull * 1024ull; ///< Max message size for local transports
+
+    // Socket buffer sizing (Unix); 0 = leave as OS default
+    int socketSendBuf = 0;              ///< SO_SNDBUF size in bytes (0 to skip)
+    int socketRecvBuf = 0;              ///< SO_RCVBUF size in bytes (0 to skip)
+
     // WebRTC-specific (only for Remote/WebRTC)
     WebRTCConfig webrtcConfig;
     SignalingCallbacks signalingCallbacks;
     std::string dataChannelLabel = "entropy-data";
+
+    // XPC-specific (Apple)
+    size_t xpcMaxMessageSize = 64ull * 1024ull * 1024ull; ///< Max allowed XPC payload size
+    int xpcReplyTimeoutMs = 5000;        ///< Default reply timeout for XPC sendWithReply
 
     // Platform-specific options
     std::optional<std::string> xpcServiceName;  ///< macOS XPC service identifier

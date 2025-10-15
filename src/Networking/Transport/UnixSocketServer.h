@@ -19,6 +19,7 @@ namespace EntropyEngine::Networking {
 class UnixSocketServer : public LocalServer {
 public:
     UnixSocketServer(ConnectionManager* connMgr, std::string socketPath);
+    UnixSocketServer(ConnectionManager* connMgr, std::string socketPath, LocalServerConfig config);
     ~UnixSocketServer() override;
 
     // LocalServer interface
@@ -37,6 +38,7 @@ private:
     std::string _socketPath;
     int _serverSocket{-1};
     std::atomic<bool> _listening{false};
+    LocalServerConfig _config{};
 };
 
 } // namespace EntropyEngine::Networking

@@ -99,14 +99,14 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 #if defined(__APPLE__)
         #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
             // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
-            return std::make_unique<XPCConnection>(config.endpoint);
+            return std::make_unique<XPCConnection>(config.endpoint, &config);
         #else
             // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
-            return std::make_unique<UnixSocketConnection>(config.endpoint);
+            return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
         #endif
 #elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
         // Linux/Android - use Unix sockets
-        return std::make_unique<UnixSocketConnection>(config.endpoint);
+        return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
 #elif defined(_WIN32)
         throw std::runtime_error("Named pipe backend not yet implemented");
 #else
@@ -117,7 +117,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
     switch (config.backend) {
         case ConnectionBackend::UnixSocket:
 #if defined(__unix__) || defined(__APPLE__)
-            return std::make_unique<UnixSocketConnection>(config.endpoint);
+            return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
 #else
             throw std::runtime_error("Unix sockets not supported on this platform");
 #endif
@@ -127,7 +127,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 
         case ConnectionBackend::XPC:
 #if defined(__APPLE__)
-            return std::make_unique<XPCConnection>(config.endpoint);
+            return std::make_unique<XPCConnection>(config.endpoint, &config);
 #else
             throw std::runtime_error("XPC not supported on this platform");
 #endif
@@ -211,12 +211,29 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
     slot.type = type;
 
     // Initialize state snapshot and callback wiring
-    slot.state.store(slot.connection->getState(), std::memory_order_release);
+    auto initialState = slot.connection->getState();
+    slot.state.store(initialState, std::memory_order_release);
+    if (initialState == ConnectionState::Connected) {
+        _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // Manager-owned state callback: update slot.state and fan out to user callback
     slot.connection->setStateCallback([this, index](ConnectionState newState) {
         // Update slot state atomically
         _connectionSlots[index].state.store(newState, std::memory_order_release);
+        // Update aggregate metrics based on transition
+        switch (newState) {
+            case ConnectionState::Connected:
+                _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case ConnectionState::Failed:
+                _metrics.connectionsFailed.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case ConnectionState::Disconnected:
+                _metrics.connectionsClosed.fetch_add(1, std::memory_order_relaxed);
+                break;
+            default: break;
+        }
         // Fan out to user callback without holding the lock during invocation
         std::function<void(ConnectionState)> cb;
         {
@@ -226,8 +243,10 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
         if (cb) cb(newState);
     });
 
-    // Manager-owned message callback: fan out to user callback
+    // Manager-owned message callback: increment metrics and fan out to user callback
     slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+        _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
+        _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
         std::function<void(const std::vector<uint8_t>&)> cb;
         {
             std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
@@ -271,12 +290,29 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
 
     // Update state to match backend's actual state
     // For WebRTC this will be Connecting; for Unix socket it may be Connected or Connecting
-    slot.state.store(slot.connection->getState(), std::memory_order_release);
+    auto initialState = slot.connection->getState();
+    slot.state.store(initialState, std::memory_order_release);
+    if (initialState == ConnectionState::Connected) {
+        _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // Wire up manager-owned callbacks to keep state synchronized and fan-out to user callbacks
     slot.connection->setStateCallback([this, index](ConnectionState newState) {
         // Update slot state atomically
         _connectionSlots[index].state.store(newState, std::memory_order_release);
+        // Update aggregate metrics based on transition
+        switch (newState) {
+            case ConnectionState::Connected:
+                _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case ConnectionState::Failed:
+                _metrics.connectionsFailed.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case ConnectionState::Disconnected:
+                _metrics.connectionsClosed.fetch_add(1, std::memory_order_relaxed);
+                break;
+            default: break;
+        }
         // Fan out to user callback without holding the lock during invocation
         std::function<void(ConnectionState)> cb;
         {
@@ -287,6 +323,8 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
     });
 
     slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) {
+        _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
+        _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
         std::function<void(const std::vector<uint8_t>&)> cb;
         {
             std::lock_guard<std::mutex> lock(_connectionSlots[index].mutex);
@@ -356,7 +394,12 @@ Result<void> ConnectionManager::send(const ConnectionHandle& handle, const std::
         return Result<void>::err(NetworkError::ConnectionClosed, "Connection not initialized");
     }
 
-    return slot.connection->send(data);
+    auto r = slot.connection->send(data);
+    if (r.success()) {
+        _metrics.totalBytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _metrics.totalMessagesSent.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
 }
 
 Result<void> ConnectionManager::sendUnreliable(const ConnectionHandle& handle, const std::vector<uint8_t>& data) {
@@ -373,7 +416,12 @@ Result<void> ConnectionManager::sendUnreliable(const ConnectionHandle& handle, c
         return Result<void>::err(NetworkError::ConnectionClosed, "Connection not initialized");
     }
 
-    return slot.connection->sendUnreliable(data);
+    auto r = slot.connection->sendUnreliable(data);
+    if (r.success()) {
+        _metrics.totalBytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _metrics.totalMessagesSent.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
 }
 
 bool ConnectionManager::isConnected(const ConnectionHandle& handle) const {
@@ -449,6 +497,43 @@ std::string ConnectionManager::toString() const {
                        static_cast<const void*>(this),
                        _capacity,
                        _activeCount.load(std::memory_order_relaxed));
+}
+
+ConnectionManager::ManagerMetrics ConnectionManager::getManagerMetrics() const noexcept {
+    ManagerMetrics m;
+    m.totalBytesSent = _metrics.totalBytesSent.load(std::memory_order_relaxed);
+    m.totalBytesReceived = _metrics.totalBytesReceived.load(std::memory_order_relaxed);
+    m.totalMessagesSent = _metrics.totalMessagesSent.load(std::memory_order_relaxed);
+    m.totalMessagesReceived = _metrics.totalMessagesReceived.load(std::memory_order_relaxed);
+    m.connectionsOpened = _metrics.connectionsOpened.load(std::memory_order_relaxed);
+    m.connectionsFailed = _metrics.connectionsFailed.load(std::memory_order_relaxed);
+    m.connectionsClosed = _metrics.connectionsClosed.load(std::memory_order_relaxed);
+    m.wouldBlockSends = _metrics.wouldBlockSends.load(std::memory_order_relaxed);
+    return m;
+}
+
+Result<void> ConnectionManager::trySend(const ConnectionHandle& handle, const std::vector<uint8_t>& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid connection handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _connectionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.connection) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Connection not initialized");
+    }
+
+    auto r = slot.connection->trySend(data);
+    if (r.success()) {
+        _metrics.totalBytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _metrics.totalMessagesSent.fetch_add(1, std::memory_order_relaxed);
+    } else if (r.error == NetworkError::WouldBlock) {
+        _metrics.wouldBlockSends.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
 }
 
 } // namespace EntropyEngine::Networking

@@ -146,6 +146,12 @@ public:
     Result<void> send(const std::vector<uint8_t>& data);
 
     /**
+     * @brief Non-blocking send that returns WouldBlock on backpressure
+     * @param data Bytes to send
+     */
+    Result<void> trySend(const std::vector<uint8_t>& data);
+
+    /**
      * @brief Sends data over the unreliable channel (if available)
      *
      * Best-effort delivery with no ordering guarantees. Falls back to reliable

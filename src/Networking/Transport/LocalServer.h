@@ -75,6 +75,16 @@ protected:
 };
 
 /**
+ * @brief Local server configuration (platform-agnostic)
+ */
+struct LocalServerConfig {
+    int backlog = 128;                 ///< listen() backlog
+    int acceptPollIntervalMs = 500;    ///< poll interval or wait timeout in accept loop
+    int chmodMode = -1;                ///< if >= 0, chmod the socket path to this mode (Unix)
+    bool unlinkOnStart = true;         ///< if true, unlink socket path before bind (Unix)
+};
+
+/**
  * @brief Creates a platform-appropriate LocalServer instance
  *
  * @param connMgr Connection manager that will own accepted connections
@@ -84,6 +94,15 @@ protected:
 std::unique_ptr<LocalServer> createLocalServer(
     ConnectionManager* connMgr,
     const std::string& endpoint
+);
+
+/**
+ * @brief Creates a LocalServer with configuration options
+ */
+std::unique_ptr<LocalServer> createLocalServer(
+    ConnectionManager* connMgr,
+    const std::string& endpoint,
+    const LocalServerConfig& config
 );
 
 } // namespace EntropyEngine::Networking

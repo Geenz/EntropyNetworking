@@ -21,12 +21,21 @@
 #include <cstring>
 #include <cstddef>
 #include <cerrno>
+#include <sys/stat.h>
+#include <Logging/Logger.h>
 
 namespace EntropyEngine::Networking {
 
 UnixSocketServer::UnixSocketServer(ConnectionManager* connMgr, std::string socketPath)
     : _connMgr(connMgr)
     , _socketPath(std::move(socketPath))
+{
+}
+
+UnixSocketServer::UnixSocketServer(ConnectionManager* connMgr, std::string socketPath, LocalServerConfig config)
+    : _connMgr(connMgr)
+    , _socketPath(std::move(socketPath))
+    , _config(std::move(config))
 {
 }
 
@@ -39,8 +48,10 @@ Result<void> UnixSocketServer::listen() {
         return Result<void>::err(NetworkError::InvalidParameter, "Already listening");
     }
 
-    // Remove existing socket file if present
-    ::unlink(_socketPath.c_str());
+    // Remove existing socket file if present (configurable)
+    if (_config.unlinkOnStart) {
+        ::unlink(_socketPath.c_str());
+    }
 
     // Create server socket with non-blocking for interruptible accept
 #if defined(SOCK_NONBLOCK) && defined(SOCK_CLOEXEC)
@@ -50,6 +61,7 @@ Result<void> UnixSocketServer::listen() {
 #endif
 
     if (_serverSocket < 0) {
+        ENTROPY_LOG_ERROR(std::string("Failed to create server socket: ") + strerror(errno));
         return Result<void>::err(NetworkError::ConnectionClosed,
             std::string("Failed to create server socket: ") + strerror(errno));
     }
@@ -82,14 +94,21 @@ Result<void> UnixSocketServer::listen() {
     // Bind
     if (::bind(_serverSocket, reinterpret_cast<sockaddr*>(&addr), addrlen) < 0) {
         std::string error = std::string("Failed to bind socket: ") + strerror(errno);
+        ENTROPY_LOG_ERROR(error);
         ::close(_serverSocket);
         _serverSocket = -1;
         return Result<void>::err(NetworkError::ConnectionClosed, error);
     }
 
-    // Listen with reasonable backlog
-    if (::listen(_serverSocket, 128) < 0) {
+    // Optionally set permissions on the socket file
+    if (_config.chmodMode >= 0) {
+        ::chmod(_socketPath.c_str(), static_cast<mode_t>(_config.chmodMode));
+    }
+
+    // Listen with configured backlog
+    if (::listen(_serverSocket, _config.backlog) < 0) {
         std::string error = std::string("Failed to listen on socket: ") + strerror(errno);
+        ENTROPY_LOG_ERROR(error);
         ::close(_serverSocket);
         _serverSocket = -1;
         ::unlink(_socketPath.c_str());
@@ -97,6 +116,7 @@ Result<void> UnixSocketServer::listen() {
     }
 
     _listening.store(true, std::memory_order_release);
+    ENTROPY_LOG_INFO(std::string("Unix socket server listening on ") + _socketPath);
     return Result<void>::ok();
 }
 
@@ -109,7 +129,7 @@ ConnectionHandle UnixSocketServer::accept() {
     pollfd pfd{_serverSocket, POLLIN, 0};
 
     while (_listening.load(std::memory_order_acquire)) {
-        int ret = ::poll(&pfd, 1, 500);  // 500ms timeout for responsiveness
+        int ret = ::poll(&pfd, 1, _config.acceptPollIntervalMs);
 
         if (ret > 0 && (pfd.revents & POLLIN)) {
             // Socket ready for accept
@@ -117,6 +137,7 @@ ConnectionHandle UnixSocketServer::accept() {
 
             if (clientSocket >= 0) {
                 // Successfully accepted - wrap in backend and adopt
+                ENTROPY_LOG_INFO("Accepted Unix local connection");
                 auto backend = std::make_unique<UnixSocketConnection>(clientSocket, "accepted");
                 return _connMgr->adoptConnection(std::move(backend), ConnectionType::Local);
             }
@@ -132,6 +153,7 @@ ConnectionHandle UnixSocketServer::accept() {
             }
 
             // Other error - return invalid handle
+            ENTROPY_LOG_WARNING(std::string("accept() failed: ") + strerror(errno));
             return ConnectionHandle();
         }
 
@@ -142,6 +164,7 @@ ConnectionHandle UnixSocketServer::accept() {
                 continue;
             }
             // Other poll error
+            ENTROPY_LOG_WARNING(std::string("poll() failed in accept: ") + strerror(errno));
             return ConnectionHandle();
         }
 
@@ -165,6 +188,7 @@ Result<void> UnixSocketServer::close() {
     }
 
     ::unlink(_socketPath.c_str());
+    ENTROPY_LOG_INFO(std::string("Unix socket server closed: ") + _socketPath);
 
     return Result<void>::ok();
 }
@@ -202,6 +226,32 @@ std::unique_ptr<LocalServer> createLocalServer(
 #elif defined(_WIN32)
     throw std::runtime_error("Named pipe server not yet implemented");
 #else
+    throw std::runtime_error("No local server implementation for this platform");
+#endif
+}
+
+std::unique_ptr<LocalServer> createLocalServer(
+    ConnectionManager* connMgr,
+    const std::string& endpoint,
+    const LocalServerConfig& config
+) {
+#if defined(__APPLE__)
+    #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+        // iOS family - XPC server does not currently consume LocalServerConfig; ignore config
+        (void)config;
+        return std::make_unique<XPCServer>(connMgr, endpoint);
+    #else
+        // macOS - use Unix sockets with config
+        return std::make_unique<UnixSocketServer>(connMgr, endpoint, config);
+    #endif
+#elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
+    // Linux/Android - use Unix sockets with config
+    return std::make_unique<UnixSocketServer>(connMgr, endpoint, config);
+#elif defined(_WIN32)
+    (void)config;
+    throw std::runtime_error("Named pipe server not yet implemented");
+#else
+    (void)config;
     throw std::runtime_error("No local server implementation for this platform");
 #endif
 }

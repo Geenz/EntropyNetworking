@@ -41,7 +41,8 @@ enum class NetworkError {
     InvalidParameter,           ///< Invalid parameter provided
     RegistryFull,               ///< Registry has reached capacity limit
     EntityNotFound,             ///< Entity ID not found
-    AlreadyExists               ///< Entity or property already exists
+    AlreadyExists,              ///< Entity or property already exists
+    WouldBlock                  ///< Operation would block (non-blocking backpressure)
 };
 
 /**
@@ -66,6 +67,7 @@ inline const char* errorToString(NetworkError error) {
         case NetworkError::RegistryFull: return "Registry full";
         case NetworkError::EntityNotFound: return "Entity not found";
         case NetworkError::AlreadyExists: return "Already exists";
+        case NetworkError::WouldBlock: return "Would block";
         default: return "Unknown error";
     }
 }

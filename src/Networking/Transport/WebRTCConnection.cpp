@@ -4,6 +4,8 @@
 
 #include "WebRTCConnection.h"
 #include <stdexcept>
+#include <EntropyCore.h>
+#include <Logging/Logger.h>
 
 namespace EntropyEngine::Networking {
 
@@ -111,7 +113,46 @@ namespace EntropyEngine::Networking {
         }
     }
 
-    Result<void> WebRTCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
+    Result<void> WebRTCConnection::trySend(const std::vector<uint8_t>& data) {
+            std::lock_guard<std::mutex> lock(_mutex);
+
+            if (_state != ConnectionState::Connected) {
+                return Result<void>::err(
+                    NetworkError::ConnectionClosed,
+                    "Connection not established"
+                );
+            }
+
+            if (!_dataChannel || !_dataChannel->isOpen()) {
+                return Result<void>::err(
+                    NetworkError::ConnectionClosed,
+                    "Data channel not open"
+                );
+            }
+
+            // Backpressure: if there's anything buffered, report WouldBlock
+            // (could be refined with a threshold in configuration in future PRs)
+            if (_dataChannel->bufferedAmount() > 0) {
+                return Result<void>::err(
+                    NetworkError::WouldBlock,
+                    "WebRTC data channel backpressured"
+                );
+            }
+
+            try {
+                _dataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
+                _stats.bytesSent += data.size();
+                _stats.messagesSent++;
+                return Result<void>::ok();
+            } catch (const std::exception& e) {
+                return Result<void>::err(
+                    NetworkError::InvalidMessage,
+                    std::string("Failed to trySend data: ") + e.what()
+                );
+            }
+        }
+
+        Result<void> WebRTCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
         std::lock_guard<std::mutex> lock(_mutex);
 
         if (_state != ConnectionState::Connected) {
@@ -255,16 +296,16 @@ namespace EntropyEngine::Networking {
 
         // Set up data channel handler for receiving channels from remote peer
         _peerConnection->onDataChannel([this](std::shared_ptr<rtc::DataChannel> dc) {
-            printf("onDataChannel called: %s\n", dc->label().c_str());
+            ENTROPY_LOG_DEBUG(std::string("onDataChannel called: ") + dc->label());
             std::lock_guard<std::mutex> lock(_mutex);
 
             // Check if this is the reliable or unreliable channel
             if (dc->label() == _dataChannelLabel) {
-                printf("  -> Setting as reliable channel\n");
+                ENTROPY_LOG_DEBUG("Setting as reliable channel");
                 _dataChannel = dc;
                 setupDataChannelCallbacks(_dataChannel);
             } else if (dc->label() == _unreliableChannelLabel) {
-                printf("  -> Setting as unreliable channel\n");
+                ENTROPY_LOG_DEBUG("Setting as unreliable channel");
                 _unreliableDataChannel = dc;
                 setupDataChannelCallbacks(_unreliableDataChannel);
             }
@@ -296,7 +337,7 @@ namespace EntropyEngine::Networking {
 
         channel->onOpen([this, isReliableChannel, channel]() {
             // Debug output
-            printf("Data channel opened: %s\n", channel->label().c_str());
+            ENTROPY_LOG_INFO(std::string("Data channel opened: ") + channel->label());
 
             if (isReliableChannel) {
                 std::lock_guard<std::mutex> lock(_mutex);

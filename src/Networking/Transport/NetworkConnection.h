@@ -42,6 +42,12 @@ public:
     virtual Result<void> send(const std::vector<uint8_t>& data) = 0;
     virtual Result<void> sendUnreliable(const std::vector<uint8_t>& data) = 0;
 
+    // Non-blocking send API (default: not supported, returns InvalidParameter)
+    virtual Result<void> trySend(const std::vector<uint8_t>& data) {
+        (void)data;
+        return Result<void>::err(NetworkError::InvalidParameter, "trySend not supported by this backend");
+    }
+
     // State and info
     virtual ConnectionState getState() const = 0;
     virtual ConnectionType getType() const = 0;
