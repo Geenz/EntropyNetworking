@@ -8,6 +8,7 @@
  */
 
 #include "PropertyRegistry.h"
+#include <mutex>
 
 namespace EntropyEngine {
 namespace Networking {
