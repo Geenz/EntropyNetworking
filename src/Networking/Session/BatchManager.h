@@ -112,7 +112,7 @@ public:
         uint64_t totalUpdatesSent{0};
         uint64_t batchesDropped{0};      // Due to backpressure
         uint64_t updatesDeduped{0};       // Same property updated multiple times
-        uint32_t averageBatchSize{0};
+        uint64_t averageBatchSize{0};
         uint32_t currentBatchInterval{0};
     };
     Stats getStats() const;
