@@ -1,11 +1,31 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.28)
 
-project(EntropyNetworking VERSION 0.1.0 LANGUAGES CXX)
+# Set vcpkg triplet for macOS universal binaries
+if(APPLE AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "universal-osx" CACHE STRING "")
+    set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/triplets" CACHE STRING "")
+endif()
 
-# Set C++ standard
+project(EntropyNetworking
+    VERSION 0.1.0
+    DESCRIPTION "Networking library for Entropy Engine with Cap'n Proto and WebRTC support"
+    LANGUAGES CXX
+)
+
+# Options
+option(BUILD_SHARED_LIBS "Build as a shared library" OFF)
+option(BUILD_TESTS "Enable/build tests for EntropyNetworking" OFF)
+option(BUILD_EXAMPLES "Build EntropyNetworking example executables" OFF)
+
+# Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Configure vcpkg
+if(DEFINED CMAKE_TOOLCHAIN_FILE)
+    message(STATUS "Using vcpkg toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+endif()
 
 # Find dependencies
 find_package(EntropyCore CONFIG REQUIRED)
@@ -13,6 +33,11 @@ find_package(CapnProto CONFIG REQUIRED)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(zstd CONFIG REQUIRED)
+
+# Only require GoogleTest when building tests
+if(BUILD_TESTS)
+    find_package(GTest CONFIG REQUIRED)
+endif()
 
 # Generate Cap'n Proto code
 set(CAPNP_SCHEMA_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/Networking/Protocol/entropy.capnp")
@@ -47,11 +72,23 @@ endif()
 # Create library
 add_library(EntropyNetworking ${NETWORKING_SOURCES})
 
+# Set target properties
+target_compile_features(EntropyNetworking PUBLIC cxx_std_20)
+
 # Apple-specific compile options (required for XPC/Blocks)
 if(APPLE)
     target_compile_options(EntropyNetworking PRIVATE -fblocks)
 endif()
 
+# Include directories
+target_include_directories(EntropyNetworking
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+        $<INSTALL_INTERFACE:include>
+)
+
+# Link dependencies
 target_link_libraries(EntropyNetworking
     PUBLIC
         EntropyCore::Core
@@ -63,14 +100,48 @@ target_link_libraries(EntropyNetworking
         $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
 )
 
-target_include_directories(EntropyNetworking
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-        $<INSTALL_INTERFACE:include>
+# Platform and compiler-specific settings
+if(WIN32)
+    # Settings for Windows
+    target_compile_definitions(EntropyNetworking PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(EntropyNetworking PRIVATE /W4)
+    endif()
+else()
+    # Settings for non-Windows platforms (macOS, Linux)
+    target_compile_options(EntropyNetworking PRIVATE -Wall -Wextra -Wpedantic)
+    # -fexperimental-library is only supported by Clang, not GCC
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(EntropyNetworking PUBLIC -fexperimental-library)
+    endif()
+    if(APPLE)
+        # macOS specific
+        target_compile_definitions(EntropyNetworking PUBLIC EntropyDarwin)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Linux specific
+        target_compile_definitions(EntropyNetworking PUBLIC EntropyLinux)
+    endif()
+endif()
+
+# Export include directories for dependent projects
+set_target_properties(EntropyNetworking PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+    EXPORT_NAME Networking
 )
 
-# Installation rules
+# Examples
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+# Testing
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# Installation
 include(GNUInstallDirs)
 
 install(TARGETS EntropyNetworking
@@ -88,39 +159,26 @@ install(DIRECTORY src/
 install(EXPORT EntropyNetworkingTargets
     FILE EntropyNetworkingTargets.cmake
     NAMESPACE EntropyNetworking::
-    DESTINATION lib/cmake/EntropyNetworking
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/EntropyNetworking
 )
 
 # Create config file
 include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
 
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntropyNetworkingConfig.cmake.in"
+    "cmake/EntropyNetworkingConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/EntropyNetworking
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/EntropyNetworking
+)
+
+write_basic_package_version_file(
+    EntropyNetworkingConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
 )
 
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfigVersion.cmake"
-    DESTINATION lib/cmake/EntropyNetworking
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/EntropyNetworking
 )
-
-# Testing
-option(BUILD_TESTS "Build unit tests" ON)
-if(BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-
-# Examples
-option(BUILD_EXAMPLES "Build example applications" ON)
-if(BUILD_EXAMPLES)
-    add_subdirectory(examples)
-endif()
-

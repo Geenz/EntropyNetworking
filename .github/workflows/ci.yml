@@ -1,139 +1,165 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
-  workflow_call:
 
-env:
+permissions:
+  contents: read
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        compiler:
-          - { cc: gcc-14, cxx: g++-14 }
-          - { cc: clang-18, cxx: clang++-18 }
-
+  build-and-test-windows:
+    name: Build and test (Windows, MSVC)
+    runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ninja-build cmake pkg-config
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
-    - name: Install compiler
-      run: |
-        if [[ "${{ matrix.compiler.cc }}" == gcc-* ]]; then
-          sudo apt-get install -y ${{ matrix.compiler.cc }} ${{ matrix.compiler.cxx }}
-        elif [[ "${{ matrix.compiler.cc }}" == clang-* ]]; then
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y libc++-18-dev libc++abi-18-dev
-        fi
-
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
-
-    - name: Setup vcpkg binary caching
-      run: |
-        echo "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite" >> $GITHUB_ENV
-
-    - name: Configure CMake (Debug)
-      env:
-        CC: ${{ matrix.compiler.cc }}
-        CXX: ${{ matrix.compiler.cxx }}
-      run: |
-        cmake -B build-debug -G Ninja \
-          -DCMAKE_BUILD_TYPE=Debug \
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-          -DBUILD_TESTS=ON \
+      - name: Configure CMake (VS 2022, x64, Release)
+        run: >
+          cmake -S . -B build
+          -G "Visual Studio 17 2022" -A x64
+          -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=OFF
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-    - name: Configure CMake (Release)
-      env:
-        CC: ${{ matrix.compiler.cc }}
-        CXX: ${{ matrix.compiler.cxx }}
-      run: |
-        cmake -B build-release -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-          -DBUILD_TESTS=ON \
+      - name: Build tests (Release)
+        run: cmake --build build --config Release
+
+      - name: Run tests (ctest, verbose)
+        working-directory: build
+        run: ctest -C Release -VV --output-on-failure
+
+      - name: Install package (Release)
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}\\EntropyNetworking-Windows-x64"
+
+      - name: Upload CTest logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-windows
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/**/Test.xml
+            build/Testing/Temporary/LastTestsFailed.log
+
+      - name: Upload Windows package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-Windows-x64
+          path: EntropyNetworking-Windows-x64/**
+
+  build-and-test-linux:
+    name: Build and test (Linux, GCC)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-14 cmake
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+
+      - name: Configure CMake (Ninja, Release)
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=OFF
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-    - name: Build (Debug)
-      run: cmake --build build-debug --parallel
+      - name: Build tests
+        run: cmake --build build
 
-    - name: Test (Debug)
-      run: ctest --test-dir build-debug --output-on-failure
+      - name: Run tests (ctest, verbose)
+        working-directory: build
+        run: ctest -VV --output-on-failure
 
-    - name: Build (Release)
-      run: cmake --build build-release --parallel
+      - name: Install package
+        run: cmake --install build --prefix "${{ github.workspace }}/EntropyNetworking-Linux-gcc-14"
 
-    - name: Install (Debug)
-      run: cmake --install build-debug --prefix build/install/debug
+      - name: Upload CTest logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-linux
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/**/Test.xml
+            build/Testing/Temporary/LastTestsFailed.log
 
-    - name: Install (Release)
-      run: cmake --install build-release --prefix build/install
+      - name: Upload Linux GCC package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-Linux-gcc-14
+          path: EntropyNetworking-Linux-gcc-14/**
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: EntropyNetworking-Linux-${{ matrix.compiler.cc }}
-        path: |
-          build/install/
-        if-no-files-found: error
-
-  build-macos:
+  build-and-test-macos:
+    name: Build and test (macOS, AppleClang)
     runs-on: macos-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        brew install ninja cmake pkg-config
+      - name: Install prerequisites
+        run: |
+          brew update
+          brew install ninja
 
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
-    - name: Setup vcpkg binary caching
-      run: |
-        echo "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite" >> $GITHUB_ENV
-
-    - name: Configure CMake
-      run: |
-        cmake -B build -G Ninja \
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-          -DVCPKG_TARGET_TRIPLET=arm64-osx \
-          -DBUILD_TESTS=ON \
+      - name: Configure CMake (Ninja, Release, Universal)
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=OFF
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-    - name: Build
-      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+      - name: Build tests
+        run: cmake --build build
 
-    - name: Test
-      run: ctest --test-dir build --output-on-failure
+      - name: Run tests (ctest, verbose)
+        working-directory: build
+        run: ctest -VV --output-on-failure
 
-    - name: Install to staging directory
-      run: |
-        cmake --install build --prefix build/install
+      - name: Install package
+        run: cmake --install build --prefix "${{ github.workspace }}/EntropyNetworking-macOS-universal"
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: EntropyNetworking-macOS-universal
-        path: |
-          build/install/
-        if-no-files-found: error
+      - name: Upload CTest logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-macos
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/**/Test.xml
+            build/Testing/Temporary/LastTestsFailed.log
+
+      - name: Upload macOS universal package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-universal
+          path: EntropyNetworking-macOS-universal/**
