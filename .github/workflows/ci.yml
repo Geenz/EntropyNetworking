@@ -9,7 +9,6 @@ on:
   workflow_call:
 
 env:
-  BUILD_TYPE: Release
 
 jobs:
   build-linux:
@@ -48,26 +47,42 @@ jobs:
       run: |
         echo "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite" >> $GITHUB_ENV
 
-    - name: Configure CMake
+    - name: Configure CMake (Debug)
       env:
         CC: ${{ matrix.compiler.cc }}
         CXX: ${{ matrix.compiler.cxx }}
       run: |
-        cmake -B build -G Ninja \
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+        cmake -B build-debug -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
           -DBUILD_TESTS=ON \
           -DBUILD_EXAMPLES=OFF
 
-    - name: Build
-      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
-
-    - name: Test
-      run: ctest --test-dir build --output-on-failure
-
-    - name: Install to staging directory
+    - name: Configure CMake (Release)
+      env:
+        CC: ${{ matrix.compiler.cc }}
+        CXX: ${{ matrix.compiler.cxx }}
       run: |
-        cmake --install build --prefix build/install
+        cmake -B build-release -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
+          -DBUILD_TESTS=ON \
+          -DBUILD_EXAMPLES=OFF
+
+    - name: Build (Debug)
+      run: cmake --build build-debug --parallel
+
+    - name: Test (Debug)
+      run: ctest --test-dir build-debug --output-on-failure
+
+    - name: Build (Release)
+      run: cmake --build build-release --parallel
+
+    - name: Install (Debug)
+      run: cmake --install build-debug --prefix build/install/debug
+
+    - name: Install (Release)
+      run: cmake --install build-release --prefix build/install
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
