@@ -44,6 +44,10 @@ jobs:
       with:
         vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
+    - name: Setup vcpkg binary caching
+      run: |
+        echo "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite" >> $GITHUB_ENV
+
     - name: Configure CMake
       env:
         CC: ${{ matrix.compiler.cc }}
@@ -87,6 +91,10 @@ jobs:
       uses: lukka/run-vcpkg@v11
       with:
         vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+
+    - name: Setup vcpkg binary caching
+      run: |
+        echo "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite" >> $GITHUB_ENV
 
     - name: Configure CMake
       run: |
