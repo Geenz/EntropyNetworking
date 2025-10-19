@@ -35,7 +35,6 @@ TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
         while (conn.isConnected()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        (void)conn.close();
         (void)server->close();
     });
 

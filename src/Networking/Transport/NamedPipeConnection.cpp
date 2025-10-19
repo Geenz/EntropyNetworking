@@ -80,6 +80,7 @@ NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*pee
 }
 
 NamedPipeConnection::~NamedPipeConnection() {
+    shutdownCallbacks();
     (void)disconnect();
 }
 
@@ -177,7 +178,6 @@ Result<void> NamedPipeConnection::disconnect() {
 
     if (_state == ConnectionState::Disconnected) {
         if (_pipe != INVALID_HANDLE_VALUE) {
-            FlushFileBuffers(_pipe);
             CloseHandle(_pipe);
             _pipe = INVALID_HANDLE_VALUE;
         }
@@ -188,7 +188,6 @@ Result<void> NamedPipeConnection::disconnect() {
     onStateChanged(ConnectionState::Disconnecting);
 
     if (_pipe != INVALID_HANDLE_VALUE) {
-        FlushFileBuffers(_pipe);
         CloseHandle(_pipe);
         _pipe = INVALID_HANDLE_VALUE;
     }
@@ -246,12 +245,22 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
             if (!GetOverlappedResult(_pipe, &ovh, &bytes, TRUE)) {
                 DWORD e2 = GetLastError();
                 CloseHandle(ovh.hEvent);
+                if (e2 == ERROR_BROKEN_PIPE || e2 == ERROR_OPERATION_ABORTED) {
+                    if (_state.exchange(ConnectionState::Disconnected) != ConnectionState::Disconnected) {
+                        onStateChanged(ConnectionState::Disconnected);
+                    }
+                }
                 return Result<void>::err(NetworkError::ConnectionClosed,
                                          "Header write failed: " + std::to_string(e2));
             }
             written = bytes;
         } else {
             CloseHandle(ovh.hEvent);
+            if (err == ERROR_BROKEN_PIPE || err == ERROR_OPERATION_ABORTED) {
+                if (_state.exchange(ConnectionState::Disconnected) != ConnectionState::Disconnected) {
+                    onStateChanged(ConnectionState::Disconnected);
+                }
+            }
             return Result<void>::err(NetworkError::ConnectionClosed, "Write header failed: " + std::to_string(err));
         }
     }
@@ -280,12 +289,22 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
                 if (!GetOverlappedResult(_pipe, &ov, &bytes, TRUE)) {
                     DWORD e2 = GetLastError();
                     CloseHandle(ov.hEvent);
+                    if (e2 == ERROR_BROKEN_PIPE || e2 == ERROR_OPERATION_ABORTED) {
+                        if (_state.exchange(ConnectionState::Disconnected) != ConnectionState::Disconnected) {
+                            onStateChanged(ConnectionState::Disconnected);
+                        }
+                    }
                     return Result<void>::err(NetworkError::ConnectionClosed,
                                              "Body write failed: " + std::to_string(e2));
                 }
                 written = bytes;
             } else {
                 CloseHandle(ov.hEvent);
+                if (err == ERROR_BROKEN_PIPE || err == ERROR_OPERATION_ABORTED) {
+                    if (_state.exchange(ConnectionState::Disconnected) != ConnectionState::Disconnected) {
+                        onStateChanged(ConnectionState::Disconnected);
+                    }
+                }
                 return Result<void>::err(NetworkError::ConnectionClosed, "Write body failed: " + std::to_string(err));
             }
         }
@@ -416,6 +435,12 @@ void NamedPipeConnection::receiveLoop() {
         _messagesReceived.fetch_add(1, std::memory_order_relaxed);
 
         onMessageReceived(buffer);
+    }
+
+    // Emit Disconnected if we exited abnormally (not via shouldStop)
+    if (!_shouldStop.load(std::memory_order_acquire)) {
+        _state = ConnectionState::Disconnected;
+        onStateChanged(ConnectionState::Disconnected);
     }
 }
 

@@ -90,6 +90,7 @@ UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string pe
 }
 
 UnixSocketConnection::~UnixSocketConnection() {
+    shutdownCallbacks();
     disconnect();
 }
 
@@ -458,6 +459,11 @@ void UnixSocketConnection::receiveLoop() {
         while (offset < static_cast<size_t>(received)) {
             if (readingHeader) {
                 // Read frame header
+                if (messageBuffer.size() > FRAME_HEADER_SIZE) {
+                    _state = ConnectionState::Failed;
+                    onStateChanged(ConnectionState::Failed);
+                    return;
+                }
                 size_t needed = FRAME_HEADER_SIZE - messageBuffer.size();
                 size_t available = received - offset;
                 size_t toCopy = std::min(needed, available);

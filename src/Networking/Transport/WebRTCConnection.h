@@ -10,7 +10,7 @@
 #pragma once
 
 #include "NetworkConnection.h"
-#include <rtc/rtc.hpp>
+#include <rtc/rtc.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -80,20 +80,32 @@ namespace EntropyEngine::Networking {
         void setupPeerConnection();
         void setupDataChannel();
         void setupUnreliableDataChannel();
-        void setupDataChannelCallbacks(std::shared_ptr<rtc::DataChannel> channel);
-        void updateConnectionState(rtc::PeerConnection::State state);
+        void setupDataChannelCallbacks(int channelId, bool isReliable);
+
+        // C API callback adapters (static with user pointer)
+        static void onLocalDescriptionCallback(int pc, const char* sdp, const char* type, void* user);
+        static void onLocalCandidateCallback(int pc, const char* cand, const char* mid, void* user);
+        static void onStateChangeCallback(int pc, rtcState state, void* user);
+        static void onDataChannelCallback(int pc, int dc, void* user);
+        static void onOpenCallback(int id, void* user);
+        static void onClosedCallback(int id, void* user);
+        static void onMessageCallback(int id, const char* message, int size, void* user);
 
         WebRTCConfig _config;
         SignalingCallbacks _signalingCallbacks;
         std::string _dataChannelLabel;
         std::string _unreliableChannelLabel;
 
-        std::shared_ptr<rtc::PeerConnection> _peerConnection;
-        std::shared_ptr<rtc::DataChannel> _dataChannel;
-        std::shared_ptr<rtc::DataChannel> _unreliableDataChannel;
+        // Using C API handles directly for proper blocking cleanup semantics
+        // The C++ wrapper doesn't implement the blocking guarantee documented in the C API
+        int _peerConnectionId = -1;
+        int _dataChannelId = -1;
+        int _unreliableDataChannelId = -1;
 
         std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
         std::atomic<bool> _destroying{false};
+        std::atomic<bool> _makingOffer{false};
+        bool _polite = false;
         mutable std::mutex _mutex;
         ConnectionStats _stats;
     };

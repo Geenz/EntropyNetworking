@@ -76,6 +76,7 @@ struct WebRTCConfig {
     uint16_t portRangeEnd = 0;
     int maxMessageSize = 256 * 1024;  // 256 KB default
     bool enableIceTcp = false;
+    bool polite = false;  ///< Perfect negotiation: true = polite peer (accepts remote offers during glare)
 };
 
 /**

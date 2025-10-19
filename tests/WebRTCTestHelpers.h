@@ -55,9 +55,12 @@ public:
 
     /**
      * @brief Create paired signaling callbacks for two peers
+     * @param politeFirst If true, peer1 is polite; otherwise peer2 is polite
      * @return Pair of callbacks for peer1 and peer2
      */
-    std::pair<SignalingCallbacks, SignalingCallbacks> createCallbackPair() {
+    std::pair<SignalingCallbacks, SignalingCallbacks> createCallbackPair(bool politeFirst = true) {
+        _politeFirst = politeFirst;
+
         SignalingCallbacks callbacks1;
         callbacks1.onLocalDescription = [this](const std::string& type, const std::string& sdp) {
             handlePeer1LocalDescription(type, sdp);
@@ -76,6 +79,11 @@ public:
 
         return {callbacks1, callbacks2};
     }
+
+    /**
+     * @brief Get whether peer1 should be polite
+     */
+    bool isPeer1Polite() const { return _politeFirst; }
 
     /**
      * @brief Get number of descriptions exchanged
@@ -129,10 +137,11 @@ private:
     WebRTCConnection* _peer2 = nullptr;
     std::atomic<int> _descriptionsExchanged{0};
     std::atomic<int> _candidatesExchanged{0};
+    bool _politeFirst = true;
 };
 
 // Hermetic local WebRTC config for CI: loopback-only, ICE-TCP enabled, bounded port range
-inline WebRTCConfig localHermeticRtcConfig() {
+inline WebRTCConfig localHermeticRtcConfig(bool polite = false) {
     WebRTCConfig cfg;
     cfg.iceServers = {};               // No external STUN
     cfg.bindAddress = "127.0.0.1";   // Loopback only
@@ -140,7 +149,13 @@ inline WebRTCConfig localHermeticRtcConfig() {
     cfg.portRangeBegin = 40000;        // Predictable narrow range
     cfg.portRangeEnd   = 40100;
     cfg.maxMessageSize = 256 * 1024;   // Match default
+    cfg.polite = polite;               // Perfect negotiation role
     return cfg;
+}
+
+// Helper to create paired configs with one polite peer
+inline std::pair<WebRTCConfig, WebRTCConfig> localHermeticRtcConfigPair(bool politeFirst = true) {
+    return {localHermeticRtcConfig(politeFirst), localHermeticRtcConfig(!politeFirst)};
 }
 
 } // namespace EntropyEngine::Networking::Testing

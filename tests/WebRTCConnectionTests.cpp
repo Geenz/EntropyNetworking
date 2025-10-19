@@ -34,67 +34,6 @@ TEST(WebRTCConnectionTests, CreateConnection) {
     EXPECT_FALSE(connection.isConnected());
 }
 
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_Connect) {
-    WebRTCConfig config;
-    config.iceServers = {"stun:stun.l.google.com:19302"};
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {
-        // Callback is working
-    };
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {
-        // Callback is working
-    };
-
-    WebRTCConnection connection(config, callbacks);
-
-    auto result = connection.connect();
-    EXPECT_TRUE(result.success());
-    EXPECT_TRUE(connection.isReady());
-
-    // Note: We don't wait for actual ICE gathering in unit tests
-    // That would be an integration test
-}
-
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_MultipleConnect) {
-    WebRTCConfig config;
-    config.iceServers = {"stun:stun.l.google.com:19302"};
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
-
-    WebRTCConnection connection(config, callbacks);
-
-    auto result1 = connection.connect();
-    EXPECT_TRUE(result1.success());
-
-    // Second connect should fail - already active
-    auto result2 = connection.connect();
-    EXPECT_TRUE(result2.failed());
-}
-
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_Disconnect) {
-    WebRTCConfig config;
-    config.iceServers = {"stun:stun.l.google.com:19302"};
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
-
-    WebRTCConnection connection(config, callbacks);
-
-    auto connectResult = connection.connect();
-    ASSERT_TRUE(connectResult.success());
-
-    auto disconnectResult = connection.disconnect();
-    EXPECT_TRUE(disconnectResult.success());
-    EXPECT_EQ(connection.getState(), ConnectionState::Disconnected);
-}
-
 TEST(WebRTCConnectionTests, SendBeforeConnect) {
     WebRTCConfig config;
     config.iceServers = {"stun:stun.l.google.com:19302"};
@@ -112,33 +51,6 @@ TEST(WebRTCConnectionTests, SendBeforeConnect) {
     EXPECT_EQ(result.error, NetworkError::ConnectionClosed);
 }
 
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_StateCallback) {
-    WebRTCConfig config;
-    config.iceServers = {"stun:stun.l.google.com:19302"};
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
-
-    WebRTCConnection connection(config, callbacks);
-
-    bool stateChanged = false;
-    ConnectionState receivedState = ConnectionState::Disconnected;
-
-    connection.setStateCallback([&stateChanged, &receivedState](ConnectionState state) {
-        stateChanged = true;
-        receivedState = state;
-    });
-
-    connection.connect();
-    connection.disconnect();
-
-    // Disconnect should have triggered the callback
-    EXPECT_TRUE(stateChanged);
-    EXPECT_EQ(receivedState, ConnectionState::Disconnected);
-}
-
 TEST(WebRTCConnectionTests, ConnectionManagerIntegration) {
     ConnectionManager manager(64);
 
@@ -154,40 +66,6 @@ TEST(WebRTCConnectionTests, ConnectionManagerIntegration) {
 
     EXPECT_EQ(handle.getType(), ConnectionType::Remote);
     EXPECT_EQ(handle.getState(), ConnectionState::Disconnected);
-}
-
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_CustomDataChannelLabel) {
-    WebRTCConfig config;
-    config.iceServers = {"stun:stun.l.google.com:19302"};
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
-
-    WebRTCConnection connection(config, callbacks, "custom-channel");
-
-    auto result = connection.connect();
-    EXPECT_TRUE(result.success());
-}
-
-// Integration test - requires network and takes time
-TEST(WebRTCConnectionTests, DISABLED_MultipleICEServers) {
-    WebRTCConfig config;
-    config.iceServers = {
-        "stun:stun.l.google.com:19302",
-        "stun:stun1.l.google.com:19302",
-        "stun:stun2.l.google.com:19302"
-    };
-
-    SignalingCallbacks callbacks;
-    callbacks.onLocalDescription = [](const std::string& type, const std::string& sdp) {};
-    callbacks.onLocalCandidate = [](const std::string& candidate, const std::string& mid) {};
-
-    WebRTCConnection connection(config, callbacks);
-
-    auto result = connection.connect();
-    EXPECT_TRUE(result.success());
 }
 
 TEST(WebRTCConnectionTests, SetRemoteDescriptionBeforeConnect) {

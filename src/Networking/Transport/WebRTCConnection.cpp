@@ -10,6 +10,7 @@
 #include "WebRTCConnection.h"
 #include <stdexcept>
 #include <optional>
+#include <chrono>
 #include <EntropyCore.h>
 #include <Logging/Logger.h>
 
@@ -25,49 +26,221 @@ namespace EntropyEngine::Networking {
         , _dataChannelLabel(std::move(dataChannelLabel))
         , _unreliableChannelLabel(_dataChannelLabel + "-unreliable")
     {
+        _polite = _config.polite;
     }
 
     WebRTCConnection::~WebRTCConnection() {
-        // Set destroying flag to prevent callback invocations during teardown
         _destroying.store(true, std::memory_order_release);
+        disconnect();
+        shutdownCallbacks();
 
-        // Clear base class callbacks before disconnect to prevent use-after-free
-        // if libdatachannel invokes callbacks during shutdown on background threads
+        // C API guarantees blocking until all callbacks complete
+        if (_dataChannelId >= 0) {
+            rtcDeleteDataChannel(_dataChannelId);
+            _dataChannelId = -1;
+        }
+
+        if (_unreliableDataChannelId >= 0) {
+            rtcDeleteDataChannel(_unreliableDataChannelId);
+            _unreliableDataChannelId = -1;
+        }
+
+        if (_peerConnectionId >= 0) {
+            rtcDeletePeerConnection(_peerConnectionId);
+            _peerConnectionId = -1;
+        }
+
         setMessageCallback(nullptr);
         setStateCallback(nullptr);
-        disconnect();
+    }
+
+    // C API callback adapters
+    void WebRTCConnection::onLocalDescriptionCallback(int, const char* sdp, const char* type, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        self->_makingOffer.store(false, std::memory_order_release);
+
+        if (self->_signalingCallbacks.onLocalDescription) {
+            self->_signalingCallbacks.onLocalDescription(type, sdp);
+        }
+    }
+
+    void WebRTCConnection::onLocalCandidateCallback(int, const char* cand, const char* mid, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        if (self->_signalingCallbacks.onLocalCandidate) {
+            self->_signalingCallbacks.onLocalCandidate(cand, mid);
+        }
+    }
+
+    void WebRTCConnection::onStateChangeCallback(int, rtcState state, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        std::optional<ConnectionState> pending;
+        {
+            std::lock_guard<std::mutex> lock(self->_mutex);
+            ConnectionState newState = self->_state;
+
+            switch (state) {
+                case RTC_NEW:
+                case RTC_CONNECTING:
+                    if (self->_state != ConnectionState::Connected) {
+                        newState = ConnectionState::Connecting;
+                    }
+                    break;
+                case RTC_CONNECTED:
+                    // Don't set Connected here - wait for data channel
+                    break;
+                case RTC_DISCONNECTED:
+                    newState = ConnectionState::Disconnected;
+                    break;
+                case RTC_FAILED:
+                    newState = ConnectionState::Failed;
+                    break;
+                case RTC_CLOSED:
+                    newState = ConnectionState::Disconnected;
+                    break;
+            }
+
+            if (newState != self->_state) {
+                self->_state = newState;
+                pending = newState;
+            }
+        }
+
+        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+            self->onStateChanged(*pending);
+        }
+    }
+
+    void WebRTCConnection::onDataChannelCallback(int, int dc, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        char label[256];
+        if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(self->_mutex);
+        std::string_view labelView(label);
+
+        if (labelView == self->_dataChannelLabel) {
+            self->_dataChannelId = dc;
+            self->setupDataChannelCallbacks(dc, true);
+        } else if (labelView == self->_unreliableChannelLabel) {
+            self->_unreliableDataChannelId = dc;
+            self->setupDataChannelCallbacks(dc, false);
+        }
+    }
+
+    void WebRTCConnection::onOpenCallback(int id, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        char label[256];
+        if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+            return;
+        }
+
+        ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label);
+
+        // Only transition to Connected for reliable channel
+        std::string_view labelView(label);
+        if (labelView != self->_dataChannelLabel) return;
+
+        std::optional<ConnectionState> pending;
+        {
+            std::lock_guard<std::mutex> lock(self->_mutex);
+            if (self->_state != ConnectionState::Connected) {
+                self->_state = ConnectionState::Connected;
+                auto now = std::chrono::system_clock::now();
+                self->_stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count();
+                self->_stats.lastActivityTime = self->_stats.connectTime;
+                pending = ConnectionState::Connected;
+            }
+        }
+
+        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+            self->onStateChanged(*pending);
+        }
+    }
+
+    void WebRTCConnection::onClosedCallback(int id, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        char label[256];
+        if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+            return;
+        }
+
+        // Only transition to Disconnected for reliable channel
+        std::string_view labelView(label);
+        if (labelView != self->_dataChannelLabel) return;
+
+        std::optional<ConnectionState> pending;
+        {
+            std::lock_guard<std::mutex> lock(self->_mutex);
+            if (self->_state != ConnectionState::Disconnected && self->_state != ConnectionState::Failed) {
+                self->_state = ConnectionState::Disconnected;
+                pending = ConnectionState::Disconnected;
+            }
+        }
+
+        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+            self->onStateChanged(*pending);
+        }
+    }
+
+    void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
+        auto* self = static_cast<WebRTCConnection*>(user);
+        if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
+                                   reinterpret_cast<const uint8_t*>(message) + size);
+
+        {
+            std::lock_guard<std::mutex> lock(self->_mutex);
+            self->_stats.bytesReceived += size;
+            self->_stats.messagesReceived++;
+            self->_stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
+
+        if (!self->_destroying.load(std::memory_order_acquire)) {
+            self->onMessageReceived(data);
+        }
     }
 
     Result<void> WebRTCConnection::connect() {
         std::lock_guard<std::mutex> lock(_mutex);
 
         if (_state != ConnectionState::Disconnected) {
-            return Result<void>::err(
-                NetworkError::InvalidParameter,
-                "Connection already active"
-            );
+            return Result<void>::err(NetworkError::InvalidParameter, "Connection already active");
         }
 
+        _state = ConnectionState::Connecting;
+        _makingOffer.store(true, std::memory_order_release);
+
         try {
-            _state = ConnectionState::Connecting;
             setupPeerConnection();
             setupDataChannel();
             setupUnreliableDataChannel();
             return Result<void>::ok();
         } catch (const std::exception& e) {
             _state = ConnectionState::Disconnected;
-            return Result<void>::err(
-                NetworkError::ConnectionClosed,
-                std::string("Failed to create peer connection: ") + e.what()
-            );
+            _makingOffer.store(false, std::memory_order_release);
+            return Result<void>::err(NetworkError::ConnectionClosed,
+                std::string("Failed to create peer connection: ") + e.what());
         }
     }
 
     Result<void> WebRTCConnection::disconnect() {
-        // Hold local copies to close outside mutex to avoid deadlock
-        std::shared_ptr<rtc::DataChannel> dataChannel;
-        std::shared_ptr<rtc::DataChannel> unreliableDataChannel;
-        std::shared_ptr<rtc::PeerConnection> peerConnection;
         std::optional<ConnectionState> pending;
 
         {
@@ -79,43 +252,21 @@ namespace EntropyEngine::Networking {
 
             _state = ConnectionState::Disconnected;
             pending = ConnectionState::Disconnected;
-
-            // Move ownership to local copies
-            dataChannel = std::move(_dataChannel);
-            unreliableDataChannel = std::move(_unreliableDataChannel);
-            peerConnection = std::move(_peerConnection);
         }
 
-        // Fire state change callback outside mutex to prevent deadlock/reentrancy
         if (pending && !_destroying.load(std::memory_order_acquire)) {
             onStateChanged(*pending);
         }
 
-        // Clear callbacks before close to prevent late invocations
-        if (dataChannel) {
-            dataChannel->onOpen([](){});
-            dataChannel->onClosed([](){});
-            dataChannel->onMessage([](auto){});
-            dataChannel->onError([](std::string){});
-            dataChannel->close();
+        // Close channels
+        if (_dataChannelId >= 0) {
+            rtcClose(_dataChannelId);
         }
-
-        if (unreliableDataChannel) {
-            unreliableDataChannel->onOpen([](){});
-            unreliableDataChannel->onClosed([](){});
-            unreliableDataChannel->onMessage([](auto){});
-            unreliableDataChannel->onError([](std::string){});
-            unreliableDataChannel->close();
+        if (_unreliableDataChannelId >= 0) {
+            rtcClose(_unreliableDataChannelId);
         }
-
-        if (peerConnection) {
-            // Clear PC callbacks to prevent late invocations during shutdown
-            peerConnection->onLocalDescription(nullptr);
-            peerConnection->onLocalCandidate(nullptr);
-            peerConnection->onDataChannel(nullptr);
-            peerConnection->onStateChange(nullptr);
-            peerConnection->onGatheringStateChange(nullptr);
-            peerConnection->close();
+        if (_peerConnectionId >= 0) {
+            rtcClose(_peerConnectionId);
         }
 
         return Result<void>::ok();
@@ -129,103 +280,77 @@ namespace EntropyEngine::Networking {
         std::lock_guard<std::mutex> lock(_mutex);
 
         if (_state != ConnectionState::Connected) {
-            return Result<void>::err(
-                NetworkError::ConnectionClosed,
-                "Connection not established"
-            );
+            return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        if (!_dataChannel || !_dataChannel->isOpen()) {
-            return Result<void>::err(
-                NetworkError::ConnectionClosed,
-                "Data channel not open"
-            );
+        if (_dataChannelId < 0 || !rtcIsOpen(_dataChannelId)) {
+            return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
-        try {
-            _dataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            return Result<void>::ok();
-        } catch (const std::exception& e) {
-            return Result<void>::err(
-                NetworkError::InvalidMessage,
-                std::string("Failed to send data: ") + e.what()
-            );
+        int result = rtcSendMessage(_dataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        if (result < 0) {
+            return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data");
         }
+
+        _stats.bytesSent += data.size();
+        _stats.messagesSent++;
+        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        return Result<void>::ok();
     }
 
     Result<void> WebRTCConnection::trySend(const std::vector<uint8_t>& data) {
-            std::lock_guard<std::mutex> lock(_mutex);
-
-            if (_state != ConnectionState::Connected) {
-                return Result<void>::err(
-                    NetworkError::ConnectionClosed,
-                    "Connection not established"
-                );
-            }
-
-            if (!_dataChannel || !_dataChannel->isOpen()) {
-                return Result<void>::err(
-                    NetworkError::ConnectionClosed,
-                    "Data channel not open"
-                );
-            }
-
-            // Backpressure: if there's anything buffered, report WouldBlock
-            // (could be refined with a threshold in configuration in future PRs)
-            if (_dataChannel->bufferedAmount() > 0) {
-                return Result<void>::err(
-                    NetworkError::WouldBlock,
-                    "WebRTC data channel backpressured"
-                );
-            }
-
-            try {
-                _dataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
-                _stats.bytesSent += data.size();
-                _stats.messagesSent++;
-                _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count();
-                return Result<void>::ok();
-            } catch (const std::exception& e) {
-                return Result<void>::err(
-                    NetworkError::InvalidMessage,
-                    std::string("Failed to trySend data: ") + e.what()
-                );
-            }
-        }
-
-        Result<void> WebRTCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
         std::lock_guard<std::mutex> lock(_mutex);
 
         if (_state != ConnectionState::Connected) {
-            return Result<void>::err(
-                NetworkError::ConnectionClosed,
-                "Connection not established"
-            );
+            return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        if (!_unreliableDataChannel || !_unreliableDataChannel->isOpen()) {
-            // Fall back to reliable channel if unreliable is not available
+        if (_dataChannelId < 0 || !rtcIsOpen(_dataChannelId)) {
+            return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
+        }
+
+        int buffered = rtcGetBufferedAmount(_dataChannelId);
+        if (buffered > 0) {
+            return Result<void>::err(NetworkError::WouldBlock, "WebRTC data channel backpressured");
+        }
+
+        int result = rtcSendMessage(_dataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        if (result < 0) {
+            return Result<void>::err(NetworkError::InvalidMessage, "Failed to trySend data");
+        }
+
+        _stats.bytesSent += data.size();
+        _stats.messagesSent++;
+        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        return Result<void>::ok();
+    }
+
+    Result<void> WebRTCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
+        std::lock_guard<std::mutex> lock(_mutex);
+
+        if (_state != ConnectionState::Connected) {
+            return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
+        }
+
+        if (_unreliableDataChannelId < 0 || !rtcIsOpen(_unreliableDataChannelId)) {
             return send(data);
         }
 
-        try {
-            _unreliableDataChannel->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            return Result<void>::ok();
-        } catch (const std::exception& e) {
-            return Result<void>::err(
-                NetworkError::InvalidMessage,
-                std::string("Failed to send unreliable data: ") + e.what()
-            );
+        int result = rtcSendMessage(_unreliableDataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        if (result < 0) {
+            return Result<void>::err(NetworkError::InvalidMessage, "Failed to send unreliable data");
         }
+
+        _stats.bytesSent += data.size();
+        _stats.messagesSent++;
+        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        return Result<void>::ok();
     }
 
     ConnectionState WebRTCConnection::getState() const {
@@ -240,296 +365,124 @@ namespace EntropyEngine::Networking {
     Result<void> WebRTCConnection::setRemoteDescription(const std::string& type, const std::string& sdp) {
         std::lock_guard<std::mutex> lock(_mutex);
 
-        if (!_peerConnection) {
-            return Result<void>::err(
-                NetworkError::InvalidParameter,
-                "Peer connection not initialized"
-            );
+        if (_peerConnectionId < 0) {
+            return Result<void>::err(NetworkError::InvalidParameter, "Peer connection not initialized");
         }
 
-        try {
-            rtc::Description description(sdp, type);
-            _peerConnection->setRemoteDescription(description);
-            return Result<void>::ok();
-        } catch (const std::exception& e) {
-            return Result<void>::err(
-                NetworkError::InvalidMessage,
-                std::string("Failed to set remote description: ") + e.what()
-            );
+        // Perfect negotiation: detect and resolve offer collisions
+        const bool isOffer = (type == "offer");
+        bool offerCollision = isOffer && _makingOffer.load(std::memory_order_acquire);
+
+        if (offerCollision) {
+            if (!_polite) {
+                // Impolite peer ignores the incoming offer
+                return Result<void>::ok();
+            }
+            // Polite peer rolls back its local offer to accept remote offer
+            int rollbackResult = rtcSetRemoteDescription(_peerConnectionId, "", "rollback");
+            if (rollbackResult < 0) {
+                ENTROPY_LOG_WARNING("Rollback failed or unsupported; ignoring incoming offer");
+                return Result<void>::ok();
+            }
         }
+
+        int result = rtcSetRemoteDescription(_peerConnectionId, sdp.c_str(), type.c_str());
+        if (result < 0) {
+            return Result<void>::err(NetworkError::InvalidMessage, "Failed to set remote description");
+        }
+
+        return Result<void>::ok();
     }
 
     Result<void> WebRTCConnection::addRemoteCandidate(const std::string& candidate, const std::string& mid) {
         std::lock_guard<std::mutex> lock(_mutex);
 
-        if (!_peerConnection) {
-            return Result<void>::err(
-                NetworkError::InvalidParameter,
-                "Peer connection not initialized"
-            );
+        if (_peerConnectionId < 0) {
+            return Result<void>::err(NetworkError::InvalidParameter, "Peer connection not initialized");
         }
 
-        try {
-            rtc::Candidate rtcCandidate(candidate, mid);
-            _peerConnection->addRemoteCandidate(rtcCandidate);
-            return Result<void>::ok();
-        } catch (const std::exception& e) {
-            return Result<void>::err(
-                NetworkError::InvalidMessage,
-                std::string("Failed to add remote candidate: ") + e.what()
-            );
+        int result = rtcAddRemoteCandidate(_peerConnectionId, candidate.c_str(), mid.c_str());
+        if (result < 0) {
+            return Result<void>::err(NetworkError::InvalidMessage, "Failed to add remote candidate");
         }
+
+        return Result<void>::ok();
     }
 
     bool WebRTCConnection::isReady() const {
-        return _peerConnection != nullptr;
+        return _peerConnectionId >= 0;
     }
 
     void WebRTCConnection::setupPeerConnection() {
-        rtc::Configuration rtcConfig;
+        rtcConfiguration config;
+        std::memset(&config, 0, sizeof(config));
 
-        // Add ICE servers
+        // Build ICE servers array
+        std::vector<const char*> iceServerPtrs;
+        iceServerPtrs.reserve(_config.iceServers.size());
         for (const auto& server : _config.iceServers) {
-            rtcConfig.iceServers.emplace_back(server);
+            iceServerPtrs.push_back(server.c_str());
         }
+        config.iceServers = iceServerPtrs.empty() ? nullptr : iceServerPtrs.data();
+        config.iceServersCount = static_cast<int>(iceServerPtrs.size());
 
-        // Set optional parameters
         if (!_config.proxyServer.empty()) {
-            rtcConfig.proxyServer = _config.proxyServer;
+            config.proxyServer = _config.proxyServer.c_str();
         }
 
         if (!_config.bindAddress.empty()) {
-            rtcConfig.bindAddress = _config.bindAddress;
+            config.bindAddress = _config.bindAddress.c_str();
         }
 
         if (_config.portRangeBegin > 0 && _config.portRangeEnd > 0) {
-            rtcConfig.portRangeBegin = _config.portRangeBegin;
-            rtcConfig.portRangeEnd = _config.portRangeEnd;
+            config.portRangeBegin = static_cast<uint16_t>(_config.portRangeBegin);
+            config.portRangeEnd = static_cast<uint16_t>(_config.portRangeEnd);
         }
 
-        rtcConfig.enableIceTcp = _config.enableIceTcp;
-        rtcConfig.maxMessageSize = _config.maxMessageSize;
+        config.enableIceTcp = _config.enableIceTcp;
+        config.maxMessageSize = _config.maxMessageSize;
 
-        _peerConnection = std::make_shared<rtc::PeerConnection>(rtcConfig);
+        _peerConnectionId = rtcCreatePeerConnection(&config);
+        if (_peerConnectionId < 0) {
+            throw std::runtime_error("Failed to create peer connection");
+        }
 
-        // Set up local description callback
-        _peerConnection->onLocalDescription([this](rtc::Description description) {
-            if (_signalingCallbacks.onLocalDescription) {
-                _signalingCallbacks.onLocalDescription(
-                    description.typeString(),
-                    std::string(description)
-                );
-            }
-        });
-
-        // Set up local candidate callback
-        _peerConnection->onLocalCandidate([this](rtc::Candidate candidate) {
-            if (_signalingCallbacks.onLocalCandidate) {
-                _signalingCallbacks.onLocalCandidate(
-                    candidate.candidate(),
-                    candidate.mid()
-                );
-            }
-        });
-
-        // Set up state change callback
-        _peerConnection->onStateChange([this](rtc::PeerConnection::State state) {
-            updateConnectionState(state);
-        });
-
-        // Set up gathering state change callback
-        _peerConnection->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
-            // Optional: could expose this to the application
-        });
-
-        // Set up data channel handler for receiving channels from remote peer
-        _peerConnection->onDataChannel([this](std::shared_ptr<rtc::DataChannel> dc) {
-            ENTROPY_LOG_DEBUG(std::string("onDataChannel called: ") + dc->label());
-            std::lock_guard<std::mutex> lock(_mutex);
-
-            // Check if this is the reliable or unreliable channel
-            if (dc->label() == _dataChannelLabel) {
-                ENTROPY_LOG_DEBUG("Setting as reliable channel");
-                _dataChannel = dc;
-                setupDataChannelCallbacks(_dataChannel);
-            } else if (dc->label() == _unreliableChannelLabel) {
-                ENTROPY_LOG_DEBUG("Setting as unreliable channel");
-                _unreliableDataChannel = dc;
-                setupDataChannelCallbacks(_unreliableDataChannel);
-            }
-        });
+        rtcSetUserPointer(_peerConnectionId, this);
+        rtcSetLocalDescriptionCallback(_peerConnectionId, onLocalDescriptionCallback);
+        rtcSetLocalCandidateCallback(_peerConnectionId, onLocalCandidateCallback);
+        rtcSetStateChangeCallback(_peerConnectionId, onStateChangeCallback);
+        rtcSetDataChannelCallback(_peerConnectionId, onDataChannelCallback);
     }
 
     void WebRTCConnection::setupDataChannel() {
-        rtc::DataChannelInit init;
-        init.reliability.unordered = false;
+        _dataChannelId = rtcCreateDataChannel(_peerConnectionId, _dataChannelLabel.c_str());
+        if (_dataChannelId < 0) {
+            throw std::runtime_error("Failed to create data channel");
+        }
 
-        _dataChannel = _peerConnection->createDataChannel(_dataChannelLabel, init);
-        setupDataChannelCallbacks(_dataChannel);
-        // Note: callbacks may be registered again via onDataChannel on the answerer side
-        // The state transition guards make this safe
+        setupDataChannelCallbacks(_dataChannelId, true);
     }
 
     void WebRTCConnection::setupUnreliableDataChannel() {
-        rtc::DataChannelInit init;
+        rtcDataChannelInit init;
+        std::memset(&init, 0, sizeof(init));
         init.reliability.unordered = true;
-        init.reliability.maxRetransmits = 0; // No retransmissions
+        init.reliability.maxRetransmits = 0;
 
-        _unreliableDataChannel = _peerConnection->createDataChannel(_unreliableChannelLabel, init);
-        setupDataChannelCallbacks(_unreliableDataChannel);
-        // Note: callbacks may be registered again via onDataChannel on the answerer side
-        // The state transition guards make this safe
-    }
-
-    void WebRTCConnection::setupDataChannelCallbacks(std::shared_ptr<rtc::DataChannel> channel) {
-        if (!channel) return;
-
-        // Determine if this is the reliable channel
-        bool isReliableChannel = (channel->label() == _dataChannelLabel);
-
-        channel->onOpen([this, isReliableChannel, channel]() {
-            // Check destroying flag before doing anything (including logging or locking)
-            if (_destroying.load(std::memory_order_acquire)) return;
-
-            // Debug output
-            ENTROPY_LOG_INFO(std::string("Data channel opened: ") + channel->label());
-
-            if (!isReliableChannel) return;
-
-            std::optional<ConnectionState> pending;
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                // Only transition to Connected if we're not already there
-                // This is the definitive source for Connected state
-                if (_state != ConnectionState::Connected) {
-                    _state = ConnectionState::Connected;
-
-                    // Record connection time
-                    auto now = std::chrono::system_clock::now();
-                    _stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        now.time_since_epoch()
-                    ).count();
-                    _stats.lastActivityTime = _stats.connectTime;
-
-                    pending = ConnectionState::Connected;
-                }
-            }
-
-            // Fire state change callback outside mutex to prevent deadlock/reentrancy
-            if (pending && !_destroying.load(std::memory_order_acquire)) {
-                onStateChanged(*pending);
-            }
-        });
-
-        channel->onClosed([this, isReliableChannel]() {
-            // Check destroying flag before doing anything (including locking)
-            if (_destroying.load(std::memory_order_acquire)) return;
-
-            if (!isReliableChannel) return;
-
-            std::optional<ConnectionState> pending;
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                // Only transition to Disconnected if we're not already there
-                if (_state != ConnectionState::Disconnected && _state != ConnectionState::Failed) {
-                    _state = ConnectionState::Disconnected;
-                    pending = ConnectionState::Disconnected;
-                }
-            }
-
-            // Fire state change callback outside mutex to prevent deadlock/reentrancy
-            if (pending && !_destroying.load(std::memory_order_acquire)) {
-                onStateChanged(*pending);
-            }
-        });
-
-        channel->onMessage([this](auto data) {
-            // Check destroying flag before doing anything
-            if (_destroying.load(std::memory_order_acquire)) return;
-
-            std::vector<uint8_t> message;
-
-            if (std::holds_alternative<std::string>(data)) {
-                const auto& str = std::get<std::string>(data);
-                message.assign(str.begin(), str.end());
-            } else {
-                const auto& binary = std::get<rtc::binary>(data);
-                message.resize(binary.size());
-                for (size_t i = 0; i < binary.size(); ++i) {
-                    message[i] = static_cast<uint8_t>(binary[i]);
-                }
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                _stats.bytesReceived += message.size();
-                _stats.messagesReceived++;
-                _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count();
-            }
-
-            if (!_destroying.load(std::memory_order_acquire)) {
-                onMessageReceived(message);
-            }
-        });
-
-        channel->onError([](std::string error) {
-            // Optional: could expose error callback to application
-        });
-    }
-
-    void WebRTCConnection::updateConnectionState(rtc::PeerConnection::State state) {
-        // Check destroying flag before doing anything (including locking)
-        if (_destroying.load(std::memory_order_acquire)) return;
-
-        std::optional<ConnectionState> pending;
-
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-
-            ConnectionState newState = _state;  // Track if state actually changes
-
-            switch (state) {
-                case rtc::PeerConnection::State::New:
-                case rtc::PeerConnection::State::Connecting:
-                    // Only update to Connecting if we haven't reached Connected yet
-                    if (_state != ConnectionState::Connected) {
-                        newState = ConnectionState::Connecting;
-                    }
-                    break;
-
-                case rtc::PeerConnection::State::Connected:
-                    // Don't set Connected here - wait for data channel to open
-                    // Data channel opening is the definitive signal that we're ready
-                    break;
-
-                case rtc::PeerConnection::State::Disconnected:
-                    // Peer connection disconnected - mark as such
-                    newState = ConnectionState::Disconnected;
-                    break;
-
-                case rtc::PeerConnection::State::Failed:
-                    // Connection failed - mark as failed
-                    newState = ConnectionState::Failed;
-                    break;
-
-                case rtc::PeerConnection::State::Closed:
-                    // Connection closed - mark as disconnected
-                    newState = ConnectionState::Disconnected;
-                    break;
-            }
-
-            // Only update state if it actually changed
-            if (newState != _state) {
-                _state = newState;
-                pending = _state;
-            }
+        _unreliableDataChannelId = rtcCreateDataChannelEx(_peerConnectionId,
+            _unreliableChannelLabel.c_str(), &init);
+        if (_unreliableDataChannelId < 0) {
+            throw std::runtime_error("Failed to create unreliable data channel");
         }
 
-        // Fire state change callback outside mutex to prevent deadlock/reentrancy
-        if (pending && !_destroying.load(std::memory_order_acquire)) {
-            onStateChanged(*pending);
-        }
+        setupDataChannelCallbacks(_unreliableDataChannelId, false);
+    }
+
+    void WebRTCConnection::setupDataChannelCallbacks(int channelId, bool isReliable) {
+        rtcSetUserPointer(channelId, this);
+        rtcSetOpenCallback(channelId, onOpenCallback);
+        rtcSetClosedCallback(channelId, onClosedCallback);
+        rtcSetMessageCallback(channelId, onMessageCallback);
     }
 
 } // namespace EntropyEngine::Networking

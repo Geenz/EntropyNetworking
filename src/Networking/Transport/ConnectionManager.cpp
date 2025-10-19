@@ -45,9 +45,18 @@ ConnectionManager::ConnectionManager(size_t capacity)
 }
 
 ConnectionManager::~ConnectionManager() {
-    // Disconnect all connections
+    // Clear all user callbacks first to prevent new invocations
+    for (auto& slot : _connectionSlots) {
+        std::atomic_store(&slot.userMessageCb, std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>>());
+        std::atomic_store(&slot.userStateCb, std::shared_ptr<std::function<void(ConnectionState)>>());
+    }
+
+    // Proactively clear backend callbacks to break captures into this manager,
+    // then disconnect all connections.
     for (auto& slot : _connectionSlots) {
         if (slot.connection) {
+            slot.connection->setStateCallback(nullptr);
+            slot.connection->setMessageCallback(nullptr);
             slot.connection->disconnect();
         }
     }
@@ -82,6 +91,16 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
 
     // Increment generation
     slot.generation.fetch_add(1, std::memory_order_acq_rel);
+
+    // Clear user callbacks BEFORE destroying connection to prevent race with in-flight callbacks
+    std::atomic_store(&slot.userMessageCb, std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>>());
+    std::atomic_store(&slot.userStateCb, std::shared_ptr<std::function<void(ConnectionState)>>());
+
+    // Clear backend callbacks to break captures into this manager
+    if (slot.connection) {
+        slot.connection->setStateCallback(nullptr);
+        slot.connection->setMessageCallback(nullptr);
+    }
 
     // Clear connection
     slot.connection.reset();
@@ -266,7 +285,12 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
     slot.type = type;
 
     // Wire manager-owned callbacks BEFORE taking the initial state snapshot
-    slot.connection->setStateCallback([this, index](ConnectionState newState) noexcept {
+    // Capture current generation to guard against stale callbacks on slot reuse
+    slot.connection->setStateCallback([this, index, gen = generation](ConnectionState newState) noexcept {
+        // Generation guard: ignore callbacks for recycled slots
+        if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
+            return;
+        }
         // Publish state and update metrics on real transitions only
         this->handleStatePublish(index, newState);
         // Fan out to user callback using atomic_load on shared_ptr (no slot mutex)
@@ -277,7 +301,11 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
     });
 
     // Manager-owned message callback: increment metrics and fan out to user callback
-    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) noexcept {
+    slot.connection->setMessageCallback([this, index, gen = generation](const std::vector<uint8_t>& data) noexcept {
+        // Generation guard: ignore callbacks for recycled slots
+        if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
+            return;
+        }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
@@ -332,7 +360,12 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
 
     // Wire up manager-owned callbacks BEFORE connecting to ensure we capture all state transitions
     // This is critical for synchronous connections (Unix sockets) where connect() completes immediately
-    slot.connection->setStateCallback([this, index](ConnectionState newState) noexcept {
+    uint32_t generation = slot.generation.load(std::memory_order_acquire);
+    slot.connection->setStateCallback([this, index, gen = generation](ConnectionState newState) noexcept {
+        // Generation guard: ignore callbacks for recycled slots
+        if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
+            return;
+        }
         // Publish state and update metrics on real transitions only
         this->handleStatePublish(index, newState);
         // Fan out to user callback using atomic_load on shared_ptr (no slot mutex)
@@ -342,7 +375,11 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
         }
     });
 
-    slot.connection->setMessageCallback([this, index](const std::vector<uint8_t>& data) noexcept {
+    slot.connection->setMessageCallback([this, index, gen = generation](const std::vector<uint8_t>& data) noexcept {
+        // Generation guard: ignore callbacks for recycled slots
+        if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
+            return;
+        }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);

@@ -33,12 +33,10 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
     InProcessSignaling signaling;
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
-    // Peer 1 (offerer) setup
-    WebRTCConfig config1 = localHermeticRtcConfig();
+    // Peer 1 (offerer) setup - polite peer for perfect negotiation
+    // Peer 2 (answerer) setup - impolite peer
+    auto [config1, config2] = localHermeticRtcConfigPair();
     WebRTCConnection peer1(config1, callbacks1);
-
-    // Peer 2 (answerer) setup
-    WebRTCConfig config2 = localHermeticRtcConfig();
     WebRTCConnection peer2(config2, callbacks2);
 
     // Register peers with signaling helper
@@ -140,10 +138,9 @@ TEST(WebRTCIntegrationTests, TwoPeerBidirectionalMessaging) {
     InProcessSignaling signaling;
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
-    WebRTCConfig config = localHermeticRtcConfig();
-
-    WebRTCConnection peer1(config, callbacks1);
-    WebRTCConnection peer2(config, callbacks2);
+    auto [config1, config2] = localHermeticRtcConfigPair();
+    WebRTCConnection peer1(config1, callbacks1);
+    WebRTCConnection peer2(config2, callbacks2);
     signaling.setPeers(&peer1, &peer2);
 
     std::atomic<bool> peer1Connected{false};
@@ -201,10 +198,9 @@ TEST(WebRTCIntegrationTests, TwoPeerDisconnectDuringConnection) {
     InProcessSignaling signaling;
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
-    WebRTCConfig config = localHermeticRtcConfig();
-
-    WebRTCConnection peer1(config, callbacks1);
-    WebRTCConnection peer2(config, callbacks2);
+    auto [config1, config2] = localHermeticRtcConfigPair();
+    WebRTCConnection peer1(config1, callbacks1);
+    WebRTCConnection peer2(config2, callbacks2);
     signaling.setPeers(&peer1, &peer2);
 
     // Start connection
@@ -231,10 +227,9 @@ TEST(WebRTCIntegrationTests, TwoPeerReconnection) {
     InProcessSignaling signaling;
     auto [cb1, cb2] = signaling.createCallbackPair();
 
-    WebRTCConfig cfg = localHermeticRtcConfig();
-
-    WebRTCConnection a(cfg, cb1);
-    WebRTCConnection b(cfg, cb2);
+    auto [cfg1, cfg2] = localHermeticRtcConfigPair();
+    WebRTCConnection a(cfg1, cb1);
+    WebRTCConnection b(cfg2, cb2);
     signaling.setPeers(&a, &b);
 
     std::atomic<bool> aUp{false}, bUp{false};
@@ -311,10 +306,9 @@ TEST(WebRTCIntegrationTests, TwoPeerStateCallback) {
     InProcessSignaling signaling;
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
-    WebRTCConfig config = localHermeticRtcConfig();
-
-    WebRTCConnection peer1(config, callbacks1);
-    WebRTCConnection peer2(config, callbacks2);
+    auto [config1, config2] = localHermeticRtcConfigPair();
+    WebRTCConnection peer1(config1, callbacks1);
+    WebRTCConnection peer2(config2, callbacks2);
     signaling.setPeers(&peer1, &peer2);
 
     // Track all state transitions for peer1
@@ -424,10 +418,9 @@ TEST(WebRTCIntegrationTests, TwoPeerMultipleICEServers) {
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
     // Hermetic local config (loopback + ICE-TCP)
-    WebRTCConfig config = localHermeticRtcConfig();
-
-    WebRTCConnection peer1(config, callbacks1);
-    WebRTCConnection peer2(config, callbacks2);
+    auto [config1, config2] = localHermeticRtcConfigPair();
+    WebRTCConnection peer1(config1, callbacks1);
+    WebRTCConnection peer2(config2, callbacks2);
     signaling.setPeers(&peer1, &peer2);
 
     std::atomic<bool> peer1Connected{false};
