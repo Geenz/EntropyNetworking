@@ -13,9 +13,10 @@ project(EntropyNetworking
 )
 
 # Options
-option(BUILD_SHARED_LIBS "Build as a shared library" OFF)
-option(BUILD_TESTS "Enable/build tests for EntropyNetworking" OFF)
-option(BUILD_EXAMPLES "Build EntropyNetworking example executables" OFF)
+# EntropyNetworking MUST ALWAYS be built as a static library - shared linking is not supported
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "EntropyNetworking only supports static linking" FORCE)
+option(BUILD_TESTS "Enable/build tests for EntropyNetworking" ON)
+option(BUILD_EXAMPLES "Build EntropyNetworking example executables" ON)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
@@ -49,8 +50,6 @@ set(NETWORKING_SOURCES
     src/Networking/Core/PropertyRegistry.cpp
     src/Networking/Core/PropertyTypes.cpp
     src/Networking/Protocol/MessageSerializer.cpp
-    src/Networking/Transport/UnixSocketConnection.cpp
-    src/Networking/Transport/UnixSocketServer.cpp
     src/Networking/Transport/WebRTCConnection.cpp
     src/Networking/Transport/ConnectionManager.cpp
     src/Networking/Transport/ConnectionHandle.cpp
@@ -61,7 +60,23 @@ set(NETWORKING_SOURCES
     ${CAPNP_SRCS}
 )
 
-# Add platform-specific sources
+# Unix-only local IPC (Unix domain sockets)
+if(UNIX OR APPLE)
+    list(APPEND NETWORKING_SOURCES
+        src/Networking/Transport/UnixSocketConnection.cpp
+        src/Networking/Transport/UnixSocketServer.cpp
+    )
+endif()
+
+# Windows local IPC (Named Pipes)
+if(WIN32)
+    list(APPEND NETWORKING_SOURCES
+        src/Networking/Transport/NamedPipeConnection.cpp
+        src/Networking/Transport/NamedPipeServer.cpp
+    )
+endif()
+
+# Apple-specific XPC transport
 if(APPLE)
     list(APPEND NETWORKING_SOURCES
         src/Networking/Transport/XPCConnection.cpp
@@ -69,8 +84,8 @@ if(APPLE)
     )
 endif()
 
-# Create library
-add_library(EntropyNetworking ${NETWORKING_SOURCES})
+# Create library (STATIC only - shared libs are not supported)
+add_library(EntropyNetworking STATIC ${NETWORKING_SOURCES})
 
 # Set target properties
 target_compile_features(EntropyNetworking PUBLIC cxx_std_20)
@@ -97,7 +112,7 @@ target_link_libraries(EntropyNetworking
         OpenSSL::SSL
         OpenSSL::Crypto
         LibDataChannel::LibDataChannel
-        $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
+        zstd::libzstd
 )
 
 # Platform and compiler-specific settings

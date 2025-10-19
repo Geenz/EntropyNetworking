@@ -8,12 +8,17 @@
  */
 
 #include "ConnectionManager.h"
-#include "UnixSocketConnection.h"
 #include "WebRTCConnection.h"
 
 #if defined(__APPLE__)
 #include "XPCConnection.h"
 #include <TargetConditionals.h>
+#endif
+
+#if defined(_WIN32)
+#include "NamedPipeConnection.h"
+#elif defined(__unix__) || defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+#include "UnixSocketConnection.h"
 #endif
 
 #include <format>
@@ -154,7 +159,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
         // Linux/Android - use Unix sockets
         return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
 #elif defined(_WIN32)
-        throw std::runtime_error("Named pipe backend not yet implemented");
+        return std::make_unique<NamedPipeConnection>(config.endpoint, &config);
 #else
         throw std::runtime_error("No local backend available for this platform");
 #endif
@@ -169,7 +174,11 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 #endif
 
         case ConnectionBackend::NamedPipe:
-            throw std::runtime_error("Named pipe backend not yet implemented");
+#if defined(_WIN32)
+            return std::make_unique<NamedPipeConnection>(config.endpoint, &config);
+#else
+            throw std::runtime_error("Named pipe backend not supported on this platform");
+#endif
 
         case ConnectionBackend::XPC:
 #if defined(__APPLE__)

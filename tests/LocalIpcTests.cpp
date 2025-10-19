@@ -20,6 +20,11 @@ using namespace EntropyEngine::Networking;
 
 // Integration test for Unix local IPC using LocalServer + ConnectionManager
 // This test exercises an actual Unix domain socket on platforms where it's available.
+#if defined(_WIN32)
+TEST(LocalIpcTests, UnixLocalServerClientEcho) {
+    GTEST_SKIP() << "Unix local IPC test skipped on Windows; NamedPipe backend is available but this test targets Unix sockets.";
+}
+#else
 TEST(LocalIpcTests, UnixLocalServerClientEcho) {
     const std::string socketPath = "/tmp/entropy_test_local.sock";
 
@@ -121,3 +126,4 @@ TEST(LocalIpcTests, UnixLocalServerClientEcho) {
     serverStop.store(true, std::memory_order_release);
     if (serverThread.joinable()) serverThread.join();
 }
+#endif
