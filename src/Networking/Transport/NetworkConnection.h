@@ -41,7 +41,30 @@ public:
     virtual bool isConnected() const = 0;
 
     // Message transmission
+    /**
+     * @brief Sends data over the reliable channel
+     *
+     * Thread-Safety: All send operations are serialized through a per-connection
+     * mutex. For high-throughput scenarios with large messages, this can become
+     * a bottleneck. Consider:
+     * - Using sendUnreliable for non-critical data
+     * - Batching multiple small messages into larger payloads
+     * - Using multiple connections for parallel sends
+     *
+     * @param data Bytes to send
+     * @return Result indicating success or failure reason
+     */
     virtual Result<void> send(const std::vector<uint8_t>& data) = 0;
+
+    /**
+     * @brief Sends data over the unreliable channel (if available)
+     *
+     * Falls back to reliable channel if unreliable is not supported.
+     * Thread-Safety: Same mutex contention considerations as send().
+     *
+     * @param data Bytes to send
+     * @return Result indicating success or failure reason
+     */
     virtual Result<void> sendUnreliable(const std::vector<uint8_t>& data) = 0;
 
     // Non-blocking send API (default: not supported, returns InvalidParameter)

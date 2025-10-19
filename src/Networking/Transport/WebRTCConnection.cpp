@@ -201,6 +201,11 @@ namespace EntropyEngine::Networking {
         auto* self = static_cast<WebRTCConnection*>(user);
         if (self->_destroying.load(std::memory_order_acquire)) return;
 
+        // Performance note: This creates a vector (heap allocation) per message.
+        // For high message rates (>10K msg/s), consider:
+        // - Buffer pool with reusable vectors
+        // - Callback API accepting std::span<const uint8_t> (breaking change)
+        // Current approach prioritizes API simplicity over allocation efficiency.
         std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
                                    reinterpret_cast<const uint8_t*>(message) + size);
 
