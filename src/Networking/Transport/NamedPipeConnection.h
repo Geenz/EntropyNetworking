@@ -58,6 +58,7 @@ private:
     Result<void> sendInternal(const std::vector<uint8_t>& data);
 
     std::wstring toWide(const std::string& s) const;
+    std::string normalizePipeName(std::string name) const;
 
     std::string _pipeName;
 #ifdef _WIN32

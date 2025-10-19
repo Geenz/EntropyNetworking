@@ -9,6 +9,7 @@ add_executable(EntropyNetworkingTests
     PropertyTypesTests.cpp
     ConnectionManagerTests.cpp
     WebRTCConnectionTests.cpp
+    WebRTCIntegrationTests.cpp
     LocalIpcTests.cpp
     CallbackFanoutTests.cpp
     ConnectionManagerLifecycleTests.cpp

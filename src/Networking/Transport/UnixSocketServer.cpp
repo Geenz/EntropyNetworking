@@ -18,6 +18,7 @@
 #endif
 #endif
 
+#if defined(__unix__) || defined(__APPLE__)
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -262,3 +263,5 @@ std::unique_ptr<LocalServer> createLocalServer(
 }
 
 } // namespace EntropyEngine::Networking
+
+#endif // defined(__unix__) || defined(__APPLE__)

@@ -93,6 +93,7 @@ namespace EntropyEngine::Networking {
         std::shared_ptr<rtc::DataChannel> _unreliableDataChannel;
 
         std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
+        std::atomic<bool> _destroying{false};
         mutable std::mutex _mutex;
         ConnectionStats _stats;
     };

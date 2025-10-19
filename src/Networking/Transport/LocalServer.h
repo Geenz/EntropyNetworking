@@ -87,6 +87,8 @@ struct LocalServerConfig {
     int acceptPollIntervalMs = 500;    ///< poll interval or wait timeout in accept loop
     int chmodMode = -1;                ///< if >= 0, chmod the socket path to this mode (Unix)
     bool unlinkOnStart = true;         ///< if true, unlink socket path before bind (Unix)
+    size_t pipeOutBufferSize = 1 * 1024 * 1024;  ///< Named pipe output buffer size (Windows)
+    size_t pipeInBufferSize = 1 * 1024 * 1024;   ///< Named pipe input buffer size (Windows)
 };
 
 /**

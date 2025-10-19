@@ -8,29 +8,53 @@
  */
 
 #include "NamedPipeServer.h"
+
+#ifdef _WIN32
+
 #include "NamedPipeConnection.h"
 #include "ConnectionManager.h"
 #include <Logging/Logger.h>
 #include <chrono>
 #include <string>
-
-#ifdef _WIN32
 #include <windows.h>
-#endif
 
 namespace EntropyEngine::Networking {
 
 NamedPipeServer::NamedPipeServer(ConnectionManager* connMgr, std::string pipeName)
     : _connMgr(connMgr)
-    , _pipeName(std::move(pipeName))
+    , _pipeName(normalizePipeName(std::move(pipeName)))
+    , _pipeNameWide(toWide(_pipeName))
 {
 }
 
 NamedPipeServer::NamedPipeServer(ConnectionManager* connMgr, std::string pipeName, LocalServerConfig config)
     : _connMgr(connMgr)
-    , _pipeName(std::move(pipeName))
+    , _pipeName(normalizePipeName(std::move(pipeName)))
+    , _pipeNameWide(toWide(_pipeName))
     , _config(std::move(config))
 {
+}
+
+std::string NamedPipeServer::normalizePipeName(std::string name) const {
+    // If already in Windows pipe format, return as-is
+    if (name.starts_with("\\\\.\\pipe\\") || name.starts_with("\\\\?\\pipe\\")) {
+        return name;
+    }
+
+    // Extract basename from Unix-style path (e.g., "/tmp/foo.sock" -> "foo.sock")
+    size_t lastSlash = name.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        name = name.substr(lastSlash + 1);
+    }
+
+    // Remove file extension if present (e.g., "foo.sock" -> "foo")
+    size_t lastDot = name.find_last_of('.');
+    if (lastDot != std::string::npos) {
+        name = name.substr(0, lastDot);
+    }
+
+    // Convert to Windows named pipe format
+    return "\\\\.\\pipe\\" + name;
 }
 
 NamedPipeServer::~NamedPipeServer() {
@@ -38,7 +62,6 @@ NamedPipeServer::~NamedPipeServer() {
 }
 
 std::wstring NamedPipeServer::toWide(const std::string& s) const {
-#ifdef _WIN32
     if (s.empty()) return std::wstring();
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
     if (len <= 0) return std::wstring();
@@ -46,29 +69,21 @@ std::wstring NamedPipeServer::toWide(const std::string& s) const {
     w.resize(static_cast<size_t>(len - 1));
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
     return w;
-#else
-    return std::wstring();
-#endif
 }
 
 Result<void> NamedPipeServer::listen() {
-#ifndef _WIN32
-    return Result<void>::err(NetworkError::InvalidParameter, "Named pipes only supported on Windows");
-#else
     if (_listening.load(std::memory_order_acquire)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Already listening");
     }
 
-    std::wstring wname = toWide(_pipeName);
-
-    // Create initial instance
+    // Create initial instance with configurable buffer sizes (use cached wide string)
     _serverPipe = CreateNamedPipeW(
-        wname.c_str(),
+        _pipeNameWide.c_str(),
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
         PIPE_UNLIMITED_INSTANCES,
-        1 * 1024 * 1024,  // out buffer
-        1 * 1024 * 1024,  // in buffer
+        static_cast<DWORD>(_config.pipeOutBufferSize),
+        static_cast<DWORD>(_config.pipeInBufferSize),
         0,                // default timeout
         nullptr           // default security
     );
@@ -82,13 +97,9 @@ Result<void> NamedPipeServer::listen() {
     _listening.store(true, std::memory_order_release);
     ENTROPY_LOG_INFO(std::string("Named pipe server listening on ") + _pipeName);
     return Result<void>::ok();
-#endif
 }
 
 ConnectionHandle NamedPipeServer::accept() {
-#ifndef _WIN32
-    return ConnectionHandle();
-#else
     if (!_listening.load(std::memory_order_acquire)) {
         return ConnectionHandle();
     }
@@ -155,16 +166,15 @@ ConnectionHandle NamedPipeServer::accept() {
     ENTROPY_LOG_INFO("Accepted Windows named pipe connection");
     auto backend = std::make_unique<NamedPipeConnection>(_serverPipe, "accepted");
 
-    // Prepare next instance for future accepts if still listening
+    // Prepare next instance for future accepts if still listening (use cached wide string)
     if (_listening.load(std::memory_order_acquire)) {
-        std::wstring wname = toWide(_pipeName);
         HANDLE next = CreateNamedPipeW(
-            wname.c_str(),
+            _pipeNameWide.c_str(),
             PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             PIPE_UNLIMITED_INSTANCES,
-            1 * 1024 * 1024,
-            1 * 1024 * 1024,
+            static_cast<DWORD>(_config.pipeOutBufferSize),
+            static_cast<DWORD>(_config.pipeInBufferSize),
             0,
             nullptr
         );
@@ -179,13 +189,9 @@ ConnectionHandle NamedPipeServer::accept() {
     }
 
     return _connMgr->adoptConnection(std::move(backend), ConnectionType::Local);
-#endif
 }
 
 Result<void> NamedPipeServer::close() {
-#ifndef _WIN32
-    return Result<void>::ok();
-#else
     if (!_listening.load(std::memory_order_acquire)) {
         return Result<void>::ok();
     }
@@ -202,7 +208,6 @@ Result<void> NamedPipeServer::close() {
 
     ENTROPY_LOG_INFO(std::string("Named pipe server closed: ") + _pipeName);
     return Result<void>::ok();
-#endif
 }
 
 uint64_t NamedPipeServer::classHash() const noexcept {
@@ -224,12 +229,7 @@ std::unique_ptr<LocalServer> createLocalServer(
     ConnectionManager* connMgr,
     const std::string& endpoint
 ) {
-#ifdef _WIN32
     return std::make_unique<NamedPipeServer>(connMgr, endpoint);
-#else
-    (void)connMgr; (void)endpoint;
-    throw std::runtime_error("createLocalServer (NamedPipe) called on non-Windows platform");
-#endif
 }
 
 std::unique_ptr<LocalServer> createLocalServer(
@@ -237,12 +237,9 @@ std::unique_ptr<LocalServer> createLocalServer(
     const std::string& endpoint,
     const LocalServerConfig& config
 ) {
-#ifdef _WIN32
     return std::make_unique<NamedPipeServer>(connMgr, endpoint, config);
-#else
-    (void)connMgr; (void)endpoint; (void)config;
-    throw std::runtime_error("createLocalServer (NamedPipe) called on non-Windows platform");
-#endif
 }
 
 } // namespace EntropyEngine::Networking
+
+#endif // _WIN32

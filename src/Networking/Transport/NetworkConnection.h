@@ -17,6 +17,7 @@
 #include <functional>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 namespace EntropyEngine::Networking {
 
@@ -53,26 +54,43 @@ public:
     virtual ConnectionType getType() const = 0;
     virtual ConnectionStats getStats() const = 0;
 
-    // Callbacks
-    void setMessageCallback(MessageCallback callback) noexcept { _messageCallback = std::move(callback); }
-    void setStateCallback(StateCallback callback) noexcept { _stateCallback = std::move(callback); }
+    // Callbacks (thread-safe)
+    void setMessageCallback(MessageCallback callback) noexcept {
+        std::lock_guard<std::mutex> lock(_cbMutex);
+        _messageCallback = std::move(callback);
+    }
+    void setStateCallback(StateCallback callback) noexcept {
+        std::lock_guard<std::mutex> lock(_cbMutex);
+        _stateCallback = std::move(callback);
+    }
 
 protected:
     NetworkConnection() = default;
 
     void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
-        if (_messageCallback) {
-            _messageCallback(data);
+        MessageCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_cbMutex);
+            cb = _messageCallback; // copy under lock
+        }
+        if (cb) {
+            cb(data); // invoke outside lock
         }
     }
 
     void onStateChanged(ConnectionState state) noexcept {
-        if (_stateCallback) {
-            _stateCallback(state);
+        StateCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_cbMutex);
+            cb = _stateCallback; // copy under lock
+        }
+        if (cb) {
+            cb(state); // invoke outside lock
         }
     }
 
 private:
+    mutable std::mutex _cbMutex;
     MessageCallback _messageCallback;
     StateCallback _stateCallback;
 };

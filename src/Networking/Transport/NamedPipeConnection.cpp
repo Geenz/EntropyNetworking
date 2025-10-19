@@ -7,28 +7,27 @@
  * This file is part of the Entropy Networking project.
  */
 
+#ifdef _WIN32
+
 #include "NamedPipeConnection.h"
 #include "../Core/ConnectionTypes.h"
 #include <Logging/Logger.h>
 #include <chrono>
 #include <cstring>
 #include <algorithm>
-
-#ifdef _WIN32
 #include <windows.h>
-#endif
 
 namespace EntropyEngine::Networking {
 
 static constexpr size_t FRAME_HEADER_SIZE = sizeof(uint32_t);
 
 NamedPipeConnection::NamedPipeConnection(std::string pipeName)
-    : _pipeName(std::move(pipeName))
+    : _pipeName(normalizePipeName(std::move(pipeName)))
 {
 }
 
 NamedPipeConnection::NamedPipeConnection(std::string pipeName, const ConnectionConfig* cfg)
-    : _pipeName(std::move(pipeName))
+    : _pipeName(normalizePipeName(std::move(pipeName)))
 {
     if (cfg) {
         _connectTimeoutMs = cfg->connectTimeoutMs;
@@ -39,7 +38,28 @@ NamedPipeConnection::NamedPipeConnection(std::string pipeName, const ConnectionC
     }
 }
 
-#ifdef _WIN32
+std::string NamedPipeConnection::normalizePipeName(std::string name) const {
+    // If already in Windows pipe format, return as-is
+    if (name.starts_with("\\\\.\\pipe\\") || name.starts_with("\\\\?\\pipe\\")) {
+        return name;
+    }
+
+    // Extract basename from Unix-style path (e.g., "/tmp/foo.sock" -> "foo.sock")
+    size_t lastSlash = name.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        name = name.substr(lastSlash + 1);
+    }
+
+    // Remove file extension if present (e.g., "foo.sock" -> "foo")
+    size_t lastDot = name.find_last_of('.');
+    if (lastDot != std::string::npos) {
+        name = name.substr(0, lastDot);
+    }
+
+    // Convert to Windows named pipe format
+    return "\\\\.\\pipe\\" + name;
+}
+
 NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*peerInfo*/)
     : _pipe(connectedPipe)
 {
@@ -58,14 +78,12 @@ NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*pee
     _shouldStop = false;
     _receiveThread = std::thread([this]() { receiveLoop(); });
 }
-#endif
 
 NamedPipeConnection::~NamedPipeConnection() {
     (void)disconnect();
 }
 
 std::wstring NamedPipeConnection::toWide(const std::string& s) const {
-#ifdef _WIN32
     if (s.empty()) return std::wstring();
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
     if (len <= 0) return std::wstring();
@@ -73,15 +91,9 @@ std::wstring NamedPipeConnection::toWide(const std::string& s) const {
     w.resize(static_cast<size_t>(len - 1));
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
     return w;
-#else
-    return std::wstring();
-#endif
 }
 
 Result<void> NamedPipeConnection::connect() {
-#ifndef _WIN32
-    return Result<void>::err(NetworkError::InvalidParameter, "Named pipes only supported on Windows");
-#else
     if (_state != ConnectionState::Disconnected) {
         return Result<void>::err(NetworkError::InvalidParameter, "Already connected or connecting");
     }
@@ -108,7 +120,7 @@ Result<void> NamedPipeConnection::connect() {
         0,
         nullptr,
         OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
         nullptr
     );
 
@@ -122,7 +134,15 @@ Result<void> NamedPipeConnection::connect() {
 
     // Set to byte mode and blocking
     DWORD mode = PIPE_READMODE_BYTE | PIPE_WAIT;
-    SetNamedPipeHandleState(_pipe, &mode, nullptr, nullptr);
+    if (!SetNamedPipeHandleState(_pipe, &mode, nullptr, nullptr)) {
+        DWORD err = GetLastError();
+        CloseHandle(_pipe);
+        _pipe = INVALID_HANDLE_VALUE;
+        _state = ConnectionState::Failed;
+        onStateChanged(ConnectionState::Failed);
+        ENTROPY_LOG_ERROR("SetNamedPipeHandleState failed: " + std::to_string(err));
+        return Result<void>::err(NetworkError::ConnectionClosed, "SetNamedPipeHandleState failed: " + std::to_string(err));
+    }
 
     _state = ConnectionState::Connected;
     onStateChanged(ConnectionState::Connected);
@@ -141,12 +161,16 @@ Result<void> NamedPipeConnection::connect() {
     _receiveThread = std::thread([this]() { receiveLoop(); });
 
     return Result<void>::ok();
-#endif
 }
 
 Result<void> NamedPipeConnection::disconnect() {
-#ifdef _WIN32
     _shouldStop = true;
+
+    // Cancel any blocking I/O operations to allow receive thread to exit
+    if (_pipe != INVALID_HANDLE_VALUE) {
+        CancelIoEx(_pipe, nullptr);
+    }
+
     if (_receiveThread.joinable()) {
         _receiveThread.join();
     }
@@ -172,9 +196,6 @@ Result<void> NamedPipeConnection::disconnect() {
     _state = ConnectionState::Disconnected;
     onStateChanged(ConnectionState::Disconnected);
     return Result<void>::ok();
-#else
-    return Result<void>::ok();
-#endif
 }
 
 Result<void> NamedPipeConnection::send(const std::vector<uint8_t>& data) {
@@ -197,7 +218,6 @@ Result<void> NamedPipeConnection::trySend(const std::vector<uint8_t>& data) {
 }
 
 Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data) {
-#ifdef _WIN32
     if (_state != ConnectionState::Connected) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -207,27 +227,71 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
 
     std::lock_guard<std::mutex> lock(_sendMutex);
 
-    // Build frame header (little-endian length)
+    // Build frame header (native byte order - local IPC only)
     uint32_t len = static_cast<uint32_t>(data.size());
 
-    DWORD written = 0;
-    BOOL ok = WriteFile(_pipe, &len, sizeof(len), &written, nullptr);
-    if (!ok || written != sizeof(len)) {
-        DWORD err = GetLastError();
-        ENTROPY_LOG_WARNING("WriteFile header failed: " + std::to_string(err));
-        return Result<void>::err(NetworkError::ConnectionClosed, "Write header failed: " + std::to_string(err));
+    // Write header with overlapped I/O
+    OVERLAPPED ovh{};
+    ovh.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!ovh.hEvent) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "CreateEvent failed for pipe write header");
     }
 
+    DWORD written = 0;
+    BOOL ok = WriteFile(_pipe, &len, sizeof(len), &written, &ovh);
+    if (!ok) {
+        DWORD err = GetLastError();
+        if (err == ERROR_IO_PENDING) {
+            DWORD bytes = 0;
+            if (!GetOverlappedResult(_pipe, &ovh, &bytes, TRUE)) {
+                DWORD e2 = GetLastError();
+                CloseHandle(ovh.hEvent);
+                return Result<void>::err(NetworkError::ConnectionClosed,
+                                         "Header write failed: " + std::to_string(e2));
+            }
+            written = bytes;
+        } else {
+            CloseHandle(ovh.hEvent);
+            return Result<void>::err(NetworkError::ConnectionClosed, "Write header failed: " + std::to_string(err));
+        }
+    }
+    if (written != sizeof(len)) {
+        CloseHandle(ovh.hEvent);
+        return Result<void>::err(NetworkError::ConnectionClosed, "Short header write");
+    }
+    CloseHandle(ovh.hEvent);
+
+    // Write body in chunks with overlapped I/O
     size_t total = 0;
     const uint8_t* ptr = data.data();
     while (total < data.size()) {
         DWORD toWrite = static_cast<DWORD>(std::min<size_t>(data.size() - total, 64 * 1024));
+        OVERLAPPED ov{};
+        ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ov.hEvent) {
+            return Result<void>::err(NetworkError::ConnectionClosed, "CreateEvent failed for pipe write body");
+        }
         written = 0;
-        ok = WriteFile(_pipe, ptr + total, toWrite, &written, nullptr);
-        if (!ok || written == 0) {
+        ok = WriteFile(_pipe, ptr + total, toWrite, &written, &ov);
+        if (!ok) {
             DWORD err = GetLastError();
-            ENTROPY_LOG_WARNING("WriteFile body failed: " + std::to_string(err));
-            return Result<void>::err(NetworkError::ConnectionClosed, "Write body failed: " + std::to_string(err));
+            if (err == ERROR_IO_PENDING) {
+                DWORD bytes = 0;
+                if (!GetOverlappedResult(_pipe, &ov, &bytes, TRUE)) {
+                    DWORD e2 = GetLastError();
+                    CloseHandle(ov.hEvent);
+                    return Result<void>::err(NetworkError::ConnectionClosed,
+                                             "Body write failed: " + std::to_string(e2));
+                }
+                written = bytes;
+            } else {
+                CloseHandle(ov.hEvent);
+                return Result<void>::err(NetworkError::ConnectionClosed, "Write body failed: " + std::to_string(err));
+            }
+        }
+        CloseHandle(ov.hEvent);
+        if (written == 0) {
+            return Result<void>::err(NetworkError::ConnectionClosed, "Zero bytes written to pipe body");
         }
         total += written;
     }
@@ -241,33 +305,53 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
 
     return Result<void>::ok();
-#else
-    (void)data;
-    return Result<void>::err(NetworkError::InvalidParameter, "Named pipes only supported on Windows");
-#endif
 }
 
 void NamedPipeConnection::receiveLoop() {
-#ifdef _WIN32
     std::vector<uint8_t> buffer;
     buffer.reserve(64 * 1024);
 
     while (!_shouldStop.load(std::memory_order_acquire)) {
-        // Read header
+        // Read header (native byte order - local IPC only) with overlapped I/O
         uint32_t len = 0;
+        OVERLAPPED ovh{};
+        ovh.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!ovh.hEvent) {
+            ENTROPY_LOG_WARNING("CreateEvent failed for pipe read header");
+            break;
+        }
         DWORD read = 0;
-        BOOL ok = ReadFile(_pipe, &len, sizeof(len), &read, nullptr);
-        if (!ok || read == 0) {
+        BOOL ok = ReadFile(_pipe, &len, sizeof(len), &read, &ovh);
+        if (!ok) {
             DWORD err = GetLastError();
-            if (err == ERROR_BROKEN_PIPE) {
-                // Peer closed
+            if (err == ERROR_IO_PENDING) {
+                DWORD bytes = 0;
+                if (!GetOverlappedResult(_pipe, &ovh, &bytes, TRUE)) {
+                    DWORD e2 = GetLastError();
+                    CloseHandle(ovh.hEvent);
+                    if (e2 == ERROR_BROKEN_PIPE) {
+                        _state = ConnectionState::Disconnected;
+                        onStateChanged(ConnectionState::Disconnected);
+                    }
+                    break;
+                }
+                read = bytes;
+            } else if (err == ERROR_BROKEN_PIPE) {
+                CloseHandle(ovh.hEvent);
                 _state = ConnectionState::Disconnected;
                 onStateChanged(ConnectionState::Disconnected);
                 break;
+            } else if (err == ERROR_OPERATION_ABORTED) {
+                CloseHandle(ovh.hEvent);
+                break;
+            } else {
+                CloseHandle(ovh.hEvent);
+                ENTROPY_LOG_WARNING("ReadFile header failed: " + std::to_string(err));
+                break;
             }
-            // On other errors, attempt to continue only if not stopping
-            if (_shouldStop.load(std::memory_order_acquire)) break;
-            ENTROPY_LOG_WARNING("ReadFile header failed: " + std::to_string(err));
+        }
+        CloseHandle(ovh.hEvent);
+        if (read != sizeof(len)) {
             break;
         }
 
@@ -280,12 +364,40 @@ void NamedPipeConnection::receiveLoop() {
         size_t total = 0;
         while (total < len) {
             DWORD toRead = static_cast<DWORD>(std::min<size_t>(len - total, 64 * 1024));
+            OVERLAPPED ov{};
+            ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!ov.hEvent) {
+                ENTROPY_LOG_WARNING("CreateEvent failed for pipe read body");
+                break;
+            }
             read = 0;
-            ok = ReadFile(_pipe, buffer.data() + total, toRead, &read, nullptr);
-            if (!ok || read == 0) {
+            ok = ReadFile(_pipe, buffer.data() + total, toRead, &read, &ov);
+            if (!ok) {
                 DWORD err = GetLastError();
-                if (_shouldStop.load(std::memory_order_acquire)) break;
-                ENTROPY_LOG_WARNING("ReadFile body failed: " + std::to_string(err));
+                if (err == ERROR_IO_PENDING) {
+                    DWORD bytes = 0;
+                    if (!GetOverlappedResult(_pipe, &ov, &bytes, TRUE)) {
+                        DWORD e2 = GetLastError();
+                        CloseHandle(ov.hEvent);
+                        if (e2 == ERROR_OPERATION_ABORTED) {
+                            // shutdown/cancel
+                            break;
+                        }
+                        ENTROPY_LOG_WARNING("ReadFile body failed: " + std::to_string(e2));
+                        break;
+                    }
+                    read = bytes;
+                } else if (err == ERROR_OPERATION_ABORTED) {
+                    CloseHandle(ov.hEvent);
+                    break;
+                } else {
+                    CloseHandle(ov.hEvent);
+                    ENTROPY_LOG_WARNING("ReadFile body failed: " + std::to_string(err));
+                    break;
+                }
+            }
+            CloseHandle(ov.hEvent);
+            if (read == 0) {
                 break;
             }
             total += read;
@@ -305,7 +417,6 @@ void NamedPipeConnection::receiveLoop() {
 
         onMessageReceived(buffer);
     }
-#endif
 }
 
 ConnectionStats NamedPipeConnection::getStats() const {
@@ -320,3 +431,5 @@ ConnectionStats NamedPipeConnection::getStats() const {
 }
 
 } // namespace EntropyEngine::Networking
+
+#endif // _WIN32

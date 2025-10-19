@@ -13,9 +13,10 @@
 
 using namespace EntropyEngine::Networking;
 
-// Integration-ish test validating aggregate manager metrics and trySend semantics.
+// Platform-agnostic integration test validating aggregate manager metrics and trySend semantics.
+// Uses Unix domain sockets on Unix/macOS, Named Pipes on Windows
 TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
-#if defined(__APPLE__) || defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
+    // Platform-agnostic endpoint - normalization handled by implementation
     const std::string socketPath = "/tmp/entropy_metrics_test.sock";
 
     ConnectionManager serverMgr(8);
@@ -68,14 +69,11 @@ TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
     EXPECT_GE(sm.totalBytesReceived, 1u);
     EXPECT_GE(sm.totalMessagesReceived, 1u);
 
-    // Unix trySend currently returns WouldBlock by design (no partial non-blocking writes)
+    // trySend currently returns WouldBlock by design (both Unix and Windows don't support partial non-blocking writes)
     auto tr = client.trySend(payload);
     EXPECT_FALSE(tr.success());
     EXPECT_EQ(tr.error, NetworkError::WouldBlock);
 
     (void)client.disconnect();
     if (serverThread.joinable()) serverThread.join();
-#else
-    GTEST_SKIP() << "Local Unix sockets not supported on this platform";
-#endif
 }

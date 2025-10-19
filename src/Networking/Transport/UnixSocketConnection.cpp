@@ -7,6 +7,8 @@
  * This file is part of the Entropy Networking project.
  */
 
+#if defined(__unix__) || defined(__APPLE__)
+
 #include "UnixSocketConnection.h"
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -524,3 +526,5 @@ ConnectionStats UnixSocketConnection::getStats() const {
 }
 
 } // namespace EntropyEngine::Networking
+
+#endif // defined(__unix__) || defined(__APPLE__)

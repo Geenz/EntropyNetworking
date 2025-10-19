@@ -43,10 +43,12 @@ public:
 
 private:
     std::wstring toWide(const std::string& s) const;
+    std::string normalizePipeName(std::string name) const;
 
     ConnectionManager* _connMgr;
     std::string _pipeName;
 #ifdef _WIN32
+    std::wstring _pipeNameWide;  // Cached wide string conversion to avoid redundant toWide() calls
     HANDLE _serverPipe{INVALID_HANDLE_VALUE};
 #endif
     std::atomic<bool> _listening{false};

@@ -9,6 +9,7 @@
 
 #include "WebRTCConnection.h"
 #include <stdexcept>
+#include <optional>
 #include <EntropyCore.h>
 #include <Logging/Logger.h>
 
@@ -27,6 +28,13 @@ namespace EntropyEngine::Networking {
     }
 
     WebRTCConnection::~WebRTCConnection() {
+        // Set destroying flag to prevent callback invocations during teardown
+        _destroying.store(true, std::memory_order_release);
+
+        // Clear base class callbacks before disconnect to prevent use-after-free
+        // if libdatachannel invokes callbacks during shutdown on background threads
+        setMessageCallback(nullptr);
+        setStateCallback(nullptr);
         disconnect();
     }
 
@@ -56,30 +64,59 @@ namespace EntropyEngine::Networking {
     }
 
     Result<void> WebRTCConnection::disconnect() {
-        std::lock_guard<std::mutex> lock(_mutex);
+        // Hold local copies to close outside mutex to avoid deadlock
+        std::shared_ptr<rtc::DataChannel> dataChannel;
+        std::shared_ptr<rtc::DataChannel> unreliableDataChannel;
+        std::shared_ptr<rtc::PeerConnection> peerConnection;
+        std::optional<ConnectionState> pending;
 
-        if (_state == ConnectionState::Disconnected) {
-            return Result<void>::ok();
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+
+            if (_state == ConnectionState::Disconnected) {
+                return Result<void>::ok();
+            }
+
+            _state = ConnectionState::Disconnected;
+            pending = ConnectionState::Disconnected;
+
+            // Move ownership to local copies
+            dataChannel = std::move(_dataChannel);
+            unreliableDataChannel = std::move(_unreliableDataChannel);
+            peerConnection = std::move(_peerConnection);
         }
 
-        _state = ConnectionState::Disconnected;
-
-        if (_dataChannel) {
-            _dataChannel->close();
-            _dataChannel.reset();
+        // Fire state change callback outside mutex to prevent deadlock/reentrancy
+        if (pending && !_destroying.load(std::memory_order_acquire)) {
+            onStateChanged(*pending);
         }
 
-        if (_unreliableDataChannel) {
-            _unreliableDataChannel->close();
-            _unreliableDataChannel.reset();
+        // Clear callbacks before close to prevent late invocations
+        if (dataChannel) {
+            dataChannel->onOpen([](){});
+            dataChannel->onClosed([](){});
+            dataChannel->onMessage([](auto){});
+            dataChannel->onError([](std::string){});
+            dataChannel->close();
         }
 
-        if (_peerConnection) {
-            _peerConnection->close();
-            _peerConnection.reset();
+        if (unreliableDataChannel) {
+            unreliableDataChannel->onOpen([](){});
+            unreliableDataChannel->onClosed([](){});
+            unreliableDataChannel->onMessage([](auto){});
+            unreliableDataChannel->onError([](std::string){});
+            unreliableDataChannel->close();
         }
 
-        onStateChanged(ConnectionState::Disconnected);
+        if (peerConnection) {
+            // Clear PC callbacks to prevent late invocations during shutdown
+            peerConnection->onLocalDescription(nullptr);
+            peerConnection->onLocalCandidate(nullptr);
+            peerConnection->onDataChannel(nullptr);
+            peerConnection->onStateChange(nullptr);
+            peerConnection->onGatheringStateChange(nullptr);
+            peerConnection->close();
+        }
 
         return Result<void>::ok();
     }
@@ -329,6 +366,8 @@ namespace EntropyEngine::Networking {
 
         _dataChannel = _peerConnection->createDataChannel(_dataChannelLabel, init);
         setupDataChannelCallbacks(_dataChannel);
+        // Note: callbacks may be registered again via onDataChannel on the answerer side
+        // The state transition guards make this safe
     }
 
     void WebRTCConnection::setupUnreliableDataChannel() {
@@ -338,6 +377,8 @@ namespace EntropyEngine::Networking {
 
         _unreliableDataChannel = _peerConnection->createDataChannel(_unreliableChannelLabel, init);
         setupDataChannelCallbacks(_unreliableDataChannel);
+        // Note: callbacks may be registered again via onDataChannel on the answerer side
+        // The state transition guards make this safe
     }
 
     void WebRTCConnection::setupDataChannelCallbacks(std::shared_ptr<rtc::DataChannel> channel) {
@@ -347,10 +388,16 @@ namespace EntropyEngine::Networking {
         bool isReliableChannel = (channel->label() == _dataChannelLabel);
 
         channel->onOpen([this, isReliableChannel, channel]() {
+            // Check destroying flag before doing anything (including logging or locking)
+            if (_destroying.load(std::memory_order_acquire)) return;
+
             // Debug output
             ENTROPY_LOG_INFO(std::string("Data channel opened: ") + channel->label());
 
-            if (isReliableChannel) {
+            if (!isReliableChannel) return;
+
+            std::optional<ConnectionState> pending;
+            {
                 std::lock_guard<std::mutex> lock(_mutex);
                 // Only transition to Connected if we're not already there
                 // This is the definitive source for Connected state
@@ -364,23 +411,42 @@ namespace EntropyEngine::Networking {
                     ).count();
                     _stats.lastActivityTime = _stats.connectTime;
 
-                    onStateChanged(ConnectionState::Connected);
+                    pending = ConnectionState::Connected;
                 }
+            }
+
+            // Fire state change callback outside mutex to prevent deadlock/reentrancy
+            if (pending && !_destroying.load(std::memory_order_acquire)) {
+                onStateChanged(*pending);
             }
         });
 
         channel->onClosed([this, isReliableChannel]() {
-            if (isReliableChannel) {
+            // Check destroying flag before doing anything (including locking)
+            if (_destroying.load(std::memory_order_acquire)) return;
+
+            if (!isReliableChannel) return;
+
+            std::optional<ConnectionState> pending;
+            {
                 std::lock_guard<std::mutex> lock(_mutex);
                 // Only transition to Disconnected if we're not already there
                 if (_state != ConnectionState::Disconnected && _state != ConnectionState::Failed) {
                     _state = ConnectionState::Disconnected;
-                    onStateChanged(ConnectionState::Disconnected);
+                    pending = ConnectionState::Disconnected;
                 }
+            }
+
+            // Fire state change callback outside mutex to prevent deadlock/reentrancy
+            if (pending && !_destroying.load(std::memory_order_acquire)) {
+                onStateChanged(*pending);
             }
         });
 
         channel->onMessage([this](auto data) {
+            // Check destroying flag before doing anything
+            if (_destroying.load(std::memory_order_acquire)) return;
+
             std::vector<uint8_t> message;
 
             if (std::holds_alternative<std::string>(data)) {
@@ -402,7 +468,9 @@ namespace EntropyEngine::Networking {
                     std::chrono::system_clock::now().time_since_epoch()).count();
             }
 
-            onMessageReceived(message);
+            if (!_destroying.load(std::memory_order_acquire)) {
+                onMessageReceived(message);
+            }
         });
 
         channel->onError([](std::string error) {
@@ -411,44 +479,56 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::updateConnectionState(rtc::PeerConnection::State state) {
-        std::lock_guard<std::mutex> lock(_mutex);
+        // Check destroying flag before doing anything (including locking)
+        if (_destroying.load(std::memory_order_acquire)) return;
 
-        ConnectionState newState = _state;  // Track if state actually changes
+        std::optional<ConnectionState> pending;
 
-        switch (state) {
-            case rtc::PeerConnection::State::New:
-            case rtc::PeerConnection::State::Connecting:
-                // Only update to Connecting if we haven't reached Connected yet
-                if (_state != ConnectionState::Connected) {
-                    newState = ConnectionState::Connecting;
-                }
-                break;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
 
-            case rtc::PeerConnection::State::Connected:
-                // Don't set Connected here - wait for data channel to open
-                // Data channel opening is the definitive signal that we're ready
-                break;
+            ConnectionState newState = _state;  // Track if state actually changes
 
-            case rtc::PeerConnection::State::Disconnected:
-                // Peer connection disconnected - mark as such
-                newState = ConnectionState::Disconnected;
-                break;
+            switch (state) {
+                case rtc::PeerConnection::State::New:
+                case rtc::PeerConnection::State::Connecting:
+                    // Only update to Connecting if we haven't reached Connected yet
+                    if (_state != ConnectionState::Connected) {
+                        newState = ConnectionState::Connecting;
+                    }
+                    break;
 
-            case rtc::PeerConnection::State::Failed:
-                // Connection failed - mark as failed
-                newState = ConnectionState::Failed;
-                break;
+                case rtc::PeerConnection::State::Connected:
+                    // Don't set Connected here - wait for data channel to open
+                    // Data channel opening is the definitive signal that we're ready
+                    break;
 
-            case rtc::PeerConnection::State::Closed:
-                // Connection closed - mark as disconnected
-                newState = ConnectionState::Disconnected;
-                break;
+                case rtc::PeerConnection::State::Disconnected:
+                    // Peer connection disconnected - mark as such
+                    newState = ConnectionState::Disconnected;
+                    break;
+
+                case rtc::PeerConnection::State::Failed:
+                    // Connection failed - mark as failed
+                    newState = ConnectionState::Failed;
+                    break;
+
+                case rtc::PeerConnection::State::Closed:
+                    // Connection closed - mark as disconnected
+                    newState = ConnectionState::Disconnected;
+                    break;
+            }
+
+            // Only update state if it actually changed
+            if (newState != _state) {
+                _state = newState;
+                pending = _state;
+            }
         }
 
-        // Only fire state change event if state actually changed
-        if (newState != _state) {
-            _state = newState;
-            onStateChanged(_state);
+        // Fire state change callback outside mutex to prevent deadlock/reentrancy
+        if (pending && !_destroying.load(std::memory_order_acquire)) {
+            onStateChanged(*pending);
         }
     }
 
