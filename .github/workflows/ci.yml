@@ -150,12 +150,13 @@ jobs:
         with:
           vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
 
-      - name: Configure CMake (Ninja, Release)
+      - name: Configure CMake (Ninja, Release, Universal)
         run: >
           cmake -S . -B build-release -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=OFF
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build tests (Release)
@@ -166,25 +167,26 @@ jobs:
         run: ctest -VV --output-on-failure
 
       - name: Install package (Release)
-        run: cmake --install build-release --prefix "${{ github.workspace }}/EntropyNetworking-macOS"
+        run: cmake --install build-release --prefix "${{ github.workspace }}/EntropyNetworking-macOS-universal"
 
-      - name: Configure CMake (Ninja, Debug)
+      - name: Configure CMake (Ninja, Debug, Universal)
         run: >
           cmake -S . -B build-debug -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DBUILD_TESTS=OFF
           -DBUILD_EXAMPLES=OFF
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build (Debug)
         run: cmake --build build-debug
 
       - name: Install package (Debug)
-        run: cmake --install build-debug --prefix "${{ github.workspace }}/EntropyNetworking-macOS/debug"
+        run: cmake --install build-debug --prefix "${{ github.workspace }}/EntropyNetworking-macOS-universal/debug"
 
       - name: Restructure debug files for vcpkg
         run: |
-          cd "${{ github.workspace }}/EntropyNetworking-macOS/debug"
+          cd "${{ github.workspace }}/EntropyNetworking-macOS-universal/debug"
           rm -rf include share
 
       - name: Upload CTest logs
@@ -197,8 +199,8 @@ jobs:
             build-release/Testing/**/Test.xml
             build-release/Testing/Temporary/LastTestsFailed.log
 
-      - name: Upload macOS package artifact
+      - name: Upload macOS universal package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EntropyNetworking-macOS
-          path: EntropyNetworking-macOS/**
+          name: EntropyNetworking-macOS-universal
+          path: EntropyNetworking-macOS-universal/**
