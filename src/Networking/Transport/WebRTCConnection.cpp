@@ -128,12 +128,18 @@ namespace EntropyEngine::Networking {
         std::lock_guard<std::mutex> lock(self->_mutex);
         std::string_view labelView(label);
 
+        // Accept remote data channels only if different from our local ones
+        // This callback fires when remote peer's channels are negotiated to us
         if (labelView == self->_dataChannelLabel) {
-            self->_dataChannelId = dc;
-            self->setupDataChannelCallbacks(dc, true);
+            if (self->_dataChannelId != dc) {
+                self->_dataChannelId = dc;
+                self->setupDataChannelCallbacks(dc, true);
+            }
         } else if (labelView == self->_unreliableChannelLabel) {
-            self->_unreliableDataChannelId = dc;
-            self->setupDataChannelCallbacks(dc, false);
+            if (self->_unreliableDataChannelId != dc) {
+                self->_unreliableDataChannelId = dc;
+                self->setupDataChannelCallbacks(dc, false);
+            }
         }
     }
 
@@ -148,13 +154,17 @@ namespace EntropyEngine::Networking {
 
         ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label);
 
-        // Only transition to Connected for reliable channel
+        // Only transition to Connected for reliable channel matching our current channel ID
         std::string_view labelView(label);
         if (labelView != self->_dataChannelLabel) return;
 
         std::optional<ConnectionState> pending;
         {
             std::lock_guard<std::mutex> lock(self->_mutex);
+            // Verify this is our current reliable channel (not a stale/replaced one)
+            if (id != self->_dataChannelId) {
+                return;
+            }
             if (self->_state != ConnectionState::Connected) {
                 self->_state = ConnectionState::Connected;
                 auto now = std::chrono::system_clock::now();
@@ -200,6 +210,9 @@ namespace EntropyEngine::Networking {
     void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
         auto* self = static_cast<WebRTCConnection*>(user);
         if (self->_destroying.load(std::memory_order_acquire)) return;
+
+        // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
+        if (size <= 0) return;
 
         // Performance note: This creates a vector (heap allocation) per message.
         // For high message rates (>10K msg/s), consider:
@@ -417,7 +430,15 @@ namespace EntropyEngine::Networking {
             if (rollbackResult < 0) {
                 ENTROPY_LOG_WARNING("Rollback failed or unsupported; ignoring incoming offer");
                 return Result<void>::ok();
+            } else {
+                // After a successful rollback we are no longer making an offer
+                _makingOffer.store(false, std::memory_order_release);
             }
+        }
+
+        // When accepting a remote offer, we are no longer making an offer
+        if (isOffer) {
+            _makingOffer.store(false, std::memory_order_release);
         }
 
         int result = rtcSetRemoteDescription(_peerConnectionId, sdp.c_str(), type.c_str());

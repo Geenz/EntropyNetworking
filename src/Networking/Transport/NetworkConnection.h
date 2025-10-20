@@ -98,7 +98,7 @@ protected:
         }
 
         // Increment active callback counter (RAII guard ensures decrement)
-        _activeCallbacks.fetch_add(1, std::memory_order_acquire);
+        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
         struct CallbackGuard {
             std::atomic<int>& counter;
             ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
@@ -130,7 +130,7 @@ protected:
         }
 
         // Increment active callback counter (RAII guard ensures decrement)
-        _activeCallbacks.fetch_add(1, std::memory_order_acquire);
+        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
         struct CallbackGuard {
             std::atomic<int>& counter;
             ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
