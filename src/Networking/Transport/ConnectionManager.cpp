@@ -439,8 +439,10 @@ Result<void> ConnectionManager::closeConnection(const ConnectionHandle& handle) 
     {
         std::lock_guard<std::mutex> lock(slot.mutex);
 
-        // Disconnect if still connected
+        // Disconnect if still connected – first silence backend callbacks to avoid re-entrancy during disconnect
         if (slot.connection) {
+            slot.connection->setStateCallback(nullptr);
+            slot.connection->setMessageCallback(nullptr);
             slot.connection->disconnect();
             slot.state.store(ConnectionState::Disconnected, std::memory_order_release);
         }

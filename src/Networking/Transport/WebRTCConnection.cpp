@@ -263,16 +263,45 @@ namespace EntropyEngine::Networking {
             onStateChanged(*pending);
         }
 
-        // Close channels
+        // Detach callbacks and user pointers to prevent further calls into this during teardown
+        auto detachChannel = [](int id) {
+            if (id < 0) return;
+            rtcSetUserPointer(id, nullptr);
+            rtcSetOpenCallback(id, nullptr);
+            rtcSetClosedCallback(id, nullptr);
+            rtcSetMessageCallback(id, nullptr);
+        };
+        auto detachPeer = [](int id) {
+            if (id < 0) return;
+            rtcSetUserPointer(id, nullptr);
+            rtcSetLocalDescriptionCallback(id, nullptr);
+            rtcSetLocalCandidateCallback(id, nullptr);
+            rtcSetStateChangeCallback(id, nullptr);
+            rtcSetDataChannelCallback(id, nullptr);
+        };
+
+        detachChannel(_dataChannelId);
+        detachChannel(_unreliableDataChannelId);
+        detachPeer(_peerConnectionId);
+
+        // Close and delete handles (C API guarantees blocking until no more callbacks)
         if (_dataChannelId >= 0) {
             rtcClose(_dataChannelId);
+            rtcDeleteDataChannel(_dataChannelId);
+            _dataChannelId = -1;
         }
         if (_unreliableDataChannelId >= 0) {
             rtcClose(_unreliableDataChannelId);
+            rtcDeleteDataChannel(_unreliableDataChannelId);
+            _unreliableDataChannelId = -1;
         }
         if (_peerConnectionId >= 0) {
             rtcClose(_peerConnectionId);
+            rtcDeletePeerConnection(_peerConnectionId);
+            _peerConnectionId = -1;
         }
+
+        _makingOffer.store(false, std::memory_order_release);
 
         return Result<void>::ok();
     }
