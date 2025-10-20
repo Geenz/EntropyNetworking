@@ -28,6 +28,8 @@ find_package(CapnProto CONFIG REQUIRED)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(zstd CONFIG REQUIRED)
+find_package(tinyxml2 CONFIG REQUIRED)
+find_package(llhttp CONFIG REQUIRED)
 
 # Only require GoogleTest when building tests
 if(BUILD_TESTS)
@@ -44,6 +46,7 @@ set(NETWORKING_SOURCES
     src/Networking/Core/PropertyRegistry.cpp
     src/Networking/Core/PropertyTypes.cpp
     src/Networking/Protocol/MessageSerializer.cpp
+    src/Networking/Protocol/WebDavAdapter.cpp
     src/Networking/Transport/WebRTCConnection.cpp
     src/Networking/Transport/ConnectionManager.cpp
     src/Networking/Transport/ConnectionHandle.cpp
@@ -51,6 +54,10 @@ set(NETWORKING_SOURCES
     src/Networking/Session/SessionHandle.cpp
     src/Networking/Session/SessionManager.cpp
     src/Networking/Session/BatchManager.cpp
+    src/Networking/WebDAV/WebDAVConnection.cpp
+    src/Networking/WebDAV/WebDAVUtils.cpp
+    src/Networking/WebDAV/WebDAVPropfindParser.cpp
+    src/Networking/WebDAV/WebDAVFileSystemBackend.cpp
     ${CAPNP_SRCS}
 )
 
@@ -107,6 +114,8 @@ target_link_libraries(EntropyNetworking
         OpenSSL::Crypto
         LibDataChannel::LibDataChannel
         zstd::libzstd
+        tinyxml2::tinyxml2
+        llhttp::llhttp_static
 )
 
 # Platform and compiler-specific settings

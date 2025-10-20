@@ -14,6 +14,9 @@ add_executable(EntropyNetworkingTests
     CallbackFanoutTests.cpp
     ConnectionManagerLifecycleTests.cpp
     ManagerMetricsTests.cpp
+    WebDAVConnectionTests.cpp
+    WebDAVPropfindParserTests.cpp
+    WebDAVBackendTests.cpp
 )
 
 target_link_libraries(EntropyNetworkingTests

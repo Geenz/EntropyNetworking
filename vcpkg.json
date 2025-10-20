@@ -8,6 +8,8 @@
     "libdatachannel",
     "openssl",
     "zstd",
-    "gtest"
+    "gtest",
+    "tinyxml2",
+    "llhttp"
   ]
 }
