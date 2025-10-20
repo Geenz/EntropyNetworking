@@ -165,6 +165,11 @@ install(DIRECTORY src/
     FILES_MATCHING PATTERN "*.h"
 )
 
+# Install generated Cap'n Proto headers
+install(FILES ${CAPNP_HDRS}
+    DESTINATION include/Networking/Protocol
+)
+
 install(EXPORT EntropyNetworkingTargets
     FILE EntropyNetworkingTargets.cmake
     NAMESPACE EntropyNetworking::
