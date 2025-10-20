@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <thread>
 
 #include "EntropyCore.h"
 
@@ -102,6 +103,22 @@ WebDAVConnection::WebDAVConnection(std::shared_ptr<EntropyEngine::Networking::Ne
     _conn->setMessageCallback([this](const std::vector<uint8_t>& bytes){ onDataReceived(bytes); });
 }
 
+WebDAVConnection::~WebDAVConnection() {
+    // Prevent new callbacks and wait for in-flight ones to complete
+    _shuttingDown.store(true, std::memory_order_release);
+    if (_conn) {
+        _conn->setMessageCallback(nullptr);
+    }
+    // Spin-wait briefly for any active onDataReceived to finish
+    while (_inCallback.load(std::memory_order_acquire) > 0) {
+        std::this_thread::yield();
+    }
+    // Clear any active request safely
+    std::lock_guard<std::mutex> lk(_reqMutex);
+    _active.reset();
+    _leftover.clear();
+}
+
 std::string WebDAVConnection::buildRequest(const char* method,
                                            const std::string& path,
                                            const std::vector<std::pair<std::string,std::string>>& headers,
@@ -176,8 +193,23 @@ WebDAVConnection::Response WebDAVConnection::sendAndReceive(std::string request)
 }
 
 void WebDAVConnection::onDataReceived(const std::vector<uint8_t>& bytes) {
+    // Guard lifetime across callback execution
+    _inCallback.fetch_add(1, std::memory_order_acq_rel);
+    struct Guard { std::atomic<int>& c; ~Guard(){ c.fetch_sub(1, std::memory_order_acq_rel); } } guard{_inCallback};
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // ignore incoming data during shutdown
+    }
+
     std::lock_guard<std::mutex> lk(_reqMutex);
     if (!_active) {
+        // Cap leftover buffer to avoid unbounded memory growth
+        constexpr size_t ABS_CAP = 1u << 20; // 1 MiB
+        const size_t cap = std::min<std::size_t>(ABS_CAP, _cfg.maxBodyBytes / 4);
+        if (_leftover.size() + bytes.size() > cap) {
+            // Drop connection bytes: best-effort safety
+            _leftover.clear();
+            return;
+        }
         _leftover.insert(_leftover.end(), bytes.begin(), bytes.end());
         return;
     }

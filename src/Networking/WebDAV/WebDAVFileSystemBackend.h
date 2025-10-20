@@ -25,14 +25,12 @@
 namespace EntropyEngine::Networking::WebDAV {
 
 /**
- * WebDAVFileSystemBackend (read-only MVP skeleton)
+ * WebDAVFileSystemBackend (read-only MVP)
  *
- * Notes:
- * - EntropyCore's VirtualFileSystem constructs FileOperationHandle state internally.
- *   Third-party backends cannot currently create OpState directly (friend-restricted).
- * - This skeleton provides a compiling backend that implements exists() and capability
- *   reporting, while read/list/metadata return immediate failed handles until
- *   EntropyCore exposes a generic submit mechanism or adds this backend to friends.
+ * Uses EntropyCore's VirtualFileSystem::submit to schedule work on the VFS WorkContractGroup
+ * (no custom threads). Implements readFile (GET), getMetadata (PROPFIND Depth 0),
+ * listDirectory (PROPFIND Depth 1), and exists(). Write/stream operations are not
+ * implemented in this phase.
  */
 class WebDAVFileSystemBackend : public Core::IO::IFileSystemBackend {
 public:

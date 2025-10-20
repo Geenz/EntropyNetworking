@@ -17,6 +17,7 @@ add_executable(EntropyNetworkingTests
     WebDAVConnectionTests.cpp
     WebDAVPropfindParserTests.cpp
     WebDAVBackendTests.cpp
+    WebDavAdapterTests.cpp
 )
 
 target_link_libraries(EntropyNetworkingTests

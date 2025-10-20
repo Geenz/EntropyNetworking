@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <optional>
+#include <atomic>
 
 #include "Networking/Transport/NetworkConnection.h"
 #include <llhttp.h>
@@ -41,7 +42,7 @@ public:
     };
 
     WebDAVConnection(std::shared_ptr<EntropyEngine::Networking::NetworkConnection> nc, Config cfg);
-    ~WebDAVConnection() = default;
+    ~WebDAVConnection();
 
     Response get(const std::string& path,
                  const std::vector<std::pair<std::string,std::string>>& extraHeaders = {});
@@ -73,6 +74,10 @@ private:
     llhttp_t _parser{};
     llhttp_settings_t _settings{};
     std::vector<uint8_t> _leftover;                 // bytes received when no request active
+
+    // Shutdown/lifetime guards for receive callback
+    std::atomic<bool> _shuttingDown{false};
+    std::atomic<int>  _inCallback{0};
 
     void onDataReceived(const std::vector<uint8_t>& bytes);
     Response sendAndReceive(std::string request);
