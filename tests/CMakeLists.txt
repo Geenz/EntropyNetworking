@@ -1,6 +1,8 @@
 # Test configuration for EntropyNetworking
 
 find_package(GTest CONFIG REQUIRED)
+find_package(tinyxml2 CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
 
 # Test executable
 add_executable(EntropyNetworkingTests
@@ -18,13 +20,22 @@ add_executable(EntropyNetworkingTests
     WebDAVPropfindParserTests.cpp
     WebDAVBackendTests.cpp
     WebDavAdapterTests.cpp
+    WebDAVStreamingTests.cpp
+    WebDavMiniServerTests.cpp
+    WebDAVClientIntegrationTests.cpp
+    HttpClientTests.cpp
+    HttpNetworkConnectionDebug.cpp
 )
+
+# Tests link libraries
 
 target_link_libraries(EntropyNetworkingTests
     PRIVATE
         EntropyNetworking
         GTest::gtest
         GTest::gtest_main
+        tinyxml2::tinyxml2
+        httplib::httplib
 )
 
 # Enable testing

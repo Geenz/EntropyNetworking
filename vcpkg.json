@@ -10,6 +10,7 @@
     "zstd",
     "gtest",
     "tinyxml2",
-    "llhttp"
+    "llhttp",
+    "cpp-httplib"
   ]
 }

@@ -57,7 +57,14 @@ set(NETWORKING_SOURCES
     src/Networking/WebDAV/WebDAVConnection.cpp
     src/Networking/WebDAV/WebDAVUtils.cpp
     src/Networking/WebDAV/WebDAVPropfindParser.cpp
+    src/Networking/WebDAV/WebDAVReadStream.cpp
     src/Networking/WebDAV/WebDAVFileSystemBackend.cpp
+    # HTTP core client
+    src/Networking/HTTP/HttpTypes.h
+    src/Networking/HTTP/HttpConnection.h
+    src/Networking/HTTP/HttpConnection.cpp
+    src/Networking/HTTP/HttpClient.h
+    src/Networking/HTTP/HttpClient.cpp
     ${CAPNP_SRCS}
 )
 

@@ -6,6 +6,15 @@
  * Copyright (c) 2025 Jonathan "Geenz" Goodman
  * This file is part of the Entropy Networking project.
  */
+
+/**
+ * @file WebDAVFileSystemBackend.h
+ * @brief VirtualFileSystem backend for WebDAV resources
+ *
+ * This file contains WebDAVFileSystemBackend, a read-only IFileSystemBackend
+ * implementation that exposes remote WebDAV servers as VFS mount points.
+ */
+
 #pragma once
 
 #include <memory>
@@ -13,11 +22,10 @@
 #include <span>
 #include <vector>
 #include <optional>
+#include <atomic>
 
-// EntropyCore VFS (via vcpkg dependency)
 #include <VirtualFileSystem/IFileSystemBackend.h>
 
-// Our WebDAV client pieces
 #include "Networking/WebDAV/WebDAVConnection.h"
 #include "Networking/WebDAV/WebDAVPropfindParser.h"
 #include "Networking/WebDAV/WebDAVUtils.h"
@@ -25,62 +33,190 @@
 namespace EntropyEngine::Networking::WebDAV {
 
 /**
- * WebDAVFileSystemBackend (read-only MVP)
+ * @brief Read-only VFS backend for WebDAV servers
  *
- * Uses EntropyCore's VirtualFileSystem::submit to schedule work on the VFS WorkContractGroup
- * (no custom threads). Implements readFile (GET), getMetadata (PROPFIND Depth 0),
- * listDirectory (PROPFIND Depth 1), and exists(). Write/stream operations are not
- * implemented in this phase.
+ * Implements IFileSystemBackend for remote WebDAV resources. Uses VirtualFileSystem::submit()
+ * to schedule async operations through the VFS WorkContractGroup (no custom threads).
+ * Supports connection pooling for concurrent HTTP requests.
+ *
+ * Read Operations:
+ * - readFile() - HTTP GET with optional Range header
+ * - getMetadata() - WebDAV PROPFIND Depth:0
+ * - listDirectory() - WebDAV PROPFIND Depth:1
+ * - exists() - WebDAV PROPFIND Depth:0
+ * - openStream() - Streaming GET for large files
+ *
+ * Thread Safety: All methods are thread-safe. Concurrent operations are handled by the VFS
+ * WorkContractGroup and connection pool (if configured).
+ *
+ * @code
+ * // Create connection and backend
+ * WebDAVConnection::Config connCfg{.host = "example.com"};
+ * auto conn = std::make_shared<WebDAVConnection>(netConn, connCfg);
+ * WebDAVFileSystemBackend::Config backendCfg{.baseUrl = "/dav"};
+ * auto backend = std::make_shared<WebDAVFileSystemBackend>(conn, backendCfg);
+ *
+ * // Optional: enable connection pooling for concurrent requests
+ * std::vector<std::shared_ptr<WebDAVConnection>> pool = {conn1, conn2, conn3};
+ * backend->setAggregateConnections(std::move(pool));
+ *
+ * // Mount in VFS
+ * vfs->mount("/remote", backend);
+ *
+ * // Use via VFS
+ * auto fileHandle = vfs->createFileHandle("/remote/data.bin");
+ * auto readOp = fileHandle.read();
+ * readOp.wait();
+ * processData(readOp.bytes());
+ * @endcode
  */
 class WebDAVFileSystemBackend : public Core::IO::IFileSystemBackend {
 public:
+    /**
+     * @brief Backend configuration
+     */
     struct Config {
-        std::string baseUrl; // e.g., "/dav/assets"
+        std::string baseUrl;  ///< Base URL path on server (e.g., "/dav/assets")
     };
 
+    /**
+     * @brief Constructs WebDAV backend with single connection
+     * @param conn WebDAVConnection for HTTP operations (must be connected)
+     * @param cfg Backend configuration (base URL)
+     */
     WebDAVFileSystemBackend(std::shared_ptr<WebDAVConnection> conn, Config cfg)
         : _conn(std::move(conn)), _cfg(std::move(cfg)) {}
 
-    // Core file operations (read-only MVP: currently stubbed)
+    /**
+     * @brief Enables connection pooling for concurrent requests
+     *
+     * Provides N independent HTTP connections for true parallelism. Operations
+     * select connections round-robin. If not called, backend uses single connection
+     * passed to constructor.
+     *
+     * @param conns Vector of connected WebDAVConnection instances
+     */
+    void setAggregateConnections(std::vector<std::shared_ptr<WebDAVConnection>> conns) {
+        _aggPool = std::move(conns);
+    }
+
+    /**
+     * @brief Reads file via HTTP GET (supports Range header)
+     * @param path VFS path (mapped to baseUrl + path)
+     * @param options Read options (offset, length for partial reads)
+     * @return FileOperationHandle that completes with file bytes
+     */
     Core::IO::FileOperationHandle readFile(const std::string& path,
                                            Core::IO::ReadOptions options = {}) override;
 
+    /**
+     * @brief Write operations not supported (read-only backend)
+     * @return Immediate failure handle
+     */
     Core::IO::FileOperationHandle writeFile(const std::string& path,
                                             std::span<const std::byte> data,
                                             Core::IO::WriteOptions options = {}) override;
 
+    /**
+     * @brief Delete operations not supported (read-only backend)
+     * @return Immediate failure handle
+     */
     Core::IO::FileOperationHandle deleteFile(const std::string& path) override;
+
+    /**
+     * @brief Create operations not supported (read-only backend)
+     * @return Immediate failure handle
+     */
     Core::IO::FileOperationHandle createFile(const std::string& path) override;
 
-    // Metadata operations
+    /**
+     * @brief Gets file/directory metadata via PROPFIND Depth:0
+     * @param path VFS path
+     * @return FileOperationHandle that completes with FileMetadata
+     */
     Core::IO::FileOperationHandle getMetadata(const std::string& path) override;
+
+    /**
+     * @brief Checks if resource exists via PROPFIND Depth:0
+     * @param path VFS path
+     * @return true if resource exists and is accessible
+     */
     bool exists(const std::string& path) override;
 
-    // Directory operations
+    /**
+     * @brief Lists directory contents via PROPFIND Depth:1
+     * @param path VFS path to directory
+     * @param options Listing options (unused in current implementation)
+     * @return FileOperationHandle that completes with DirectoryEntry vector
+     */
     Core::IO::FileOperationHandle listDirectory(const std::string& path,
                                                 Core::IO::ListDirectoryOptions options = {}) override;
 
-    // Stream support (not supported in MVP)
+    /**
+     * @brief Opens streaming read for large files
+     * @param path VFS path
+     * @param options Stream options (mode must be Read, bufferSize configurable)
+     * @return FileStream for incremental reads, or nullptr if mode is not Read
+     */
     std::unique_ptr<Core::IO::FileStream> openStream(const std::string& path,
                                                      Core::IO::StreamOptions options = {}) override;
 
-    // Line ops (not supported in MVP)
+    /**
+     * @brief Line operations not supported
+     * @return Immediate failure handle
+     */
     Core::IO::FileOperationHandle readLine(const std::string& path, size_t lineNumber) override;
+
+    /**
+     * @brief Line operations not supported
+     * @return Immediate failure handle
+     */
     Core::IO::FileOperationHandle writeLine(const std::string& path, size_t lineNumber, std::string_view line) override;
 
-    // Backend info
+    /**
+     * @brief Gets backend capabilities
+     * @return Capabilities indicating read-only, streaming, remote backend
+     */
     Core::IO::BackendCapabilities getCapabilities() const override;
+
+    /**
+     * @brief Gets backend type identifier
+     * @return "WebDAV"
+     */
     std::string getBackendType() const override { return "WebDAV"; }
 
-    // Path normalization for identity/locking (pass-through)
+    /**
+     * @brief Path normalization for VFS locking (pass-through)
+     * @param path Path to normalize
+     * @return Path unchanged (WebDAV paths are used as-is)
+     */
     std::string normalizeKey(const std::string& path) const override { return path; }
 
 private:
-    std::shared_ptr<WebDAVConnection> _conn;
-    Config _cfg;
+    std::shared_ptr<WebDAVConnection> _conn;                       ///< Primary connection (fallback if no pool)
+    std::vector<std::shared_ptr<WebDAVConnection>> _aggPool;       ///< Optional connection pool for concurrency
+    std::atomic<uint32_t> _rrAgg{0};                               ///< Round-robin counter for pool selection
+    Config _cfg;                                                   ///< Backend configuration
 
+    /**
+     * @brief Selects connection for this operation (round-robin if pool configured)
+     * @return Connection to use for HTTP request
+     */
+    std::shared_ptr<WebDAVConnection> acquireAgg();
+
+    /**
+     * @brief Builds full URL from VFS path
+     * @param path VFS path
+     * @return Full URL (baseUrl + encoded path)
+     * @throws std::invalid_argument if path contains parent directory references
+     */
     std::string buildUrl(const std::string& path) const;
 
+    /**
+     * @brief Maps HTTP status code to FileError
+     * @param statusCode HTTP status code
+     * @return Corresponding FileError
+     */
     static Core::IO::FileError mapHttpStatus(int statusCode);
 };
 

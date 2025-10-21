@@ -1,0 +1,195 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2025 Jonathan "Geenz" Goodman
+ * This file is part of the Entropy Networking project.
+ */
+
+#include "Networking/HTTP/HttpConnection.h"
+#include <algorithm>
+#include <sstream>
+#include <cstring>
+
+namespace EntropyEngine::Networking::HTTP {
+
+namespace {
+struct ParsedResponse {
+    int statusCode = 0;
+    std::string statusMessage;
+    HttpHeaders headers;
+    std::vector<uint8_t> body;
+
+    std::string curHeaderField;
+    std::string curHeaderValue;
+    bool complete = false;
+};
+
+static int on_status_cb(llhttp_t* p, const char* at, size_t len) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    pr->statusMessage.append(at, len);
+    return 0;
+}
+static int on_header_field_cb(llhttp_t* p, const char* at, size_t len) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    if (!pr->curHeaderField.empty() && !pr->curHeaderValue.empty()) {
+        std::string name = pr->curHeaderField;
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+        pr->headers[name] = pr->curHeaderValue;
+        pr->curHeaderField.clear();
+        pr->curHeaderValue.clear();
+    }
+    pr->curHeaderField.append(at, len);
+    return 0;
+}
+static int on_header_value_cb(llhttp_t* p, const char* at, size_t len) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    pr->curHeaderValue.append(at, len);
+    return 0;
+}
+static int on_headers_complete_cb(llhttp_t* p) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    if (!pr->curHeaderField.empty()) {
+        std::string name = pr->curHeaderField;
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+        pr->headers[name] = pr->curHeaderValue;
+        pr->curHeaderField.clear();
+        pr->curHeaderValue.clear();
+    }
+    pr->statusCode = p->status_code;
+    return 0;
+}
+static int on_body_cb(llhttp_t* p, const char* at, size_t len) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    pr->body.insert(pr->body.end(), reinterpret_cast<const uint8_t*>(at), reinterpret_cast<const uint8_t*>(at)+len);
+    return 0;
+}
+static int on_message_complete_cb(llhttp_t* p) { auto* pr = static_cast<ParsedResponse*>(p->data); pr->complete = true; return 0; }
+}
+
+HttpConnection::HttpConnection() {
+#ifdef _WIN32
+    static bool wsaInit = false;
+    static std::mutex m;
+    std::lock_guard<std::mutex> lk(m);
+    if (!wsaInit) {
+        WSADATA wsaData; WSAStartup(MAKEWORD(2,2), &wsaData); wsaInit = true;
+    }
+#endif
+}
+
+std::string HttpConnection::methodToString(HttpMethod m) {
+    switch (m) {
+        case HttpMethod::GET: return "GET";
+        case HttpMethod::HEAD: return "HEAD";
+        case HttpMethod::POST: return "POST";
+        case HttpMethod::PUT: return "PUT";
+        case HttpMethod::DELETE_: return "DELETE";
+        case HttpMethod::OPTIONS: return "OPTIONS";
+        case HttpMethod::PATCH: return "PATCH";
+        case HttpMethod::PROPFIND: return "PROPFIND";
+        default: return "GET";
+    }
+}
+
+void HttpConnection::toLowerInPlace(std::string& s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+}
+
+bool HttpConnection::executeOnSocket(int sock, const HttpRequest& req, const RequestOptions& opts, HttpResponse& out) {
+    (void)opts; // minimal initial implementation ignores per-request timeouts at the socket level
+
+    // Build request text (origin-form target)
+    std::ostringstream o;
+    o << methodToString(req.method) << ' ' << (req.path.empty()? "/" : req.path) << " HTTP/1.1\r\n";
+    // Host header: use req.host verbatim
+    o << "Host: " << req.host << "\r\n";
+    // Default UA
+    if (req.headers.find("user-agent") == req.headers.end()) {
+        o << "User-Agent: EntropyHTTP/1.0\r\n";
+    }
+    // Default Connection: keep-alive
+    bool hasConn = (req.headers.find("connection") != req.headers.end());
+    if (!hasConn) o << "Connection: keep-alive\r\n";
+
+    // Additional headers
+    for (auto& kv : req.headers) {
+        std::string key = kv.first; // assume already lowercase; write as-is
+        // Capitalization does not matter on wire; keep as provided
+        o << key << ": " << kv.second << "\r\n";
+    }
+
+    if (!req.body.empty()) {
+        o << "Content-Length: " << req.body.size() << "\r\n";
+    }
+    o << "\r\n";
+
+    std::string head = o.str();
+
+    // Send request
+    if (!head.empty()) {
+        int sent = ::send(sock, head.c_str(), (int)head.size(), 0);
+        if (sent < 0) return false;
+    }
+    if (!req.body.empty()) {
+        int sent = ::send(sock, reinterpret_cast<const char*>(req.body.data()), (int)req.body.size(), 0);
+        if (sent < 0) return false;
+    }
+
+    // Parse response
+    ParsedResponse pr;
+    llhttp_settings_t settings{};
+    llhttp_settings_init(&settings);
+    settings.on_status = on_status_cb;
+    settings.on_header_field = on_header_field_cb;
+    settings.on_header_value = on_header_value_cb;
+    settings.on_headers_complete = on_headers_complete_cb;
+    settings.on_body = on_body_cb;
+    settings.on_message_complete = on_message_complete_cb;
+
+    llhttp_t parser{};
+    llhttp_init(&parser, HTTP_RESPONSE, &settings);
+    parser.data = &pr;
+
+    std::vector<uint8_t> buf(8192);
+    size_t total = 0;
+
+    auto deadline = std::chrono::steady_clock::now() + opts.totalDeadline;
+
+    while (!pr.complete) {
+        // Basic deadline check
+        if (std::chrono::steady_clock::now() > deadline) {
+            break;
+        }
+        int n = recv(sock, reinterpret_cast<char*>(buf.data()), (int)buf.size(), 0);
+        if (n <= 0) {
+            break; // closed or timeout
+        }
+        total += (size_t)n;
+        auto err = llhttp_execute(&parser, reinterpret_cast<const char*>(buf.data()), n);
+        if (err != HPE_OK && err != HPE_PAUSED) {
+            break;
+        }
+        // Stop if we exceed max response size safety bound
+        if (total > opts.maxResponseBytes) {
+            break;
+        }
+    }
+
+    out.statusCode = pr.statusCode;
+    out.statusMessage = pr.statusMessage;
+    out.headers = std::move(pr.headers);
+    out.body = std::move(pr.body);
+
+    // Determine keep-alive: HTTP/1.1 default keep-alive unless Connection: close
+    bool keep = true;
+    auto it = out.headers.find("connection");
+    if (it != out.headers.end()) {
+        std::string v = it->second; toLowerInPlace(v);
+        if (v.find("close") != std::string::npos) keep = false;
+    }
+    return keep;
+}
+
+} // namespace EntropyEngine::Networking::HTTP

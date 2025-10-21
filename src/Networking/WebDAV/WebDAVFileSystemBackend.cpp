@@ -7,6 +7,7 @@
  * This file is part of the Entropy Networking project.
  */
 #include "Networking/WebDAV/WebDAVFileSystemBackend.h"
+#include "Networking/WebDAV/WebDAVReadStream.h"
 
 #include <stdexcept>
 #include <sstream>
@@ -25,6 +26,15 @@
 using namespace EntropyEngine::Core::IO;
 
 namespace EntropyEngine::Networking::WebDAV {
+
+std::shared_ptr<WebDAVConnection> WebDAVFileSystemBackend::acquireAgg() {
+    // If an explicit pool was provided, pick round-robin; otherwise fall back to single _conn
+    if (!_aggPool.empty()) {
+        uint32_t i = _rrAgg.fetch_add(1, std::memory_order_relaxed);
+        return _aggPool[i % _aggPool.size()];
+    }
+    return _conn;
+}
 
 static bool hasParentTraversal(std::string_view p) {
     return p.find("../") != std::string_view::npos || p.find("..\\") != std::string_view::npos;
@@ -100,7 +110,8 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
                 headers.emplace_back("Range", range);
             }
 
-            auto r = _conn->get(url, headers);
+            auto conn = acquireAgg();
+                        auto r = conn->get(url, headers);
             if (!r.isSuccess()) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "GET failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -154,7 +165,8 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
                 "  </D:prop>"
                 "</D:propfind>";
 
-            auto r = _conn->propfind(url, 0, bodyXml);
+            auto conn = acquireAgg();
+                        auto r = conn->propfind(url, 0, bodyXml);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 if (fe == FileError::FileNotFound) {
@@ -212,7 +224,8 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
 }
 
 bool WebDAVFileSystemBackend::exists(const std::string& path) {
-    if (!_conn || !_conn->isConnected()) return false;
+    auto conn = acquireAgg();
+        if (!conn || !conn->isConnected()) return false;
     try {
         // Depth: 0 for existence check
         const std::string reqPath = buildUrl(path);
@@ -223,7 +236,7 @@ bool WebDAVFileSystemBackend::exists(const std::string& path) {
             "    <D:resourcetype/>"
             "  </D:prop>"
             "</D:propfind>";
-        auto r = _conn->propfind(reqPath, 0, bodyXml);
+        auto r = conn->propfind(reqPath, 0, bodyXml);
         if (r.statusCode != 200 && r.statusCode != 207) return false;
         auto infos = parsePropfindXml(r.body);
         if (infos.empty()) return false;
@@ -264,7 +277,8 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
                 "</D:propfind>";
 
             const int depth = 1; // MVP: non-recursive
-            auto r = _conn->propfind(url, depth, bodyXml);
+            auto conn = acquireAgg();
+                        auto r = conn->propfind(url, depth, bodyXml);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PROPFIND d1 failed: " + std::to_string(r.statusCode), p);
@@ -317,8 +331,19 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
 }
 
 std::unique_ptr<FileStream> WebDAVFileSystemBackend::openStream(const std::string& path, StreamOptions options) {
-    (void)path; (void)options;
-    return nullptr;
+    try {
+        if (options.mode != StreamOptions::Read) {
+            return nullptr;
+        }
+        const std::string url = buildUrl(path);
+        const size_t bufferBytes = options.bufferSize > 0 ? options.bufferSize : (64u * 1024u);
+        // No extra headers for now; could add Range later
+        std::vector<std::pair<std::string,std::string>> extraHeaders;
+        auto conn = acquireAgg();
+                return std::make_unique<WebDAVReadStream>(conn, url, bufferBytes, extraHeaders);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 FileOperationHandle WebDAVFileSystemBackend::readLine(const std::string& path, size_t lineNumber) {
@@ -333,7 +358,7 @@ FileOperationHandle WebDAVFileSystemBackend::writeLine(const std::string& path, 
 
 BackendCapabilities WebDAVFileSystemBackend::getCapabilities() const {
     BackendCapabilities caps;
-    caps.supportsStreaming = false;
+    caps.supportsStreaming = true; // streaming via openStream
     caps.supportsRandomAccess = false;
     caps.supportsDirectories = true;
     caps.supportsMetadata = true;

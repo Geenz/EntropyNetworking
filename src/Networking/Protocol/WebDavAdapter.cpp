@@ -57,6 +57,25 @@ HttpResponseLite WebDavAdapter::handlePropfind(const HttpRequestLite& req, int d
     if (!vfsPathOpt) { res.status = 400; return res; }
     std::string vfsPath = *vfsPathOpt;
 
+    // Determine requested Depth: header (prefer header over parameter)
+    int reqDepth = depth;
+    for (const auto& kv : req.headers) {
+        const std::string& k = kv.first;
+        if (k.size() == 5 && (k == "Depth" || k == "depth" || k == "DEPTH")) {
+            const std::string& v = kv.second;
+            if (v == "0") reqDepth = 0;
+            else if (v == "1") reqDepth = 1;
+            else if (v == "infinity" || v == "Infinity" || v == "INFINITY") {
+                // Depth: infinity not supported in MVP
+                res.status = 400;
+                res.headers["Content-Type"] = "application/xml; charset=utf-8";
+                res.body = "<error>Depth infinity not supported</error>";
+                return res;
+            }
+            break;
+        }
+    }
+
     // Determine if target is a collection (by trailing slash heuristic and metadata)
     bool targetIsDir = !vfsPath.empty() && vfsPath.back() == '/';
 
@@ -139,7 +158,7 @@ HttpResponseLite WebDavAdapter::handlePropfind(const HttpRequestLite& req, int d
     addResponse(selfHref, selfName, targetIsDir, selfSize, selfMeta? selfMeta->lastModified : std::optional<std::chrono::system_clock::time_point>{}, selfType);
 
     // Depth: 1 listing for directories
-    if (depth >= 1 && targetIsDir) {
+    if (reqDepth >= 1 && targetIsDir) {
         auto dh = _vfs->createDirectoryHandle(vfsPath);
         auto listOp = dh.list({}); listOp.wait();
         if (listOp.status() == FileOpStatus::Complete) {
