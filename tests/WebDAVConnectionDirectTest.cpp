@@ -1,3 +1,7 @@
+// DISABLED: WebDAVConnection has been removed in favor of HttpClient.
+// WebDAV functionality is tested via WebDAVClientIntegrationTests using real HTTP server.
+#if 0
+
 #include <gtest/gtest.h>
 #include "HttpNetworkConnection.h"
 #include "MiniDavServer.h"
@@ -59,3 +63,5 @@ TEST(WebDAVConnectionDirectTest, SimpleGet) {
     workService.stop();
     server.stop();
 }
+
+#endif // Disabled WebDAVConnectionDirectTest

@@ -11,8 +11,8 @@
  * @file WebDAVReadStream.h
  * @brief FileStream implementation for streaming WebDAV GET operations
  *
- * This file contains WebDAVReadStream, a FileStream that consumes data from
- * WebDAVConnection's ring buffer for incremental reading of large files.
+ * This file contains WebDAVReadStream, a FileStream wrapper around HttpClient::StreamHandle
+ * for incremental reading of large files over HTTP/WebDAV.
  */
 
 #pragma once
@@ -20,26 +20,22 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <mutex>
-#include <condition_variable>
 #include <unordered_map>
 
 #include <VirtualFileSystem/FileStream.h>
-#include "Networking/WebDAV/WebDAVConnection.h"
+#include "Networking/HTTP/HttpClient.h"
 
 namespace EntropyEngine::Networking::WebDAV {
 
 /**
- * @brief Read-only FileStream for WebDAV GET operations
+ * @brief Read-only FileStream for WebDAV GET operations via HttpClient
  *
- * Consumes data from WebDAVConnection's ring buffer in a producer-consumer pattern.
- * HTTP parser (producer) fills buffer, WebDAVReadStream (consumer) reads from it.
- * Synchronization via mutex and condition variable.
+ * Wraps HttpClient::StreamHandle to provide FileStream interface for incremental
+ * reading of large files over HTTP/WebDAV.
  *
- * Thread Safety: Can be used from any thread. Internal state is protected by mutex.
+ * Thread Safety: Can be used from any thread. HttpClient::StreamHandle handles synchronization.
  *
  * @code
- * WebDAVConnection::StreamConfig cfg{.bufferBytes = 1024 * 1024};  // 1 MiB buffer
  * auto stream = backend->openStream("/remote/large_file.bin");
  *
  * std::vector<std::byte> chunk(8192);
@@ -53,20 +49,15 @@ namespace EntropyEngine::Networking::WebDAV {
 class WebDAVReadStream : public Core::IO::FileStream {
 public:
     /**
-     * @brief Constructs stream and initiates HTTP GET
+     * @brief Constructs stream from HttpClient StreamHandle
      *
-     * Constructor is non-blocking. HTTP request is sent immediately but stream
-     * waits for data on first read() call.
+     * Constructor is non-blocking. HTTP request is already initiated via
+     * HttpClient::executeStream(). Stream waits for data on first read() call.
      *
-     * @param conn WebDAVConnection for HTTP operations
-     * @param url Full URL to GET
-     * @param bufferBytes Ring buffer capacity
-     * @param extraHeaders Additional HTTP headers (e.g., Range)
+     * @param handle HttpClient StreamHandle for incremental reading
+     * @param url Full URL being streamed (for path() method)
      */
-    WebDAVReadStream(std::shared_ptr<WebDAVConnection> conn,
-                     std::string url,
-                     size_t bufferBytes,
-                     const std::vector<std::pair<std::string,std::string>>& extraHeaders = {});
+    WebDAVReadStream(HTTP::StreamHandle handle, std::string url);
 
     /**
      * @brief Destructor closes stream and aborts request
@@ -142,26 +133,20 @@ public:
      * @brief Returns HTTP status code of the streaming response (0 if unavailable)
      */
     int statusCode() const {
-        if (!_st) return 0;
-        std::scoped_lock<std::mutex> lk(_st->m);
-        return _st->statusCode;
+        return _handle.getStatusCode();
     }
 
     /**
      * @brief Returns a copy of response headers (lowercase keys)
      */
-    std::unordered_map<std::string,std::string> headers() const {
-        if (!_st) return {};
-        std::scoped_lock<std::mutex> lk(_st->m);
-        return _st->headers;
+    HTTP::HttpHeaders headers() const {
+        return _handle.getHeaders();
     }
 
 private:
-    std::shared_ptr<WebDAVConnection> _conn;               ///< Connection for abort on close
-    std::shared_ptr<WebDAVConnection::StreamState> _st;    ///< Shared ring buffer state
-    std::string _url;                                      ///< URL being streamed
-    bool _closed = false;                                  ///< true if close() called
-    bool _failed = false;                                  ///< true on error
+    HTTP::StreamHandle _handle;    ///< HttpClient stream handle for incremental reading
+    std::string _url;              ///< URL being streamed
+    bool _closed = false;          ///< true if close() called
 };
 
 } // namespace EntropyEngine::Networking::WebDAV

@@ -1,16 +1,13 @@
 #include <gtest/gtest.h>
 #include "DavTree.h"
 #include "MiniDavServer.h"
-#include "Networking/WebDAV/WebDAVConnection.h"
 #include "Networking/WebDAV/WebDAVFileSystemBackend.h"
-#include "HttpNetworkConnection.h"
 #include <Concurrency/WorkService.h>
 #include <VirtualFileSystem/VirtualFileSystem.h>
 #include <algorithm>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Networking::WebDAV;
-using namespace EntropyEngine::Networking::Tests;
 using namespace EntropyEngine::Core::IO;
 using namespace EntropyEngine::Core::Concurrency;
 
@@ -34,56 +31,29 @@ protected:
         server = std::make_unique<MiniDavServer>(tree, "/dav/");
         server->start();
 
-        // Create work service and groups
+        // Create work service and VFS group
         workService = std::make_unique<WorkService>(WorkService::Config{});
         workService->start();
 
-        httpGroup = std::make_unique<WorkContractGroup>(1000, "HttpGroup");
         vfsGroup = std::make_unique<WorkContractGroup>(2000, "VfsGroup");
-
-        workService->addWorkContractGroup(httpGroup.get());
         workService->addWorkContractGroup(vfsGroup.get());
 
         // Create VFS
         vfs = std::make_unique<VirtualFileSystem>(vfsGroup.get());
 
-        // Create HTTP network connection using work group
-        httpConn = std::make_shared<HttpNetworkConnection>("127.0.0.1", server->port(), httpGroup.get());
-        httpConn->connect();
-
-        // Create WebDAV connection
-        WebDAVConnection::Config davCfg;
-        davCfg.host = "127.0.0.1:" + std::to_string(server->port());
-        davConn = std::make_shared<WebDAVConnection>(httpConn, davCfg);
-
-        // Create backend
+        // Create backend with HttpClient
         WebDAVFileSystemBackend::Config bcfg;
+        bcfg.scheme = "http";  // Local test server uses HTTP
+        bcfg.host = "127.0.0.1:" + std::to_string(server->port());
         bcfg.baseUrl = "/dav";
-        backend = std::make_shared<WebDAVFileSystemBackend>(davConn, bcfg);
+        backend = std::make_shared<WebDAVFileSystemBackend>(bcfg);
         backend->setVirtualFileSystem(vfs.get());
-
-        // Create connection pool (3 connections) to avoid contention
-        std::vector<std::shared_ptr<WebDAVConnection>> pool;
-        for (int i = 0; i < 3; i++) {
-            auto http = std::make_shared<HttpNetworkConnection>("127.0.0.1", server->port(), httpGroup.get());
-            http->connect();
-            auto dav = std::make_shared<WebDAVConnection>(http, davCfg);
-            pool.push_back(dav);
-        }
-        backend->setAggregateConnections(pool);
     }
 
     void TearDown() override {
         backend.reset();
-        davConn.reset();
-        if (httpConn) {
-            httpConn->disconnect();
-        }
-        httpConn.reset();
-
         vfs.reset();
         vfsGroup.reset();
-        httpGroup.reset();
 
         if (workService) {
             workService->stop();
@@ -96,11 +66,8 @@ protected:
     DavTree tree;
     std::unique_ptr<MiniDavServer> server;
     std::unique_ptr<WorkService> workService;
-    std::unique_ptr<WorkContractGroup> httpGroup;
     std::unique_ptr<WorkContractGroup> vfsGroup;
     std::unique_ptr<VirtualFileSystem> vfs;
-    std::shared_ptr<HttpNetworkConnection> httpConn;
-    std::shared_ptr<WebDAVConnection> davConn;
     std::shared_ptr<WebDAVFileSystemBackend> backend;
 };
 
@@ -117,13 +84,14 @@ TEST_F(WebDAVClientIntegrationFixture, ServerSmokeTest) {
     EXPECT_GT(server->port(), 0);
 }
 
-TEST_F(WebDAVClientIntegrationFixture, Connection_Get_SimpleFile) {
-    auto resp = davConn->get("/dav/hello.txt");
-    ASSERT_TRUE(resp.isSuccess());
-    EXPECT_EQ(resp.statusCode, 200);
-    std::string body(resp.body.begin(), resp.body.end());
-    EXPECT_EQ(body, "hello world");
-}
+// Disabled: WebDAVConnection removed in favor of HttpClient
+// TEST_F(WebDAVClientIntegrationFixture, Connection_Get_SimpleFile) {
+//     auto resp = davConn->get("/dav/hello.txt");
+//     ASSERT_TRUE(resp.isSuccess());
+//     EXPECT_EQ(resp.statusCode, 200);
+//     std::string body(resp.body.begin(), resp.body.end());
+//     EXPECT_EQ(body, "hello world");
+// }
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_ReadFile_Complete) {
     auto handle = backend->readFile("/hello.txt");

@@ -25,6 +25,7 @@ enum class HttpMethod {
 
 struct HttpRequest {
     HttpMethod method = HttpMethod::GET;
+    std::string scheme = "https"; // "http" or "https" - defaults to HTTPS for security
     std::string host;      // may include ":port"
     std::string path;      // origin-form path + optional query
     HttpHeaders headers;   // lowercase keys; Host/User-Agent auto-filled if missing
@@ -40,6 +41,8 @@ struct HttpResponse {
     bool isSuccess() const { return statusCode >= 200 && statusCode < 300; }
 };
 
+enum class ProxyPolicy { Auto, DirectOnly, ForceProxy };
+
 struct RequestOptions {
     std::chrono::milliseconds connectTimeout{10000};
     std::chrono::milliseconds writeTimeout{10000};
@@ -47,6 +50,9 @@ struct RequestOptions {
     std::chrono::milliseconds totalDeadline{30000};
     size_t maxResponseBytes = 128ull * 1024ull * 1024ull;
     bool followRedirects = false; // not implemented yet
+    // Proxy behaviour (auto = env/system detection; DirectOnly = bypass; ForceProxy = expect proxy)
+    ProxyPolicy proxyPolicy = ProxyPolicy::Auto;
+    std::optional<std::string> explicitProxy; // per-request override, e.g., "http://proxy:8080"
 };
 
 } // namespace EntropyEngine::Networking::HTTP

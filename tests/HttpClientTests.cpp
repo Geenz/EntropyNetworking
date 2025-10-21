@@ -35,6 +35,7 @@ TEST_F(HttpClientFixture, Get_BasicFile_Aggregated) {
 
     HttpRequest req;
     req.method = HttpMethod::GET;
+    req.scheme = "http"; // Local test server doesn't use TLS
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
 
@@ -54,6 +55,7 @@ TEST_F(HttpClientFixture, Head_NoBody_ContentLengthPresent) {
 
     HttpRequest req;
     req.method = HttpMethod::HEAD;
+    req.scheme = "http"; // Local test server doesn't use TLS
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
 
@@ -73,6 +75,7 @@ TEST_F(HttpClientFixture, MultipleSequentialGets_Succeed) {
     for (int i = 0; i < 5; ++i) {
         HttpRequest req;
         req.method = HttpMethod::GET;
+        req.scheme = "http"; // Local test server doesn't use TLS
         req.host = std::string("127.0.0.1:") + std::to_string(server->port());
         req.path = "/dav/hello.txt";
         auto resp = client.execute(req);

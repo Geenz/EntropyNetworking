@@ -21,6 +21,8 @@
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
+#include <openssl/ssl.h>
+
 namespace EntropyEngine::Networking::HTTP {
 
 // A single HTTP/1.1 connection operating on a TCP socket.
@@ -33,11 +35,15 @@ public:
     // The socket must already be connected to host:port.
     bool executeOnSocket(int sock, const HttpRequest& req, const RequestOptions& opts, HttpResponse& out);
 
+    // Perform a single HTTPS request over an established TLS session (SSL*).
+    // The SSL object must be connected and associated with a TCP socket.
+    bool executeOnSsl(SSL* ssl, const HttpRequest& req, const RequestOptions& opts, HttpResponse& out);
+
 private:
     static std::string methodToString(HttpMethod m);
     static void toLowerInPlace(std::string& s);
 
-    // llhttp state per-call (stack allocated in executeOnSocket)
+    // llhttp state per-call (stack allocated in execute methods)
 };
 
 } // namespace EntropyEngine::Networking::HTTP

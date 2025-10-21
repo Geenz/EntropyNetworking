@@ -27,15 +27,6 @@ using namespace EntropyEngine::Core::IO;
 
 namespace EntropyEngine::Networking::WebDAV {
 
-std::shared_ptr<WebDAVConnection> WebDAVFileSystemBackend::acquireAgg() {
-    // If an explicit pool was provided, pick round-robin; otherwise fall back to single _conn
-    if (!_aggPool.empty()) {
-        uint32_t i = _rrAgg.fetch_add(1, std::memory_order_relaxed);
-        return _aggPool[i % _aggPool.size()];
-    }
-    return _conn;
-}
-
 static bool hasParentTraversal(std::string_view p) {
     return p.find("../") != std::string_view::npos || p.find("..\\") != std::string_view::npos;
 }
@@ -78,12 +69,15 @@ std::string WebDAVFileSystemBackend::buildUrl(const std::string& path) const {
 
 FileError WebDAVFileSystemBackend::mapHttpStatus(int sc) {
     switch (sc) {
-        case 200: case 201: case 204: case 207: return FileError::None;
+        case 200: case 201: case 204: case 206: case 207: return FileError::None;
         case 401: case 403: return FileError::AccessDenied;
         case 404: return FileError::FileNotFound;
         case 405: return FileError::InvalidPath; // Method not allowed
         case 409: return FileError::Conflict;
         case 413: return FileError::DiskFull;
+        case 416: return FileError::InvalidPath; // Range not satisfiable (treat as invalid for now)
+        case 423: return FileError::AccessDenied; // Locked
+        case 507: return FileError::DiskFull; // Insufficient Storage
         case 500: case 502: case 503: case 504: return FileError::NetworkError;
         default:
             if (sc >= 400 && sc < 500) return FileError::InvalidPath;
@@ -99,7 +93,16 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
                                               const ExecContext& /*ctx*/){
         try {
             const std::string url = buildUrl(p);
-            std::vector<std::pair<std::string,std::string>> headers;
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::GET;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+
             if (options.offset > 0 || options.length.has_value()) {
                 const uint64_t start = options.offset;
                 std::string range = "bytes=" + std::to_string(start) + "-";
@@ -107,11 +110,10 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
                     const uint64_t end = start + static_cast<uint64_t>(*options.length) - 1;
                     range += std::to_string(end);
                 }
-                headers.emplace_back("Range", range);
+                req.headers["Range"] = range;
             }
 
-            auto conn = acquireAgg();
-                        auto r = conn->get(url, headers);
+            auto r = _client.execute(req);
             if (!r.isSuccess()) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "GET failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -165,8 +167,19 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
                 "  </D:prop>"
                 "</D:propfind>";
 
-            auto conn = acquireAgg();
-                        auto r = conn->propfind(url, 0, bodyXml);
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::PROPFIND;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["Depth"] = "0";
+            req.headers["Content-Type"] = "application/xml; charset=utf-8";
+            req.body.assign(bodyXml.begin(), bodyXml.end());
+
+            auto r = _client.execute(req);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 if (fe == FileError::FileNotFound) {
@@ -224,10 +237,7 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
 }
 
 bool WebDAVFileSystemBackend::exists(const std::string& path) {
-    auto conn = acquireAgg();
-        if (!conn || !conn->isConnected()) return false;
     try {
-        // Depth: 0 for existence check
         const std::string reqPath = buildUrl(path);
         const std::string bodyXml =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
@@ -236,7 +246,20 @@ bool WebDAVFileSystemBackend::exists(const std::string& path) {
             "    <D:resourcetype/>"
             "  </D:prop>"
             "</D:propfind>";
-        auto r = conn->propfind(reqPath, 0, bodyXml);
+
+        HTTP::HttpRequest req;
+        req.method = HTTP::HttpMethod::PROPFIND;
+        req.scheme = _cfg.scheme;
+        req.host = _cfg.host;
+        req.path = reqPath;
+        if (!_cfg.authHeader.empty()) {
+            req.headers["Authorization"] = _cfg.authHeader;
+        }
+        req.headers["Depth"] = "0";
+        req.headers["Content-Type"] = "application/xml; charset=utf-8";
+        req.body.assign(bodyXml.begin(), bodyXml.end());
+
+        auto r = _client.execute(req);
         if (r.statusCode != 200 && r.statusCode != 207) return false;
         auto infos = parsePropfindXml(r.body);
         if (infos.empty()) return false;
@@ -276,9 +299,19 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
                 "  </D:prop>"
                 "</D:propfind>";
 
-            const int depth = 1; // MVP: non-recursive
-            auto conn = acquireAgg();
-                        auto r = conn->propfind(url, depth, bodyXml);
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::PROPFIND;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["Depth"] = "1";
+            req.headers["Content-Type"] = "application/xml; charset=utf-8";
+            req.body.assign(bodyXml.begin(), bodyXml.end());
+
+            auto r = _client.execute(req);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PROPFIND d1 failed: " + std::to_string(r.statusCode), p);
@@ -335,12 +368,32 @@ std::unique_ptr<FileStream> WebDAVFileSystemBackend::openStream(const std::strin
         if (options.mode != StreamOptions::Read) {
             return nullptr;
         }
+
         const std::string url = buildUrl(path);
         const size_t bufferBytes = options.bufferSize > 0 ? options.bufferSize : (64u * 1024u);
-        // No extra headers for now; could add Range later
-        std::vector<std::pair<std::string,std::string>> extraHeaders;
-        auto conn = acquireAgg();
-                return std::make_unique<WebDAVReadStream>(conn, url, bufferBytes, extraHeaders);
+
+        // Prepare HTTP GET request
+        HTTP::HttpRequest req;
+        req.method = HTTP::HttpMethod::GET;
+        req.scheme = _cfg.scheme;
+        req.host = _cfg.host;
+        req.path = url;
+        if (!_cfg.authHeader.empty()) {
+            req.headers["Authorization"] = _cfg.authHeader;
+        }
+
+        // Configure streaming options
+        HTTP::StreamOptions streamOpts;
+        streamOpts.bufferBytes = bufferBytes;
+        streamOpts.maxBodyBytes = 0;  // Unlimited for streaming
+        streamOpts.connectTimeout = std::chrono::milliseconds(10000);
+        streamOpts.totalDeadline = std::chrono::milliseconds(0);  // No total deadline for streaming
+
+        // Execute streaming request
+        auto handle = _client.executeStream(req, streamOpts);
+
+        // Create WebDAVReadStream wrapper
+        return std::make_unique<WebDAVReadStream>(std::move(handle), url);
     } catch (...) {
         return nullptr;
     }

@@ -22,11 +22,10 @@
 #include <span>
 #include <vector>
 #include <optional>
-#include <atomic>
 
 #include <VirtualFileSystem/IFileSystemBackend.h>
 
-#include "Networking/WebDAV/WebDAVConnection.h"
+#include "Networking/HTTP/HttpClient.h"
 #include "Networking/WebDAV/WebDAVPropfindParser.h"
 #include "Networking/WebDAV/WebDAVUtils.h"
 
@@ -50,15 +49,13 @@ namespace EntropyEngine::Networking::WebDAV {
  * WorkContractGroup and connection pool (if configured).
  *
  * @code
- * // Create connection and backend
- * WebDAVConnection::Config connCfg{.host = "example.com"};
- * auto conn = std::make_shared<WebDAVConnection>(netConn, connCfg);
- * WebDAVFileSystemBackend::Config backendCfg{.baseUrl = "/dav"};
- * auto backend = std::make_shared<WebDAVFileSystemBackend>(conn, backendCfg);
- *
- * // Optional: enable connection pooling for concurrent requests
- * std::vector<std::shared_ptr<WebDAVConnection>> pool = {conn1, conn2, conn3};
- * backend->setAggregateConnections(std::move(pool));
+ * // Create backend
+ * WebDAVFileSystemBackend::Config cfg{
+ *     .scheme = "https",
+ *     .host = "example.com",
+ *     .baseUrl = "/dav"
+ * };
+ * auto backend = std::make_shared<WebDAVFileSystemBackend>(cfg);
  *
  * // Mount in VFS
  * vfs->mount("/remote", backend);
@@ -76,29 +73,18 @@ public:
      * @brief Backend configuration
      */
     struct Config {
-        std::string baseUrl;  ///< Base URL path on server (e.g., "/dav/assets")
+        std::string scheme = "https";  ///< HTTP scheme ("http" or "https", defaults to "https")
+        std::string host;              ///< Server hostname with optional port (e.g., "example.com:8080")
+        std::string baseUrl;           ///< Base URL path on server (e.g., "/dav/assets")
+        std::string authHeader;        ///< Optional Authorization header value (e.g., "Bearer ..." or "Basic ...")
     };
 
     /**
-     * @brief Constructs WebDAV backend with single connection
-     * @param conn WebDAVConnection for HTTP operations (must be connected)
-     * @param cfg Backend configuration (base URL)
+     * @brief Constructs WebDAV backend with HttpClient
+     * @param cfg Backend configuration (scheme, host, base URL)
      */
-    WebDAVFileSystemBackend(std::shared_ptr<WebDAVConnection> conn, Config cfg)
-        : _conn(std::move(conn)), _cfg(std::move(cfg)) {}
-
-    /**
-     * @brief Enables connection pooling for concurrent requests
-     *
-     * Provides N independent HTTP connections for true parallelism. Operations
-     * select connections round-robin. If not called, backend uses single connection
-     * passed to constructor.
-     *
-     * @param conns Vector of connected WebDAVConnection instances
-     */
-    void setAggregateConnections(std::vector<std::shared_ptr<WebDAVConnection>> conns) {
-        _aggPool = std::move(conns);
-    }
+    explicit WebDAVFileSystemBackend(Config cfg)
+        : _client(), _cfg(std::move(cfg)) {}
 
     /**
      * @brief Reads file via HTTP GET (supports Range header)
@@ -193,16 +179,8 @@ public:
     std::string normalizeKey(const std::string& path) const override { return path; }
 
 private:
-    std::shared_ptr<WebDAVConnection> _conn;                       ///< Primary connection (fallback if no pool)
-    std::vector<std::shared_ptr<WebDAVConnection>> _aggPool;       ///< Optional connection pool for concurrency
-    std::atomic<uint32_t> _rrAgg{0};                               ///< Round-robin counter for pool selection
-    Config _cfg;                                                   ///< Backend configuration
-
-    /**
-     * @brief Selects connection for this operation (round-robin if pool configured)
-     * @return Connection to use for HTTP request
-     */
-    std::shared_ptr<WebDAVConnection> acquireAgg();
+    HTTP::HttpClient _client;  ///< HTTP client for WebDAV operations
+    Config _cfg;               ///< Backend configuration
 
     /**
      * @brief Builds full URL from VFS path

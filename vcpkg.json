@@ -11,6 +11,10 @@
     "gtest",
     "tinyxml2",
     "llhttp",
-    "cpp-httplib"
+    "cpp-httplib",
+    {
+      "name": "curl",
+      "features": ["http2", "ssl"]
+    }
   ]
 }

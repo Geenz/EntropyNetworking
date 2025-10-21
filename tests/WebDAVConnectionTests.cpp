@@ -1,3 +1,7 @@
+// DISABLED: WebDAVConnection has been removed in favor of HttpClient.
+// WebDAV functionality is tested via WebDAVClientIntegrationTests using real HTTP server.
+#if 0
+
 #include <gtest/gtest.h>
 #include "MockHttpConnection.h"
 #include "Networking/WebDAV/WebDAVConnection.h"
@@ -108,3 +112,5 @@ TEST(WebDAVConnection, GetBodySizeExceeded) {
     // Failure message propagated from parser; presence is enough
     ASSERT_FALSE(r.statusMessage.empty());
 }
+
+#endif // Disabled WebDAVConnectionTests
