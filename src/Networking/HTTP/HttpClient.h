@@ -35,7 +35,8 @@ struct StreamState {
     bool failed = false;                                      ///< true on error
     std::string failureReason;                                ///< Error description
     int statusCode = 0;                                       ///< HTTP status code
-    HttpHeaders headers;                                      ///< Response headers (lowercase)
+    HttpHeaders headers;                                      ///< Response headers (lowercase, last-seen)
+    HttpHeaderValuesMap headersMulti;                         ///< All values per header key
     std::vector<uint8_t> buffer;                              ///< Ring buffer storage
     size_t head = 0;                                          ///< Read index
     size_t tail = 0;                                          ///< Write index
@@ -104,6 +105,12 @@ public:
      * @return Headers map (lowercase keys)
      */
     HttpHeaders getHeaders() const;
+
+    /**
+     * @brief Gets multi-valued response headers (available after headers received)
+     * @return Map of header name to all values
+     */
+    HttpHeaderValuesMap getHeadersMulti() const;
 
     /**
      * @brief Waits for headers to be received
@@ -223,7 +230,8 @@ private:
 
     struct ResponseData {
         std::vector<uint8_t> body;
-        HttpHeaders headers;
+        HttpHeaders headers;                // last-seen value per key
+        HttpHeaderValuesMap headersMulti;   // all values per key
         std::string curHeaderLine;
         size_t cap = 0;              // max response bytes (0 = unlimited)
         bool abortedByCap = false;   // indicates we aborted due to cap

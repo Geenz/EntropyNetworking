@@ -89,16 +89,6 @@ public:
             shutdown(_listenSock, SD_BOTH);
             closesocket(_listenSock);
             _listenSock = -1;
-            // Wake up accept() by connecting
-            SOCKET s = ::socket(AF_INET, SOCK_STREAM, 0);
-            if (s != INVALID_SOCKET) {
-                sockaddr_in addr{};
-                addr.sin_family = AF_INET;
-                addr.sin_port = htons(_port);
-                inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-                ::connect(s, (sockaddr*)&addr, sizeof(addr));
-                closesocket(s);
-            }
 #else
             shutdown(_listenSock, SHUT_RDWR);
             close(_listenSock);
@@ -252,11 +242,46 @@ private:
                 sendSimple(cs, n ? 405 : 404);
                 return;
             }
-            std::string bodyOut = (method == "GET") ? n->content : std::string();
-            std::string mime = n->mime.empty() ? "application/octet-stream" : n->mime;
 
             std::unordered_map<std::string,std::string> extraHeaders;
             extraHeaders["Accept-Ranges"] = "bytes";
+            std::string mime = n->mime.empty() ? "application/octet-stream" : n->mime;
+
+            // Handle Range requests
+            auto itRange = headers.find("range");
+            if (method == "GET" && itRange != headers.end()) {
+                // Parse "bytes=start-end"
+                const std::string& rangeValue = itRange->second;
+                if (rangeValue.rfind("bytes=", 0) == 0) {
+                    std::string byteRange = rangeValue.substr(6);
+                    auto dashPos = byteRange.find('-');
+                    if (dashPos != std::string::npos) {
+                        size_t start = 0, end = n->content.size() - 1;
+                        std::string startStr = byteRange.substr(0, dashPos);
+                        std::string endStr = byteRange.substr(dashPos + 1);
+
+                        if (!startStr.empty()) start = std::strtoull(startStr.c_str(), nullptr, 10);
+                        if (!endStr.empty()) end = std::strtoull(endStr.c_str(), nullptr, 10);
+
+                        // Clamp to valid range
+                        if (start < n->content.size() && end >= start) {
+                            end = std::min(end, n->content.size() - 1);
+                            size_t length = end - start + 1;
+                            std::string bodyOut = n->content.substr(start, length);
+
+                            extraHeaders["Content-Range"] = "bytes " + std::to_string(start) + "-" +
+                                                            std::to_string(end) + "/" +
+                                                            std::to_string(n->content.size());
+                            extraHeaders["Content-Length"] = std::to_string(length);
+                            sendRaw(cs, 206, mime, bodyOut, extraHeaders);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Full response (no range or range parsing failed)
+            std::string bodyOut = (method == "GET") ? n->content : std::string();
             extraHeaders["Content-Length"] = std::to_string(n->content.size());
             sendRaw(cs, 200, mime, bodyOut, extraHeaders);
             return;
@@ -379,6 +404,7 @@ private:
         std::unordered_map<std::string,std::string> headers = {})
     {
         std::string statusText = (status == 200 ? "OK" :
+                                  status == 206 ? "Partial Content" :
                                   status == 207 ? "Multi-Status" :
                                   status == 404 ? "Not Found" :
                                   status == 405 ? "Method Not Allowed" :
@@ -388,7 +414,7 @@ private:
         if (headers.find("Content-Length") == headers.end()) {
             headers["Content-Length"] = std::to_string(body.size());
         }
-        headers["Connection"] = "keep-alive";
+        headers["Connection"] = "close";  // Single request per connection
         for (auto& kv : headers) {
             resp += kv.first + ": " + kv.second + "\r\n";
         }

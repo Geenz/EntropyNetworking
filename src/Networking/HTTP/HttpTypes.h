@@ -16,8 +16,10 @@
 
 namespace EntropyEngine::Networking::HTTP {
 
-// Lowercase header keys map
+// Lowercase header keys map (single value per key for convenience)
 using HttpHeaders = std::unordered_map<std::string, std::string>;
+// Multi-valued headers map (stores all values for a given header key)
+using HttpHeaderValuesMap = std::unordered_map<std::string, std::vector<std::string>>;
 
 enum class HttpMethod {
     GET, HEAD, POST, PUT, DELETE_, OPTIONS, PATCH, PROPFIND
@@ -35,8 +37,9 @@ struct HttpRequest {
 struct HttpResponse {
     int statusCode = 0;
     std::string statusMessage;
-    HttpHeaders headers;   // lowercase keys
-    std::vector<uint8_t> body; // aggregated body
+    HttpHeaders headers;            // lowercase keys (last-seen value)
+    HttpHeaderValuesMap headersMulti; // all values per header key (lowercase keys)
+    std::vector<uint8_t> body;      // aggregated body
 
     bool isSuccess() const { return statusCode >= 200 && statusCode < 300; }
 };

@@ -122,7 +122,10 @@ size_t HttpClient::headerCallback(char* data, size_t size, size_t nmemb, void* u
         std::transform(name.begin(), name.end(), name.begin(),
                       [](unsigned char c){ return std::tolower(c); });
 
+        // Store last-seen value for convenience
         respData->headers[name] = value;
+        // Also append to multi-valued header map
+        respData->headersMulti[name].push_back(value);
     }
 
     return totalSize;
@@ -313,6 +316,7 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
         response.statusCode = static_cast<int>(statusCode);
         response.statusMessage = "OK";
         response.headers = std::move(respData.headers);
+        response.headersMulti = std::move(respData.headersMulti);
         response.body = std::move(respData.body);
     }
 
@@ -391,7 +395,10 @@ size_t HttpClient::streamHeaderCallback(char* data, size_t size, size_t nmemb, v
                       [](unsigned char c){ return std::tolower(c); });
 
         std::lock_guard<std::mutex> lock(state->mutex);
+        // Store last-seen value for convenience
         state->headers[name] = value;
+        // Append to multi-valued map
+        state->headersMulti[name].push_back(value);
     }
 
     return totalSize;
@@ -614,6 +621,11 @@ int StreamHandle::getStatusCode() const {
 HttpHeaders StreamHandle::getHeaders() const {
     std::lock_guard<std::mutex> lock(_state->mutex);
     return _state->headers;
+}
+
+HttpHeaderValuesMap StreamHandle::getHeadersMulti() const {
+    std::lock_guard<std::mutex> lock(_state->mutex);
+    return _state->headersMulti;
 }
 
 bool StreamHandle::waitForHeaders(std::chrono::milliseconds timeout) {

@@ -180,12 +180,15 @@ TEST_F(HttpClientWebDAVIntegration, RangeRequest) {
 
     auto resp = client.execute(req);
 
-    // Should return 206 Partial Content or 200 OK (some servers ignore Range)
-    ASSERT_TRUE(resp.statusCode == 200 || resp.statusCode == 206)
-        << "Status: " << resp.statusCode << ", Message: " << resp.statusMessage;
+    // MiniDavServer now supports Range requests
+    ASSERT_EQ(resp.statusCode, 206) << "Status: " << resp.statusCode
+                                     << ", Message: " << resp.statusMessage;
 
-    if (resp.statusCode == 206) {
-        std::string body(resp.body.begin(), resp.body.end());
-        EXPECT_EQ(body, "hello");
-    }
+    std::string body(resp.body.begin(), resp.body.end());
+    EXPECT_EQ(body, "hello");  // "hello world" -> first 5 bytes = "hello"
+
+    // Verify Content-Range header
+    auto itRange = resp.headers.find("content-range");
+    ASSERT_NE(itRange, resp.headers.end());
+    EXPECT_EQ(itRange->second, "bytes 0-4/11");
 }
