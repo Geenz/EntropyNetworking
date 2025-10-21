@@ -7,6 +7,7 @@
  * This file is part of the Entropy Networking project.
  */
 #include "Networking/WebDAV/WebDAVReadStream.h"
+#include <cstdlib>
 
 namespace EntropyEngine::Networking::WebDAV {
 
@@ -81,6 +82,31 @@ void WebDAVReadStream::close() {
     _closed = true;
     // Cancel the underlying HTTP transfer to stop promptly
     _handle.cancel();
+}
+
+std::optional<uint64_t> WebDAVReadStream::contentLength() const {
+    auto h = _handle.getHeaders();
+    auto it = h.find("content-length");
+    if (it == h.end()) return std::nullopt;
+    const char* s = it->second.c_str();
+    char* end = nullptr;
+    unsigned long long v = std::strtoull(s, &end, 10);
+    if (end == s) return std::nullopt;
+    return static_cast<uint64_t>(v);
+}
+
+std::optional<std::string> WebDAVReadStream::etag() const {
+    auto h = _handle.getHeaders();
+    auto it = h.find("etag");
+    if (it == h.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<std::string> WebDAVReadStream::contentType() const {
+    auto h = _handle.getHeaders();
+    auto it = h.find("content-type");
+    if (it == h.end()) return std::nullopt;
+    return it->second;
 }
 
 } // namespace EntropyEngine::Networking::WebDAV

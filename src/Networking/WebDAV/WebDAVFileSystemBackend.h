@@ -95,6 +95,10 @@ public:
     Core::IO::FileOperationHandle readFile(const std::string& path,
                                            Core::IO::ReadOptions options = {}) override;
 
+    // Backend-specific helper: Conditional GET with If-None-Match; returns Complete with empty body on 304
+    Core::IO::FileOperationHandle readFileIfNoneMatch(const std::string& path,
+                                                      const std::string& etag);
+
     /**
      * @brief Write operations not supported (read-only backend)
      * @return Immediate failure handle
@@ -103,17 +107,44 @@ public:
                                             std::span<const std::byte> data,
                                             Core::IO::WriteOptions options = {}) override;
 
+    // Backend-specific helper overload: write with If-Match precondition (no EntropyCore API changes)
+    Core::IO::FileOperationHandle writeFile(const std::string& path,
+                                            std::span<const std::byte> data,
+                                            const std::string& ifMatchETag);
+
     /**
      * @brief Delete operations not supported (read-only backend)
      * @return Immediate failure handle
      */
     Core::IO::FileOperationHandle deleteFile(const std::string& path) override;
 
+    // Backend-specific helper: delete with If-Match precondition (no EntropyCore API changes)
+    Core::IO::FileOperationHandle deleteFileIfMatch(const std::string& path,
+                                                    const std::string& ifMatchETag);
+
     /**
      * @brief Create operations not supported (read-only backend)
      * @return Immediate failure handle
      */
     Core::IO::FileOperationHandle createFile(const std::string& path) override;
+
+    /**
+     * @brief Create a directory via WebDAV MKCOL
+     * @param path VFS path to directory to create (e.g., "/newdir/")
+     * @return FileOperationHandle that completes with success on 201 and maps 405/409 appropriately
+     */
+    Core::IO::FileOperationHandle createDirectory(const std::string& path);
+
+    // WebDAV MOVE/COPY operations (backend-specific helpers)
+    Core::IO::FileOperationHandle move(const std::string& srcPath,
+                                       const std::string& dstPath,
+                                       bool overwrite = true,
+                                       std::optional<std::string> ifMatchETag = {});
+
+    Core::IO::FileOperationHandle copy(const std::string& srcPath,
+                                       const std::string& dstPath,
+                                       bool overwrite = true,
+                                       bool depth0 = false);
 
     /**
      * @brief Gets file/directory metadata via PROPFIND Depth:0

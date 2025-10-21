@@ -45,6 +45,10 @@ struct StreamState {
     size_t totalReceived = 0;                                 ///< Total bytes received
     size_t maxBodyBytes = 0;                                  ///< Hard safety cap
     bool cancelRequested = false;                             ///< Cancellation requested by consumer
+    // Streaming control
+    CURL* easy = nullptr;                                     ///< cURL easy handle for this stream (set by worker thread)
+    bool paused = false;                                      ///< true if write callback paused due to backpressure
+    bool resumeRequested = false;                              ///< consumer requested resume (handled on worker thread)
 };
 
 /**

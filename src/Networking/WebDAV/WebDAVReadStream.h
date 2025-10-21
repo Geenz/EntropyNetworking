@@ -24,6 +24,8 @@
 
 #include <VirtualFileSystem/FileStream.h>
 #include "Networking/HTTP/HttpClient.h"
+#include <optional>
+#include <cstdint>
 
 namespace EntropyEngine::Networking::WebDAV {
 
@@ -142,6 +144,11 @@ public:
     HTTP::HttpHeaders headers() const {
         return _handle.getHeaders();
     }
+
+    // Convenience accessors for common headers
+    std::optional<uint64_t> contentLength() const;
+    std::optional<std::string> etag() const;
+    std::optional<std::string> contentType() const;
 
 private:
     HTTP::StreamHandle _handle;    ///< HttpClient stream handle for incremental reading

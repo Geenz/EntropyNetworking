@@ -24,7 +24,7 @@ add_executable(EntropyNetworkingTests
     HttpClientTests.cpp
     HttpClientRobustnessTests.cpp
     HttpClientWebDAVIntegrationTest.cpp
-    HttpNetworkConnectionDebug.cpp
+    HttpClientStreamingTests.cpp
 )
 
 # Tests link libraries

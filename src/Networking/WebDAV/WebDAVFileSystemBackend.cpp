@@ -131,21 +131,196 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
     });
 }
 
+FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::string& path,
+                                                      const std::string& etag) {
+    if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this, etag](FileOperationHandle::OpState& s,
+                                           const std::string& p,
+                                           const ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::GET;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["If-None-Match"] = etag;
+
+            auto r = _client.execute(req);
+            if (r.statusCode == 304) {
+                // Not Modified: succeed with empty body to signal cache hit
+                s.bytes.clear();
+                s.complete(FileOpStatus::Complete);
+                return;
+            }
+            if (!r.isSuccess()) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "Conditional GET failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(FileOpStatus::Failed);
+                return;
+            }
+
+            s.bytes.assign(reinterpret_cast<const std::byte*>(r.body.data()),
+                           reinterpret_cast<const std::byte*>(r.body.data()) + r.body.size());
+            s.complete(FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(FileError::NetworkError, e.what(), p);
+            s.complete(FileOpStatus::Failed);
+        }
+    });
+}
+
 FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
                                                        std::span<const std::byte> data,
-                                                       WriteOptions options) {
-    (void)path; (void)data; (void)options;
-    return FileOperationHandle::immediate(FileOpStatus::Failed);
+                                                       WriteOptions /*options*/) {
+    if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this, data](FileOperationHandle::OpState& s,
+                                           const std::string& p,
+                                           const ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::PUT;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            // Optional: set a default Content-Type for binary uploads
+            req.headers["Content-Type"] = "application/octet-stream";
+
+            // Copy data into request body
+            req.body.resize(data.size());
+            if (!data.empty()) {
+                std::memcpy(req.body.data(), data.data(), data.size());
+            }
+
+            auto r = _client.execute(req);
+            if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "PUT failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(FileOpStatus::Failed);
+                return;
+            }
+
+            s.complete(FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(FileError::NetworkError, e.what(), p);
+            s.complete(FileOpStatus::Failed);
+        }
+    });
 }
 
 FileOperationHandle WebDAVFileSystemBackend::deleteFile(const std::string& path) {
-    (void)path;
-    return FileOperationHandle::immediate(FileOpStatus::Failed);
+    if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+                                     const std::string& p,
+                                     const ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::DELETE_;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+
+            auto r = _client.execute(req);
+            if (!(r.statusCode == 200 || r.statusCode == 204)) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "DELETE failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(FileOpStatus::Failed);
+                return;
+            }
+
+            s.complete(FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(FileError::NetworkError, e.what(), p);
+            s.complete(FileOpStatus::Failed);
+        }
+    });
 }
 
 FileOperationHandle WebDAVFileSystemBackend::createFile(const std::string& path) {
-    (void)path;
-    return FileOperationHandle::immediate(FileOpStatus::Failed);
+    if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+                                     const std::string& p,
+                                     const ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::PUT;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["Content-Type"] = "application/octet-stream";
+            // Empty body creates/empties the file
+
+            auto r = _client.execute(req);
+            if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "PUT (create) failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(FileOpStatus::Failed);
+                return;
+            }
+
+            s.complete(FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(FileError::NetworkError, e.what(), p);
+            s.complete(FileOpStatus::Failed);
+        }
+    });
+}
+
+FileOperationHandle WebDAVFileSystemBackend::createDirectory(const std::string& path) {
+    if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+                                     const std::string& p,
+                                     const ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::MKCOL;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+
+            auto r = _client.execute(req);
+            if (r.statusCode != 201) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "MKCOL failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(FileOpStatus::Failed);
+                return;
+            }
+
+            s.complete(FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(FileError::NetworkError, e.what(), p);
+            s.complete(FileOpStatus::Failed);
+        }
+    });
 }
 
 FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path) {
@@ -422,4 +597,174 @@ BackendCapabilities WebDAVFileSystemBackend::getCapabilities() const {
     return caps;
 }
 
+// == MOVE/COPY operations ==
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
+    const std::string& srcPath,
+    const std::string& dstPath,
+    bool overwrite,
+    std::optional<std::string> ifMatchETag) {
+    if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
+
+    return _vfs->submit(srcPath, [this, srcPath, dstPath, overwrite, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+                                                                                  const std::string& /*p*/,
+                                                                                  const Core::IO::ExecContext& /*ctx*/) {
+        try {
+            const std::string srcUrl = buildUrl(srcPath);
+            const std::string dstUrl = buildUrl(dstPath);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::MOVE;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = srcUrl;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["Destination"] = dstUrl; // absolute-path OK for MiniDavServer
+            req.headers["Overwrite"] = overwrite ? "T" : "F";
+            if (ifMatchETag && !ifMatchETag->empty()) {
+                req.headers["If-Match"] = *ifMatchETag;
+            }
+
+            auto r = _client.execute(req);
+            if (r.statusCode == 201 || r.statusCode == 204) {
+                s.complete(Core::IO::FileOpStatus::Complete);
+                return;
+            }
+            auto fe = mapHttpStatus(r.statusCode);
+            s.setError(fe, "MOVE failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, srcPath);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        } catch (const std::exception& e) {
+            s.setError(Core::IO::FileError::NetworkError, e.what(), srcPath);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        }
+    });
+}
+
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
+    const std::string& srcPath,
+    const std::string& dstPath,
+    bool overwrite,
+    bool depth0) {
+    if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
+
+    return _vfs->submit(srcPath, [this, srcPath, dstPath, overwrite, depth0](Core::IO::FileOperationHandle::OpState& s,
+                                                                             const std::string& /*p*/,
+                                                                             const Core::IO::ExecContext& /*ctx*/) {
+        try {
+            const std::string srcUrl = buildUrl(srcPath);
+            const std::string dstUrl = buildUrl(dstPath);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::COPY;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = srcUrl;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            req.headers["Destination"] = dstUrl;
+            req.headers["Overwrite"] = overwrite ? "T" : "F";
+            if (depth0) req.headers["Depth"] = "0";
+
+            auto r = _client.execute(req);
+            if (r.statusCode == 201 || r.statusCode == 204) {
+                s.complete(Core::IO::FileOpStatus::Complete);
+                return;
+            }
+            auto fe = mapHttpStatus(r.statusCode);
+            s.setError(fe, "COPY failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, srcPath);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        } catch (const std::exception& e) {
+            s.setError(Core::IO::FileError::NetworkError, e.what(), srcPath);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        }
+    });
+}
+
+
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
+    const std::string& path,
+    std::span<const std::byte> data,
+    const std::string& ifMatchETag) {
+    if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this, data, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+                                                        const std::string& p,
+                                                        const Core::IO::ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::PUT;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            if (!ifMatchETag.empty()) {
+                req.headers["If-Match"] = ifMatchETag;
+            }
+            req.headers["Content-Type"] = "application/octet-stream";
+
+            req.body.resize(data.size());
+            if (!data.empty()) {
+                std::memcpy(req.body.data(), data.data(), data.size());
+            }
+
+            auto r = _client.execute(req);
+            if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "PUT failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(Core::IO::FileOpStatus::Failed);
+                return;
+            }
+            s.complete(Core::IO::FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(Core::IO::FileError::NetworkError, e.what(), p);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        }
+    });
+}
+
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
+    const std::string& path,
+    const std::string& ifMatchETag) {
+    if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
+
+    return _vfs->submit(path, [this, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+                                                  const std::string& p,
+                                                  const Core::IO::ExecContext& /*ctx*/){
+        try {
+            const std::string url = buildUrl(p);
+
+            HTTP::HttpRequest req;
+            req.method = HTTP::HttpMethod::DELETE_;
+            req.scheme = _cfg.scheme;
+            req.host = _cfg.host;
+            req.path = url;
+            if (!_cfg.authHeader.empty()) {
+                req.headers["Authorization"] = _cfg.authHeader;
+            }
+            if (!ifMatchETag.empty()) {
+                req.headers["If-Match"] = ifMatchETag;
+            }
+
+            auto r = _client.execute(req);
+            if (!(r.statusCode == 200 || r.statusCode == 204)) {
+                auto fe = mapHttpStatus(r.statusCode);
+                s.setError(fe, "DELETE failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
+                s.complete(Core::IO::FileOpStatus::Failed);
+                return;
+            }
+            s.complete(Core::IO::FileOpStatus::Complete);
+        } catch (const std::exception& e) {
+            s.setError(Core::IO::FileError::NetworkError, e.what(), p);
+            s.complete(Core::IO::FileOpStatus::Failed);
+        }
+    });
+}
+
 } // namespace EntropyEngine::Networking::WebDAV
+

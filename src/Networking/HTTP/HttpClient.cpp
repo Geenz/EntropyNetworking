@@ -13,6 +13,7 @@
 #include <sstream>
 #include <cctype>
 #include <cstdlib>
+#include <cstdio>
 
 namespace EntropyEngine::Networking::HTTP {
 
@@ -200,6 +201,15 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
         case HttpMethod::PROPFIND:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PROPFIND");
             break;
+        case HttpMethod::MKCOL:
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "MKCOL");
+            break;
+        case HttpMethod::MOVE:
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "MOVE");
+            break;
+        case HttpMethod::COPY:
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "COPY");
+            break;
     }
 
     // Request body (aggregated)
@@ -213,13 +223,51 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     }
 
-    // Select HTTP version based on scheme
-    // - For HTTPS: allow HTTP/2 via ALPN with fallback to HTTP/1.1
-    // - For HTTP: stick to HTTP/1.1 to avoid h2c upgrade issues with simple servers
-    if (req.scheme == "https") {
-        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
-    } else {
-        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
+    // Select HTTP version preference
+    switch (opts.httpVersionPref) {
+        case HttpVersionPref::PreferH3:
+            curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_3);
+            break;
+        case HttpVersionPref::H3Only:
+            curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_3ONLY);
+            break;
+        default:
+            if (req.scheme == "https") {
+                curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
+            } else {
+                curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
+            }
+            break;
+    }
+
+    // TLS options
+    if (opts.caInfoPath && !opts.caInfoPath->empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, opts.caInfoPath->c_str());
+    }
+    if (opts.caPathDir && !opts.caPathDir->empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAPATH, opts.caPathDir->c_str());
+    }
+    if (opts.sslCertPath && !opts.sslCertPath->empty()) {
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, opts.sslCertPath->c_str());
+    }
+    if (opts.sslKeyPath && !opts.sslKeyPath->empty()) {
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, opts.sslKeyPath->c_str());
+    }
+    if (opts.sslKeyPasswd && !opts.sslKeyPasswd->empty()) {
+        curl_easy_setopt(curl, CURLOPT_KEYPASSWD, opts.sslKeyPasswd->c_str());
+    }
+    if (opts.pinnedPublicKey && !opts.pinnedPublicKey->empty()) {
+        curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, opts.pinnedPublicKey->c_str());
+    }
+    switch (opts.tlsMinVersion) {
+        case TlsMinVersion::TLSv1_2:
+            curl_easy_setopt(curl, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1_2);
+            break;
+        case TlsMinVersion::TLSv1_3:
+            curl_easy_setopt(curl, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1_3);
+            break;
+        default:
+            break;
     }
 
     // Callbacks
@@ -235,10 +283,23 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
     // Timeouts
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long)opts.connectTimeout.count());
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)opts.totalDeadline.count());
-    // Approximate read-idle timeout via low-speed options if set (>0)
+    // Approximate idle/write timeouts via low-speed options
+    long lowSpeedTimeSec = 0;
     if (opts.readIdleTimeout.count() > 0) {
+        lowSpeedTimeSec = std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.readIdleTimeout.count()/1000)));
+    }
+    if (opts.writeTimeout.count() > 0) {
+        lowSpeedTimeSec = std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.writeTimeout.count()/1000)));
+        // Also limit time waiting for 100-continue handshake when Expect is enabled
+#ifdef CURLOPT_EXPECT_100_TIMEOUT_MS
+        if (opts.expect100Continue) {
+            curl_easy_setopt(curl, CURLOPT_EXPECT_100_TIMEOUT_MS, (long)opts.writeTimeout.count());
+        }
+#endif
+    }
+    if (lowSpeedTimeSec > 0) {
         curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L); // bytes/sec
-        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, (long)std::max<int64_t>(1, opts.readIdleTimeout.count()/1000));
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, lowSpeedTimeSec);
     }
 
     // Avoid signals in multi-threaded apps
@@ -255,10 +316,12 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
     // Enforce response cap via our write callback
     respData.cap = opts.maxResponseBytes;
 
-    // Follow redirects if requested
-    if (opts.followRedirects) {
+    // Follow redirects: default ON for safe methods (GET/HEAD/PROPFIND/OPTIONS) unless explicitly disabled
+    auto isSafe = [](HttpMethod m){ return m==HttpMethod::GET || m==HttpMethod::HEAD || m==HttpMethod::PROPFIND || m==HttpMethod::OPTIONS; };
+    bool follow = opts.followRedirects || isSafe(req.method);
+    if (follow) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, (long)opts.maxRedirects);
     }
 
     // Respect system proxy env and allow any proxy auth scheme
@@ -277,56 +340,189 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
 }
 
 HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& opts) {
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        return HttpResponse{0, "Failed to initialize curl", {}, {}};
-    }
+    auto isIdempotent = [](HttpMethod m){ return m==HttpMethod::GET || m==HttpMethod::HEAD || m==HttpMethod::PROPFIND || m==HttpMethod::OPTIONS; };
+    int attempts = (opts.enableRetries && isIdempotent(req.method)) ? (opts.maxRetries + 1) : 1;
 
-    ResponseData respData;
-    struct curl_slist* headers = nullptr;
+    HttpResponse finalResp;
+    auto startTime = std::chrono::steady_clock::now();
+    bool hasTotalDeadline = opts.totalDeadline.count() > 0;
 
-    // Build headers list
-    for (const auto& [name, value] : req.headers) {
-        std::string header = name + ": " + value;
-        headers = curl_slist_append(headers, header.c_str());
-    }
-
-    configureCurlHandle(curl, req, opts, respData, headers);
-
-    // Perform request (blocking)
-    CURLcode res = curl_easy_perform(curl);
-
-    HttpResponse response;
-
-    if (res != CURLE_OK) {
-        response.statusCode = 0;
-        std::string msg;
-        if (respData.abortedByCap) {
-            msg = "response exceeds maximum size";
-        } else if (respData.errbuf[0] != '\0') {
-            msg = respData.errbuf;
-        } else {
-            msg = curl_easy_strerror(res);
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            return HttpResponse{0, "Failed to initialize curl", {}, {}};
         }
-        response.statusMessage = std::string("cURL error: ") + msg;
-    } else {
-        long statusCode = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &statusCode);
 
-        response.statusCode = static_cast<int>(statusCode);
-        response.statusMessage = "OK";
-        response.headers = std::move(respData.headers);
-        response.headersMulti = std::move(respData.headersMulti);
-        response.body = std::move(respData.body);
+        ResponseData respData;
+        struct curl_slist* headers = nullptr;
+
+        // Build headers list
+        for (const auto& [name, value] : req.headers) {
+            std::string header = name + ": " + value;
+            headers = curl_slist_append(headers, header.c_str());
+        }
+        // Additional headers (allow duplicates, order preserved)
+        for (const auto& kv : opts.extraHeaders) {
+            std::string header = kv.first + ": " + kv.second;
+            headers = curl_slist_append(headers, header.c_str());
+        }
+
+        // Optionally disable Expect: 100-continue per request
+        if (!opts.expect100Continue) {
+            headers = curl_slist_append(headers, "Expect:");
+        }
+
+        configureCurlHandle(curl, req, opts, respData, headers);
+
+        // Adjust per-attempt timeout to respect overall totalDeadline
+        if (hasTotalDeadline) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+            long remainingMs = (long)opts.totalDeadline.count() - (long)elapsedMs;
+            if (remainingMs <= 0) {
+                // No time left; return last response or timeout immediately
+                if (headers) curl_slist_free_all(headers);
+                curl_easy_cleanup(curl);
+                finalResp.statusCode = 0;
+                finalResp.statusMessage = "cURL error: timeout";
+                break;
+            }
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, remainingMs);
+            // Clamp connect timeout to remaining time as well
+            long connMs = (long)opts.connectTimeout.count();
+            if (connMs > remainingMs) connMs = remainingMs;
+            if (connMs > 0) curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, connMs);
+        }
+
+        // Streaming upload support for aggregated execute(): provide read callback when requested
+        struct UploadSource { std::function<size_t(char*, size_t)> read; } uploadSrc;
+        bool useStreamingUpload = static_cast<bool>(opts.uploadRead);
+        if (useStreamingUpload && (req.method == HttpMethod::PUT || req.method == HttpMethod::POST)) {
+            uploadSrc.read = opts.uploadRead; // copy function
+            // Set read callback
+            curl_easy_setopt(curl, CURLOPT_READFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
+                auto* src = static_cast<UploadSource*>(userdata);
+                size_t max = size * nmemb;
+                return src->read ? src->read(ptr, max) : 0; // 0 = EOF
+            });
+            curl_easy_setopt(curl, CURLOPT_READDATA, &uploadSrc);
+
+            if (req.method == HttpMethod::PUT) {
+                curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L); // PUT upload
+                // Some servers expect explicit PUT
+                curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+            } else if (req.method == HttpMethod::POST) {
+                curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            }
+
+            if (opts.contentLength.has_value()) {
+                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)opts.contentLength.value());
+                // For POST, also set POSTFIELDSIZE_LARGE so libcurl sends Content-Length
+                if (req.method == HttpMethod::POST) {
+                    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)opts.contentLength.value());
+                }
+            } else {
+                // Unknown length not yet supported in our raw-socket test server; prefer known length
+                // Force HTTP/1.1 and attempt chunked transfer if user insists (not default)
+                curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
+                headers = curl_slist_append(headers, "Transfer-Encoding: chunked");
+                curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+                curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)-1);
+            }
+        }
+
+        // Perform request (blocking)
+        CURLcode res = curl_easy_perform(curl);
+
+        HttpResponse response;
+
+        if (res != CURLE_OK) {
+            response.statusCode = 0;
+            std::string msg;
+            if (respData.abortedByCap) {
+                msg = "response exceeds maximum size";
+            } else if (respData.errbuf[0] != '\0') {
+                msg = respData.errbuf;
+            } else {
+                msg = curl_easy_strerror(res);
+            }
+            response.statusMessage = std::string("cURL error: ") + msg;
+        } else {
+            long statusCode = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &statusCode);
+
+            response.statusCode = static_cast<int>(statusCode);
+            response.statusMessage = "OK";
+            response.headers = std::move(respData.headers);
+            response.headersMulti = std::move(respData.headersMulti);
+            response.body = std::move(respData.body);
+        }
+
+        // Optional metrics logging
+        if (std::getenv("ENTROPY_HTTP_METRICS")) {
+            long httpVer = 0; curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &httpVer);
+            curl_off_t szUp=0, szDn=0, totalMs=0; long redirects=0;
+            curl_easy_getinfo(curl, CURLINFO_SIZE_UPLOAD_T, &szUp);
+            curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &szDn);
+            curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &totalMs);
+            curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &redirects);
+            fprintf(stderr, "[EntropyHTTP] method=%d status=%d up=%lld down=%lld totalMs=%lld redirects=%ld httpVer=%ld\n",
+                (int)req.method, response.statusCode, (long long)szUp, (long long)szDn, (long long)totalMs, redirects, httpVer);
+        }
+
+        // Cleanup per attempt
+        if (headers) {
+            curl_slist_free_all(headers);
+        }
+        curl_easy_cleanup(curl);
+
+        // Decide on retry
+        bool shouldRetry = false;
+        if (res != CURLE_OK && !respData.abortedByCap) {
+            shouldRetry = true;
+        } else {
+            int s = response.statusCode;
+            if (s == 408 || s == 429 || (s >= 500 && s != 501 && s != 505)) {
+                shouldRetry = true;
+            }
+        }
+
+        if (!shouldRetry || attempt == attempts - 1) {
+            finalResp = std::move(response);
+            break;
+        }
+
+        // Compute backoff delay
+        uint64_t delayMs = 0;
+        auto itRA = response.headers.find("retry-after");
+        if (itRA != response.headers.end()) {
+            // try parse seconds
+            delayMs = (uint64_t)(std::strtoull(itRA->second.c_str(), nullptr, 10) * 1000ull);
+        }
+        if (delayMs == 0) {
+            uint64_t base = (uint64_t)std::max(0, opts.retryBackoffBaseMs);
+            uint64_t cap  = (uint64_t)std::max(0, opts.retryBackoffCapMs);
+            uint64_t backoff = base * (1u << attempt);
+            if (cap > 0 && backoff > cap) backoff = cap;
+            // jitter: 50%-100%
+            uint64_t jitter = backoff / 2 + (uint64_t)(rand() % (int)(backoff / 2 + 1));
+            delayMs = jitter;
+        }
+        // Respect remaining deadline for backoff sleep
+        if (hasTotalDeadline) {
+            auto now2 = std::chrono::steady_clock::now();
+            auto elapsed2 = std::chrono::duration_cast<std::chrono::milliseconds>(now2 - startTime).count();
+            long remaining2 = (long)opts.totalDeadline.count() - (long)elapsed2;
+            if (remaining2 <= 0) {
+                finalResp = std::move(response);
+                break;
+            }
+            if ((long)delayMs > remaining2) delayMs = (uint64_t)remaining2;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
     }
 
-    // Cleanup
-    if (headers) {
-        curl_slist_free_all(headers);
-    }
-    curl_easy_cleanup(curl);
-
-    return response;
+    return finalResp;
 }
 
 // ============================================================================
@@ -349,6 +545,8 @@ size_t HttpClient::streamWriteCallback(char* data, size_t size, size_t nmemb, vo
 
     // Check buffer capacity - pause if full (backpressure)
     if (state->size + totalSize > state->capacity) {
+        state->paused = true;
+        state->cv.notify_all();
         return CURL_WRITEFUNC_PAUSE; // pause transfer, will resume when consumer frees space
     }
 
@@ -380,6 +578,22 @@ size_t HttpClient::streamHeaderCallback(char* data, size_t size, size_t nmemb, v
         return totalSize;
     }
 
+    // Detect end-of-headers (blank line) to mark headers ready and fetch status code early
+    if (line == "\r\n") {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        long sc = 0;
+        if (state->easy) {
+            curl_easy_getinfo(state->easy, CURLINFO_RESPONSE_CODE, &sc);
+        }
+        state->statusCode = static_cast<int>(sc);
+        // Defer headersReady if this is an intermediate 3xx redirect; final response will trigger another header block
+        if (!(state->statusCode >= 300 && state->statusCode < 400)) {
+            state->headersReady = true;
+            state->cv.notify_all();
+        }
+        return totalSize;
+    }
+
     // Parse header
     auto colonPos = line.find(':');
     if (colonPos != std::string::npos) {
@@ -407,12 +621,29 @@ size_t HttpClient::streamHeaderCallback(char* data, size_t size, size_t nmemb, v
 // Progress callback used to support cancellation of streaming transfers
 static int xferInfoCallback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
     auto* state = static_cast<StreamState*>(clientp);
-    std::lock_guard<std::mutex> lock(state->mutex);
-    if (state->cancelRequested) {
-        state->failed = true;
-        if (state->failureReason.empty()) state->failureReason = "cancelled";
-        // Returning non-zero aborts the transfer
-        return 1;
+
+    // Handle cancellation and (if needed) resume on the worker thread
+    CURL* easyLocal = nullptr;
+    bool doResume = false;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->cancelRequested) {
+            state->failed = true;
+            if (state->failureReason.empty()) state->failureReason = "cancelled";
+            return 1; // abort transfer
+        }
+        if (state->paused && state->resumeRequested && !state->failed && !state->done && state->easy != nullptr) {
+            // Only resume if there is room in the buffer now
+            if (state->size < state->capacity) {
+                doResume = true;
+                easyLocal = state->easy;
+                state->resumeRequested = false; // consume the request
+            }
+        }
+    }
+    if (doResume && easyLocal) {
+        // Call libcurl without holding the mutex to avoid deadlocks
+        curl_easy_pause(easyLocal, CURLPAUSE_CONT);
     }
     return 0;
 }
@@ -472,13 +703,15 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
     // Thread safety
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-    // Connection sharing
-    {
-        std::lock_guard<std::mutex> lock(_shareMutex);
-        if (_connectionShare) {
-            curl_easy_setopt(curl, CURLOPT_SHARE, _connectionShare);
-        }
-    }
+    // Connection sharing intentionally disabled for streaming to avoid cross-thread
+    // share lock/unlock interactions that trigger MSVC debug mutex diagnostics.
+    // Aggregated requests still use the shared connection cache.
+    //{
+    //    std::lock_guard<std::mutex> lock(_shareMutex);
+    //    if (_connectionShare) {
+    //        curl_easy_setopt(curl, CURLOPT_SHARE, _connectionShare);
+    //    }
+    //}
 
     // Proxy support
     curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
@@ -489,6 +722,10 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
     // Accept encoding
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 
+    // Follow redirects by default for streaming GET
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+ 
     // Debug
     if (std::getenv("ENTROPY_HTTP_DEBUG")) {
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
@@ -520,10 +757,12 @@ StreamHandle HttpClient::executeStream(const HttpRequest& req, const StreamOptio
             return;
         }
 
-        configureStreamCurlHandle(curl, req, opts, *state, headersList);
+        {
+            std::lock_guard<std::mutex> lk(state->mutex);
+            state->easy = curl;
+        }
 
-        // Mark headers ready after first header callback
-        // (streamHeaderCallback will notify when headers are complete)
+        configureStreamCurlHandle(curl, req, opts, *state, headersList);
 
         // Perform request (blocks until complete or error)
         CURLcode res = curl_easy_perform(curl);
@@ -550,6 +789,11 @@ StreamHandle HttpClient::executeStream(const HttpRequest& req, const StreamOptio
         }
 
         // Cleanup
+        {
+            std::lock_guard<std::mutex> lk(state->mutex);
+            // Invalidate easy handle for other threads before cleanup to avoid races
+            state->easy = nullptr;
+        }
         if (headersList) {
             curl_slist_free_all(headersList);
         }
@@ -593,7 +837,16 @@ size_t StreamHandle::read(uint8_t* buffer, size_t size) {
     _state->head = (_state->head + toRead) % _state->capacity;
     _state->size -= toRead;
 
+    // Decide if we should resume the paused transfer
+    bool needResume = _state->paused && _state->easy != nullptr && !_state->failed && !_state->done;
+    if (needResume) {
+        // Request resume to be handled by the worker (libcurl) thread via progress callback
+        _state->resumeRequested = true;
+    }
+
     _state->cv.notify_all(); // Notify writer that space is available
+
+    lock.unlock();
 
     return toRead;
 }

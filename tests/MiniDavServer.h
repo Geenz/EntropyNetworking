@@ -183,27 +183,86 @@ private:
             i = lineEnd + 2;
         }
 
+        // Read request body (supports Content-Length and Transfer-Encoding: chunked)
         size_t contentLen = 0;
+        bool isChunked = false;
+        if (auto it = headers.find("transfer-encoding"); it != headers.end()) {
+            const std::string& te = it->second;
+            if (te.find("chunked") != std::string::npos) isChunked = true;
+        }
         if (auto it = headers.find("content-length"); it != headers.end()) {
             contentLen = (size_t)std::strtoull(it->second.c_str(), nullptr, 10);
         }
+
         std::string body;
-        body.reserve(contentLen);
-        auto have = req.size() - (hdrEnd + 4);
-        if (have > 0) {
-            size_t copy = std::min(have, contentLen);
-            body.append(req.data() + hdrEnd + 4, copy);
-        }
-        while (body.size() < contentLen) {
+        if (isChunked) {
+            // Decode chunked body from the socket using the already buffered data in `req`
+            size_t pos = hdrEnd + 4; // start of body within req buffer
+            auto readMore = [&]() -> bool {
 #ifdef _WIN32
-            int n = ::recv(cs, buf, sizeof(buf), 0);
+                int n = ::recv(cs, buf, sizeof(buf), 0);
 #else
-            ssize_t n = ::recv(cs, buf, sizeof(buf), 0);
+                ssize_t n = ::recv(cs, buf, sizeof(buf), 0);
 #endif
-            if (n <= 0) break;
-            size_t remain = contentLen - body.size();
-            size_t copy = (size_t)n > remain ? remain : (size_t)n;
-            body.append(buf, buf + copy);
+                if (n <= 0) return false;
+                req.append(buf, buf + n);
+                return true;
+            };
+            auto readLine = [&]() -> std::string {
+                for (;;) {
+                    size_t crlf = req.find("\r\n", pos);
+                    if (crlf != std::string::npos) {
+                        std::string line = req.substr(pos, crlf - pos);
+                        pos = crlf + 2;
+                        return line;
+                    }
+                    if (!readMore()) return std::string();
+                }
+            };
+            auto readExact = [&](size_t nbytes) -> bool {
+                while (req.size() < pos + nbytes) {
+                    if (!readMore()) return false;
+                }
+                body.append(req.data() + pos, nbytes);
+                pos += nbytes;
+                return true;
+            };
+
+            for (;;) {
+                std::string sizeLine = readLine();
+                if (sizeLine.empty()) break; // malformed
+                // sizeLine may include chunk extensions after ';' — strip them
+                auto sc = sizeLine.find(';');
+                if (sc != std::string::npos) sizeLine = sizeLine.substr(0, sc);
+                size_t chunkSize = (size_t)std::strtoull(sizeLine.c_str(), nullptr, 16);
+                if (chunkSize == 0) {
+                    // Read the trailing CRLF and optional trailers (ignore trailers)
+                    // Consume one blank line after 0-size chunk if present
+                    (void)readLine();
+                    break;
+                }
+                if (!readExact(chunkSize)) break;
+                // Consume CRLF after the chunk data
+                (void)readLine();
+            }
+        } else {
+            body.reserve(contentLen);
+            auto have = req.size() - (hdrEnd + 4);
+            if (have > 0) {
+                size_t copy = std::min(have, contentLen);
+                body.append(req.data() + hdrEnd + 4, copy);
+            }
+            while (body.size() < contentLen) {
+#ifdef _WIN32
+                int n = ::recv(cs, buf, sizeof(buf), 0);
+#else
+                ssize_t n = ::recv(cs, buf, sizeof(buf), 0);
+#endif
+                if (n <= 0) break;
+                size_t remain = contentLen - body.size();
+                size_t copy = (size_t)n > remain ? remain : (size_t)n;
+                body.append(buf, buf + copy);
+            }
         }
 
         if (!starts_with(path, _base)) {
@@ -236,6 +295,21 @@ private:
         }
 
         if (method == "HEAD" || method == "GET") {
+            // Special endpoints for tests: redirect and flaky behavior
+            if (path == _base + "redirect") {
+                sendSimple(cs, 302, {{"Location", _base + std::string("hello.txt")}});
+                return;
+            }
+            if (path == _base + "flaky") {
+                int c = ++_hitCounts[path];
+                if (c == 1) {
+                    sendSimple(cs, 500);
+                    return;
+                } else {
+                    sendRaw(cs, 200, "text/plain", "ok");
+                    return;
+                }
+            }
             std::string tpath = toTreePath(path);
             auto* n = _tree.find(tpath);
             if (!n || n->isDir) {
@@ -247,7 +321,24 @@ private:
             extraHeaders["Accept-Ranges"] = "bytes";
             std::string mime = n->mime.empty() ? "application/octet-stream" : n->mime;
 
-            // Handle Range requests
+            // Simple ETag based on content size (sufficient for tests) and Last-Modified if available
+            std::string etag = "\"" + std::to_string(n->content.size()) + "\"";
+            extraHeaders["ETag"] = etag;
+            if (auto lm = httpDate(n->mtime); !lm.empty()) {
+                extraHeaders["Last-Modified"] = lm;
+            }
+
+            // Conditional GET/HEAD: If-None-Match → 304 Not Modified
+            auto itInm = headers.find("if-none-match");
+            if (itInm != headers.end()) {
+                // Basic match (no weak validators used)
+                if (itInm->second == etag) {
+                    sendSimple(cs, 304, {{"ETag", etag}});
+                    return;
+                }
+            }
+
+            // Handle Range requests (return 206 with Content-Range and Content-Length)
             auto itRange = headers.find("range");
             if (method == "GET" && itRange != headers.end()) {
                 // Parse "bytes=start-end"
@@ -281,14 +372,176 @@ private:
             }
 
             // Full response (no range or range parsing failed)
-            std::string bodyOut = (method == "GET") ? n->content : std::string();
-            extraHeaders["Content-Length"] = std::to_string(n->content.size());
-            sendRaw(cs, 200, mime, bodyOut, extraHeaders);
+            if (method == "HEAD") {
+                // HEAD: advertise full length, no body
+                extraHeaders["Content-Length"] = std::to_string(n->content.size());
+                sendRaw(cs, 200, mime, /*body*/"", extraHeaders);
+                return;
+            }
+
+            // For GET without Range: default to Content-Length full body.
+            // Enable chunked streaming only for specific test paths or when explicitly requested.
+            bool wantChunked = false;
+            // Header-driven toggle
+            if (auto it = headers.find("x-stream-chunked"); it != headers.end()) {
+                if (it->second == "1" || it->second == "true" || it->second == "on") wantChunked = true;
+            }
+
+            std::string bodyOut = n->content;
+            if (wantChunked) {
+                // Small chunk size to ensure multiple chunks for small files
+                size_t chunkSize = 5; // 5-byte chunks work well with tests reading small pieces
+                int delayMs = 2; // small inter-chunk delay to allow mid-transfer cancellation tests to observe aborts reliably
+                sendChunked(cs, 200, mime, bodyOut, extraHeaders, chunkSize, delayMs);
+            } else {
+                extraHeaders["Content-Length"] = std::to_string(bodyOut.size());
+                sendRaw(cs, 200, mime, bodyOut, extraHeaders);
+            }
+            return;
+        }
+
+        if (method == "PUT") {
+            std::string tpath = toTreePath(path);
+            auto* n = _tree.find(tpath);
+            if (n && n->isDir) {
+                sendSimple(cs, 405);
+                return;
+            }
+
+            // If-Match precondition handling (status-only semantics)
+            auto itIfMatch = headers.find("if-match");
+            if (itIfMatch != headers.end()) {
+                std::string cond = itIfMatch->second;
+                // Resource must exist when If-Match is present (unless cond is wildcard and resource exists)
+                if (!n) {
+                    // RFC would return 412 when resource does not exist and If-Match is present
+                    sendSimple(cs, 412);
+                    return;
+                }
+                bool ok = false;
+                if (cond == "*") {
+                    ok = true; // any current representation is acceptable
+                } else {
+                    // Compare against our simple ETag for files (size-based)
+                    if (!n->isDir) {
+                        std::string etag = "\"" + std::to_string(n->content.size()) + "\"";
+                        ok = (cond == etag);
+                    }
+                }
+                if (!ok) {
+                    sendSimple(cs, 412);
+                    return;
+                }
+            }
+
+            // 201 if created, 204 if replaced
+            sendSimple(cs, n ? 204 : 201);
+            return;
+        }
+
+        if (method == "DELETE") {
+            std::string tpath = toTreePath(path);
+            auto* n = _tree.find(tpath);
+            if (!n) {
+                sendSimple(cs, 404);
+                return;
+            }
+            // If-Match precondition handling
+            auto itIfMatch = headers.find("if-match");
+            if (itIfMatch != headers.end()) {
+                std::string cond = itIfMatch->second;
+                bool ok = false;
+                if (cond == "*") {
+                    ok = true; // any current representation is acceptable
+                } else {
+                    if (!n->isDir) {
+                        std::string etag = "\"" + std::to_string(n->content.size()) + "\"";
+                        ok = (cond == etag);
+                    } else {
+                        // For directories, require wildcard to match
+                        ok = false;
+                    }
+                }
+                if (!ok) {
+                    sendSimple(cs, 412);
+                    return;
+                }
+            }
+            sendSimple(cs, 204);
+            return;
+        }
+
+        if (method == "MKCOL") {
+            std::string tpath = toTreePath(path);
+            auto* n = _tree.find(tpath);
+            // If resource already exists, 405
+            if (n) {
+                sendSimple(cs, 405);
+                return;
+            }
+            // Check parent existence
+            std::string parent = tpath;
+            if (parent.size()>1 && parent.back()=='/') parent.pop_back();
+            auto slash = parent.find_last_of('/');
+            if (slash == std::string::npos) parent = "/";
+            else if (slash == 0) parent = "/";
+            else parent = parent.substr(0, slash);
+            auto* pn = _tree.find(parent);
+            if (!pn || !pn->isDir) {
+                sendSimple(cs, 409);
+                return;
+            }
+            sendSimple(cs, 201);
+            return;
+        }
+
+        // MOVE and COPY (status-only)
+        if (method == "MOVE" || method == "COPY") {
+            // Destination header is required
+            auto itDest = headers.find("destination");
+            if (itDest == headers.end()) { sendSimple(cs, 400); return; }
+            std::string destPath = itDest->second;
+            // Extract absolute-path from absolute-URI if necessary
+            auto schemePos = destPath.find("://");
+            if (schemePos != std::string::npos) {
+                auto pathStart = destPath.find('/', schemePos + 3);
+                if (pathStart != std::string::npos) destPath = destPath.substr(pathStart);
+            }
+            // Must be under our mount base
+            if (!starts_with(destPath, _base)) { sendSimple(cs, 400); return; }
+
+            bool overwrite = true;
+            if (auto itOw = headers.find("overwrite"); itOw != headers.end()) {
+                overwrite = !itOw->second.empty() && (itOw->second[0] == 'T' || itOw->second[0] == 't');
+            }
+
+            std::string srcTree = toTreePath(path);
+            std::string dstTree = toTreePath(destPath);
+
+            const DavNode* srcNode = _tree.find(srcTree);
+            if (!srcNode) { sendSimple(cs, 404); return; }
+
+            // Parent of destination must exist
+            std::string parent = dstTree;
+            if (parent.size()>1 && parent.back()=='/') parent.pop_back();
+            auto slash = parent.find_last_of('/');
+            if (slash == std::string::npos) parent = "/";
+            else if (slash == 0) parent = "/";
+            else parent = parent.substr(0, slash);
+            const DavNode* pn = _tree.find(parent);
+            if (!pn || !pn->isDir) { sendSimple(cs, 409); return; }
+
+            const DavNode* dstNode = _tree.find(dstTree);
+            if (dstNode && !overwrite) { sendSimple(cs, 412); return; }
+
+            // Success statuses only (no tree mutation for tests):
+            // 201 if created new, 204 if overwrote existing
+            sendSimple(cs, dstNode ? 204 : 201);
             return;
         }
 
         // Method not allowed
-        sendSimple(cs, 405, {{"Allow","OPTIONS, PROPFIND, GET, HEAD"}});
+        sendSimple(cs, 405, {{"Allow","OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY"}});
     }
 
     std::string toTreePath(const std::string& reqPath) const {
@@ -321,7 +574,7 @@ private:
     {
         std::unordered_map<std::string,std::string> headers;
         headers["DAV"] = "1,2";
-        headers["Allow"] = "OPTIONS, PROPFIND, GET, HEAD";
+        headers["Allow"] = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY";
         headers["Accept-Ranges"] = "bytes";
         sendRaw(cs, 200, "text/plain", "", headers);
     }
@@ -406,9 +659,12 @@ private:
         std::string statusText = (status == 200 ? "OK" :
                                   status == 206 ? "Partial Content" :
                                   status == 207 ? "Multi-Status" :
+                                  status == 302 ? "Found" :
+                                  status == 307 ? "Temporary Redirect" :
                                   status == 404 ? "Not Found" :
                                   status == 405 ? "Method Not Allowed" :
-                                  status == 400 ? "Bad Request" : "");
+                                  status == 400 ? "Bad Request" :
+                                  status == 500 ? "Internal Server Error" : "");
         std::string resp = "HTTP/1.1 " + std::to_string(status) + " " + statusText + "\r\n";
         headers["Content-Type"] = contentType;
         if (headers.find("Content-Length") == headers.end()) {
@@ -421,6 +677,58 @@ private:
         resp += "\r\n";
         resp += body;
         sendAll(cs, resp.data(), resp.size());
+    }
+
+    // Send a chunked-encoding response in multiple chunks (test-only helper)
+    static void sendChunked(
+#ifdef _WIN32
+        SOCKET
+#else
+        int
+#endif
+        cs, int status, const std::string& contentType, const std::string& body,
+        std::unordered_map<std::string,std::string> headers = {}, size_t chunkSize = 8192, int delayMs = 0)
+    {
+        if (chunkSize == 0) chunkSize = 8192;
+        std::string statusText = (status == 200 ? "OK" :
+                                  status == 206 ? "Partial Content" :
+                                  status == 207 ? "Multi-Status" :
+                                  status == 302 ? "Found" :
+                                  status == 307 ? "Temporary Redirect" :
+                                  status == 404 ? "Not Found" :
+                                  status == 405 ? "Method Not Allowed" :
+                                  status == 400 ? "Bad Request" :
+                                  status == 500 ? "Internal Server Error" : "");
+        std::string head = "HTTP/1.1 " + std::to_string(status) + " " + statusText + "\r\n";
+        headers["Content-Type"] = contentType;
+        headers["Transfer-Encoding"] = "chunked";
+        headers["Connection"] = "close";
+        for (auto& kv : headers) {
+            head += kv.first + ": " + kv.second + "\r\n";
+        }
+        head += "\r\n";
+        sendAll(cs, head.data(), head.size());
+
+        // write chunks
+        size_t off = 0;
+        while (off < body.size()) {
+            size_t n = std::min(chunkSize, body.size() - off);
+            char sizeLine[32];
+            int sl = std::snprintf(sizeLine, sizeof(sizeLine), "%zx\r\n", n);
+            sendAll(cs, sizeLine, (size_t)sl);
+            sendAll(cs, body.data() + off, n);
+            sendAll(cs, "\r\n", 2);
+            off += n;
+            if (delayMs > 0) {
+#ifdef _WIN32
+                Sleep((DWORD)delayMs);
+#else
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+#endif
+            }
+        }
+        // final zero-size chunk
+        sendAll(cs, "0\r\n\r\n", 5);
     }
 
     static void sendAll(
@@ -453,4 +761,6 @@ private:
 #endif
     std::thread _thr;
     uint16_t _port = 0;
+    // Simple per-path hit counters to simulate flaky endpoints
+    std::unordered_map<std::string,int> _hitCounts;
 };
