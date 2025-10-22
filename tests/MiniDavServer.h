@@ -113,6 +113,11 @@ private:
             int cs = ::accept(_listenSock, nullptr, nullptr);
             if (cs < 0) break;
 #endif
+#if defined(SO_NOSIGPIPE)
+            // Prevent SIGPIPE on macOS/BSD when client disconnects mid-send
+            int set = 1;
+            setsockopt(cs, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set));
+#endif
             handleClient(cs);
 #ifdef _WIN32
             closesocket(cs);
@@ -744,7 +749,11 @@ private:
 #ifdef _WIN32
             int n = ::send(cs, data + sent, (int)(len - sent), 0);
 #else
-            ssize_t n = ::send(cs, data + sent, len - sent, 0);
+            int flags = 0;
+#ifdef MSG_NOSIGNAL
+            flags |= MSG_NOSIGNAL;
+#endif
+            ssize_t n = ::send(cs, data + sent, len - sent, flags);
 #endif
             if (n <= 0) break;
             sent += (size_t)n;

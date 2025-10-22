@@ -11,6 +11,12 @@
 #pragma comment(lib, "Winhttp.lib")
 #endif
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#include <CFNetwork/CFNetwork.h>
+#endif
+
 namespace EntropyEngine::Networking::HTTP {
 
 static inline std::string toLower(std::string s) {
@@ -188,10 +194,6 @@ ProxyResult SystemProxyResolver::resolve(const std::string& scheme, const std::s
     }
     std::string url = ou.str();
 
-    // Include CF headers locally to avoid polluting global includes
-    #include <CoreFoundation/CoreFoundation.h>
-    #include <SystemConfiguration/SystemConfiguration.h>
-    #include <CFNetwork/CFNetwork.h>
 
     auto cfStrFrom = [](const std::string& s){ return CFStringCreateWithBytes(nullptr, reinterpret_cast<const UInt8*>(s.data()), s.size(), kCFStringEncodingUTF8, false); };
 
