@@ -257,6 +257,10 @@ ProxyResult SystemProxyResolver::resolve(const std::string& scheme, const std::s
 // ---------------- DefaultProxyResolver ----------------
 DefaultProxyResolver::DefaultProxyResolver() = default;
 
+void DefaultProxyResolver::setUseSystemProxy(bool enabled) {
+    _useSystemProxy.store(enabled, std::memory_order_release);
+}
+
 ProxyResult DefaultProxyResolver::resolve(const std::string& scheme, const std::string& host, uint16_t port) {
     const std::string key = hostKey(scheme, host, port);
     {
@@ -267,17 +271,24 @@ ProxyResult DefaultProxyResolver::resolve(const std::string& scheme, const std::
         }
     }
 
+    // 1) Env-based decision (honors NO_PROXY and HTTP[S]_PROXY)
     ProxyResult res = _env.resolve(scheme, host, port);
+
+    // 2) If env said Direct, optionally fall back to system proxy.
     if (res.type == ProxyResult::Type::Direct) {
-        // Use system/PAC resolver only when explicitly enabled via env flag
-        const char* useSys = std::getenv("ENTROPY_HTTP_USE_SYSTEM_PROXY");
-        bool enabled = false;
-        if (useSys) {
-            std::string v(useSys);
-            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c){ return (char)std::tolower(c); });
-            enabled = (v=="1" || v=="true" || v=="on");
+        bool allowSystem = _useSystemProxy.load(std::memory_order_acquire);
+
+        // Back-compat: ENTROPY_HTTP_USE_SYSTEM_PROXY can force-enable/disable.
+        if (const char* env = std::getenv("ENTROPY_HTTP_USE_SYSTEM_PROXY")) {
+            std::string v = toLower(std::string(env));
+            if (v == "0" || v == "false" || v == "off") {
+                allowSystem = false;
+            } else if (v == "1" || v == "true" || v == "on") {
+                allowSystem = true;
+            }
         }
-        if (enabled) {
+
+        if (allowSystem) {
             res = _sys.resolve(scheme, host, port);
         }
     }

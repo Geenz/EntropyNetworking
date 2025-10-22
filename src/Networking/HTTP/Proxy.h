@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <chrono>
+#include <atomic>
 
 namespace EntropyEngine::Networking::HTTP {
 
@@ -40,6 +41,8 @@ public:
 class DefaultProxyResolver : public ProxyResolver {
 public:
     DefaultProxyResolver();
+    // Programmatic policy: if true (default), fall back to system proxy when env yields Direct
+    void setUseSystemProxy(bool enabled);
     ProxyResult resolve(const std::string& scheme, const std::string& host, uint16_t port) override;
 private:
     EnvProxyResolver _env;
@@ -51,6 +54,7 @@ private:
     };
     std::mutex _m;
     std::unordered_map<std::string, CacheEntry> _cache; // key: scheme://host:port
+    std::atomic<bool> _useSystemProxy{true};
 };
 
 } // namespace EntropyEngine::Networking::HTTP

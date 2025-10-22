@@ -188,6 +188,9 @@ public:
     HttpClient(HttpClient&&) = default;
     HttpClient& operator=(HttpClient&&) = default;
 
+    /** Programmatic opt-out for system proxy fallback (default: enabled) */
+    void setUseSystemProxy(bool enabled);
+
     /**
      * @brief Execute HTTP request synchronously (blocks calling thread)
      *

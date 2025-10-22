@@ -64,6 +64,13 @@ HttpClient::~HttpClient() {
     }
 }
 
+void HttpClient::setUseSystemProxy(bool enabled) {
+    // Best-effort: only DefaultProxyResolver supports this policy toggle
+    if (auto* def = dynamic_cast<DefaultProxyResolver*>(_proxyResolver.get())) {
+        def->setUseSystemProxy(enabled);
+    }
+}
+
 void HttpClient::closeIdle() {
     std::lock_guard<std::mutex> lock(_shareMutex);
     // libcurl doesn't provide explicit API to close idle connections
