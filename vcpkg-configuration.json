@@ -8,7 +8,7 @@
     {
       "kind": "git",
       "repository": "https://github.com/Geenz/EntropyRegistry",
-      "baseline": "4fce30063719c0bac7aa89a2fe3221b78eef023b",
+      "baseline": "ece6f08124e0f0a17d7224a772c6432ba8e6309d",
       "packages": ["entropycore"]
     }
   ]

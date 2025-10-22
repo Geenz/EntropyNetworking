@@ -88,10 +88,7 @@ ProxyResult EnvProxyResolver::resolve(const std::string& scheme, const std::stri
 
 // ---------------- SystemProxyResolver (Windows/non-Windows) ----------------
 ProxyResult SystemProxyResolver::resolve(const std::string& scheme, const std::string& host, uint16_t port) {
-#ifndef _WIN32
-    (void)scheme; (void)host; (void)port;
-    return ProxyResult{ ProxyResult::Type::Direct, {} };
-#else
+#if defined(_WIN32)
     // Compose URL
     std::ostringstream ou; ou << scheme << "://" << host;
     // Append port if provided in host is absent and non-default
@@ -179,6 +176,79 @@ ProxyResult SystemProxyResolver::resolve(const std::string& scheme, const std::s
     if (iecfg.lpszProxyBypass) GlobalFree(iecfg.lpszProxyBypass);
 
     return out;
+#elif defined(__APPLE__)
+    // macOS system proxy resolution using CFNetwork
+    // Build a CFURL for the destination
+    std::ostringstream ou; ou << scheme << "://" << host;
+    bool hostHasPort = (host.rfind(':') != std::string::npos) && (host.find(':') == host.rfind(':'));
+    if (!hostHasPort) {
+        if (scheme == "http" && port != 80) ou << ":" << port;
+        if (scheme == "https" && port != 443) ou << ":" << port;
+        if (scheme != "http" && scheme != "https" && port != 0) ou << ":" << port;
+    }
+    std::string url = ou.str();
+
+    // Include CF headers locally to avoid polluting global includes
+    #include <CoreFoundation/CoreFoundation.h>
+    #include <SystemConfiguration/SystemConfiguration.h>
+    #include <CFNetwork/CFNetwork.h>
+
+    auto cfStrFrom = [](const std::string& s){ return CFStringCreateWithBytes(nullptr, reinterpret_cast<const UInt8*>(s.data()), s.size(), kCFStringEncodingUTF8, false); };
+
+    CFStringRef urlStr = cfStrFrom(url);
+    if (!urlStr) return ProxyResult{ ProxyResult::Type::Direct, {} };
+    CFURLRef cfUrl = CFURLCreateWithString(nullptr, urlStr, nullptr);
+    CFRelease(urlStr);
+    if (!cfUrl) return ProxyResult{ ProxyResult::Type::Direct, {} };
+
+    CFDictionaryRef sys = CFNetworkCopySystemProxySettings();
+    if (!sys) { CFRelease(cfUrl); return ProxyResult{ ProxyResult::Type::Direct, {} }; }
+
+    CFArrayRef arr = CFNetworkCopyProxiesForURL(cfUrl, sys);
+    CFRelease(cfUrl);
+    CFRelease(sys);
+    if (!arr) return ProxyResult{ ProxyResult::Type::Direct, {} };
+
+    ProxyResult out{ ProxyResult::Type::Direct, {} };
+    CFIndex n = CFArrayGetCount(arr);
+    for (CFIndex i = 0; i < n; ++i) {
+        CFDictionaryRef prx = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+        if (!prx) continue;
+        CFStringRef typeRef = (CFStringRef)CFDictionaryGetValue(prx, kCFProxyTypeKey);
+        if (!typeRef) continue;
+        CFStringRef hostRef = (CFStringRef)CFDictionaryGetValue(prx, kCFProxyHostNameKey);
+        CFNumberRef portRef = (CFNumberRef)CFDictionaryGetValue(prx, kCFProxyPortNumberKey);
+
+        // Determine type
+        if (CFStringCompare(typeRef, kCFProxyTypeNone, 0) == kCFCompareEqualTo) {
+            out = ProxyResult{ ProxyResult::Type::Direct, {} };
+            break;
+        } else if (CFStringCompare(typeRef, kCFProxyTypeHTTP, 0) == kCFCompareEqualTo || CFStringCompare(typeRef, kCFProxyTypeHTTPS, 0) == kCFCompareEqualTo || CFStringCompare(typeRef, kCFProxyTypeHTTP, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+            if (hostRef && portRef) {
+                int p = 0; CFNumberGetValue(portRef, kCFNumberIntType, &p);
+                // Build URL
+                char hostBuf[512] = {0};
+                CFStringGetCString(hostRef, hostBuf, sizeof(hostBuf), kCFStringEncodingUTF8);
+                std::ostringstream po; po << "http://" << hostBuf << ":" << p;
+                out = ProxyResult{ ProxyResult::Type::Http, po.str() };
+                break;
+            }
+        } else if (CFStringCompare(typeRef, kCFProxyTypeSOCKS, 0) == kCFCompareEqualTo) {
+            if (hostRef && portRef) {
+                int p = 0; CFNumberGetValue(portRef, kCFNumberIntType, &p);
+                char hostBuf[512] = {0};
+                CFStringGetCString(hostRef, hostBuf, sizeof(hostBuf), kCFStringEncodingUTF8);
+                std::ostringstream po; po << "socks5://" << hostBuf << ":" << p;
+                out = ProxyResult{ ProxyResult::Type::Socks5, po.str() };
+                break;
+            }
+        }
+    }
+    CFRelease(arr);
+    return out;
+#else
+    (void)scheme; (void)host; (void)port;
+    return ProxyResult{ ProxyResult::Type::Direct, {} };
 #endif
 }
 

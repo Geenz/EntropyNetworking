@@ -131,6 +131,15 @@ if (WIN32)
     target_link_libraries(EntropyNetworking PRIVATE winhttp)
 endif()
 
+# Link macOS frameworks for CFNetwork-based proxy resolution
+if(APPLE)
+    target_link_libraries(EntropyNetworking PRIVATE
+        "-framework CoreFoundation"
+        "-framework SystemConfiguration"
+        "-framework CFNetwork"
+    )
+endif()
+
 # Platform and compiler-specific settings
 if(WIN32)
     # Settings for Windows
