@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 
 namespace EntropyEngine::Networking::HTTP {
 
