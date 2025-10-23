@@ -8,6 +8,13 @@
     "libdatachannel",
     "openssl",
     "zstd",
-    "gtest"
+    "gtest",
+    "tinyxml2",
+    "llhttp",
+    "cpp-httplib",
+    {
+      "name": "curl",
+      "features": ["http2", "ssl"]
+    }
   ]
 }

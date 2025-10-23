@@ -1,6 +1,7 @@
 # Test configuration for EntropyNetworking
 
 find_package(GTest CONFIG REQUIRED)
+find_package(tinyxml2 CONFIG REQUIRED)
 
 # Test executable
 add_executable(EntropyNetworkingTests
@@ -14,14 +15,32 @@ add_executable(EntropyNetworkingTests
     CallbackFanoutTests.cpp
     ConnectionManagerLifecycleTests.cpp
     ManagerMetricsTests.cpp
+    # WebDAVConnectionTests.cpp - REMOVED: WebDAVConnection no longer exists
+    WebDAVPropfindParserTests.cpp
+    # WebDAVBackendTests.cpp - REMOVED: Used mock WebDAVConnection
+    WebDavAdapterTests.cpp
+    # WebDAVStreamingTests.cpp - REMOVED: Used mock WebDAVConnection
+    WebDAVClientIntegrationTests.cpp
+    HttpClientTests.cpp
+    HttpClientRobustnessTests.cpp
+    HttpClientWebDAVIntegrationTest.cpp
+    HttpClientStreamingTests.cpp
 )
+
+# Tests link libraries
 
 target_link_libraries(EntropyNetworkingTests
     PRIVATE
         EntropyNetworking
         GTest::gtest
         GTest::gtest_main
+        tinyxml2::tinyxml2
 )
+
+# Link Winsock on Windows for test-local raw socket server
+if (WIN32)
+    target_link_libraries(EntropyNetworkingTests PRIVATE ws2_32)
+endif()
 
 # Enable testing
 include(GoogleTest)

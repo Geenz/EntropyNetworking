@@ -7,6 +7,14 @@
  * This file is part of the Entropy Networking project.
  */
 
+/**
+ * @file NetworkConnection.h
+ * @brief Base interface for network connections
+ *
+ * This file contains NetworkConnection, the abstract interface for all connection
+ * backends (Unix sockets, named pipes, WebRTC, XPC).
+ */
+
 #pragma once
 
 #include <EntropyCore.h>
@@ -23,24 +31,45 @@
 namespace EntropyEngine::Networking {
 
 /**
- * NetworkConnection - Represents a network connection to a peer
+ * @brief Abstract base interface for network connections
  *
- * Derives from EntropyObject for ref counting. Connections are created
- * by ConnectionManager and stamped with appropriate handles.
+ * NetworkConnection defines the interface that all connection backends must implement.
+ * Derives from EntropyObject for type system integration. Connections are created by
+ * ConnectionManager and accessed via ConnectionHandle.
+ *
+ * Implementations:
+ * - UnixSocketConnection (Linux/macOS local IPC)
+ * - NamedPipeConnection (Windows local IPC)
+ * - WebRTCConnection (all platforms, remote)
+ * - XPCConnection (macOS, local IPC)
+ *
+ * Thread Safety: All methods are thread-safe unless documented otherwise.
+ * Callbacks are invoked with reference-counted guards to prevent use-after-free.
  */
 class NetworkConnection : public Core::EntropyObject {
 public:
-    using MessageCallback = std::function<void(const std::vector<uint8_t>&)>;
-    using StateCallback = std::function<void(ConnectionState)>;
+    using MessageCallback = std::function<void(const std::vector<uint8_t>&)>;  ///< Callback for received messages
+    using StateCallback = std::function<void(ConnectionState)>;                ///< Callback for state changes
 
     virtual ~NetworkConnection() = default;
 
-    // Connection lifecycle
+    /**
+     * @brief Initiates connection to endpoint
+     * @return Result indicating success or failure
+     */
     virtual Result<void> connect() = 0;
-    virtual Result<void> disconnect() = 0;
-    virtual bool isConnected() const = 0;
 
-    // Message transmission
+    /**
+     * @brief Disconnects from endpoint
+     * @return Result indicating success or failure
+     */
+    virtual Result<void> disconnect() = 0;
+
+    /**
+     * @brief Checks if connection is established
+     * @return true if state is Connected
+     */
+    virtual bool isConnected() const = 0;
     /**
      * @brief Sends data over the reliable channel
      *
@@ -67,22 +96,51 @@ public:
      */
     virtual Result<void> sendUnreliable(const std::vector<uint8_t>& data) = 0;
 
-    // Non-blocking send API (default: not supported, returns InvalidParameter)
+    /**
+     * @brief Non-blocking send with backpressure detection
+     * @param data Bytes to send
+     * @return Result with WouldBlock error if backpressured, or InvalidParameter if not supported
+     */
     virtual Result<void> trySend(const std::vector<uint8_t>& data) {
         (void)data;
         return Result<void>::err(NetworkError::InvalidParameter, "trySend not supported by this backend");
     }
 
-    // State and info
+    /**
+     * @brief Gets current connection state
+     * @return Connection state (Disconnected, Connecting, Connected, etc.)
+     */
     virtual ConnectionState getState() const = 0;
+
+    /**
+     * @brief Gets connection type (Local or Remote)
+     * @return Connection type determined at creation
+     */
     virtual ConnectionType getType() const = 0;
+
+    /**
+     * @brief Gets connection statistics
+     * @return Stats with bytes/messages sent/received
+     */
     virtual ConnectionStats getStats() const = 0;
 
-    // Callbacks (thread-safe)
+    /**
+     * @brief Sets callback for incoming messages
+     *
+     * Thread-safe: Can be called from any thread.
+     * @param callback Function called when messages arrive
+     */
     void setMessageCallback(MessageCallback callback) noexcept {
         std::lock_guard<std::mutex> lock(_cbMutex);
         _messageCallback = std::move(callback);
     }
+
+    /**
+     * @brief Sets callback for state changes
+     *
+     * Thread-safe: Can be called from any thread.
+     * @param callback Function called when connection state changes
+     */
     void setStateCallback(StateCallback callback) noexcept {
         std::lock_guard<std::mutex> lock(_cbMutex);
         _stateCallback = std::move(callback);
@@ -91,6 +149,13 @@ public:
 protected:
     NetworkConnection() = default;
 
+    /**
+     * @brief Invokes message callback with lifetime guards
+     *
+     * Called by derived classes when messages arrive. Uses RAII guard and shutdown
+     * flag to prevent use-after-free during destruction.
+     * @param data Received message bytes
+     */
     void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
         // Check shutdown flag first (fast path)
         if (_callbacksShutdown.load(std::memory_order_acquire)) {
@@ -123,6 +188,13 @@ protected:
         // until we're completely done with the mutex
     }
 
+    /**
+     * @brief Invokes state callback with lifetime guards
+     *
+     * Called by derived classes when state changes. Uses RAII guard and shutdown
+     * flag to prevent use-after-free during destruction.
+     * @param state New connection state
+     */
     void onStateChanged(ConnectionState state) noexcept {
         // Check shutdown flag first (fast path)
         if (_callbacksShutdown.load(std::memory_order_acquire)) {
@@ -155,8 +227,12 @@ protected:
         // until we're completely done with the mutex
     }
 
-    // Shutdown callbacks and wait for all active ones to complete
-    // Call this from derived class destructor BEFORE base class destructor runs
+    /**
+     * @brief Shuts down callbacks and waits for in-flight invocations
+     *
+     * Sets shutdown flag and spin-waits for active callbacks to complete.
+     * Call this from derived class destructor BEFORE base destructor runs.
+     */
     void shutdownCallbacks() noexcept {
         // Set shutdown flag to prevent new callbacks from proceeding
         _callbacksShutdown.store(true, std::memory_order_release);
@@ -169,11 +245,11 @@ protected:
     }
 
 private:
-    mutable std::mutex _cbMutex;
-    MessageCallback _messageCallback;
-    StateCallback _stateCallback;
-    std::atomic<int> _activeCallbacks{0};
-    std::atomic<bool> _callbacksShutdown{false};
+    mutable std::mutex _cbMutex;                         ///< Protects callback access
+    MessageCallback _messageCallback;                    ///< User message callback
+    StateCallback _stateCallback;                        ///< User state callback
+    std::atomic<int> _activeCallbacks{0};                ///< Count of active callback invocations
+    std::atomic<bool> _callbacksShutdown{false};         ///< Shutdown flag for destructor
 };
 
 } // namespace EntropyEngine::Networking
