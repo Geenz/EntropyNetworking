@@ -14,6 +14,8 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <EntropyCore.h>
+#include <Logging/Logger.h>
 
 namespace EntropyEngine::Networking::Testing {
 
@@ -102,33 +104,45 @@ public:
 private:
     void handlePeer1LocalDescription(const std::string& type, const std::string& sdp) {
         std::lock_guard lock(_mutex);
+        ENTROPY_LOG_DEBUG(std::string("Signaling: P1 -> P2 localDescription type=") + type +
+                          ", sdpLen=" + std::to_string((int)sdp.size()));
         if (_peer2) {
             _peer2->setRemoteDescription(type, sdp);
-            _descriptionsExchanged.fetch_add(1, std::memory_order_relaxed);
+            auto n = _descriptionsExchanged.fetch_add(1, std::memory_order_relaxed) + 1;
+            ENTROPY_LOG_DEBUG("Signaling: descriptionsExchanged=" + std::to_string(n));
         }
     }
 
     void handlePeer1LocalCandidate(const std::string& candidate, const std::string& mid) {
         std::lock_guard lock(_mutex);
+        ENTROPY_LOG_DEBUG(std::string("Signaling: P1 -> P2 candidate mid=") + mid +
+                          ", len=" + std::to_string((int)candidate.size()));
         if (_peer2) {
             _peer2->addRemoteCandidate(candidate, mid);
-            _candidatesExchanged.fetch_add(1, std::memory_order_relaxed);
+            auto n = _candidatesExchanged.fetch_add(1, std::memory_order_relaxed) + 1;
+            ENTROPY_LOG_DEBUG("Signaling: candidatesExchanged=" + std::to_string(n));
         }
     }
 
     void handlePeer2LocalDescription(const std::string& type, const std::string& sdp) {
         std::lock_guard lock(_mutex);
+        ENTROPY_LOG_DEBUG(std::string("Signaling: P2 -> P1 localDescription type=") + type +
+                          ", sdpLen=" + std::to_string((int)sdp.size()));
         if (_peer1) {
             _peer1->setRemoteDescription(type, sdp);
-            _descriptionsExchanged.fetch_add(1, std::memory_order_relaxed);
+            auto n = _descriptionsExchanged.fetch_add(1, std::memory_order_relaxed) + 1;
+            ENTROPY_LOG_DEBUG("Signaling: descriptionsExchanged=" + std::to_string(n));
         }
     }
 
     void handlePeer2LocalCandidate(const std::string& candidate, const std::string& mid) {
         std::lock_guard lock(_mutex);
+        ENTROPY_LOG_DEBUG(std::string("Signaling: P2 -> P1 candidate mid=") + mid +
+                          ", len=" + std::to_string((int)candidate.size()));
         if (_peer1) {
             _peer1->addRemoteCandidate(candidate, mid);
-            _candidatesExchanged.fetch_add(1, std::memory_order_relaxed);
+            auto n = _candidatesExchanged.fetch_add(1, std::memory_order_relaxed) + 1;
+            ENTROPY_LOG_DEBUG("Signaling: candidatesExchanged=" + std::to_string(n));
         }
     }
 

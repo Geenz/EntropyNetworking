@@ -13,8 +13,33 @@
 #include <chrono>
 #include <EntropyCore.h>
 #include <Logging/Logger.h>
+#include <cstring>
 
 namespace EntropyEngine::Networking {
+
+    // Debug helpers for readable logs
+    static const char* rtcStateToString(rtcState s) {
+        switch (s) {
+            case RTC_NEW: return "RTC_NEW";
+            case RTC_CONNECTING: return "RTC_CONNECTING";
+            case RTC_CONNECTED: return "RTC_CONNECTED";
+            case RTC_DISCONNECTED: return "RTC_DISCONNECTED";
+            case RTC_FAILED: return "RTC_FAILED";
+            case RTC_CLOSED: return "RTC_CLOSED";
+        }
+        return "RTC_?";
+    }
+
+    static const char* connStateToString(ConnectionState s) {
+        switch (s) {
+            case ConnectionState::Disconnected: return "Disconnected";
+            case ConnectionState::Disconnecting: return "Disconnecting";
+            case ConnectionState::Connecting:   return "Connecting";
+            case ConnectionState::Connected:    return "Connected";
+            case ConnectionState::Failed:       return "Failed";
+        }
+        return "?";
+    }
 
     WebRTCConnection::WebRTCConnection(
         WebRTCConfig config,
@@ -60,6 +85,9 @@ namespace EntropyEngine::Networking {
         if (self->_destroying.load(std::memory_order_acquire)) return;
 
         self->_makingOffer.store(false, std::memory_order_release);
+        ENTROPY_LOG_DEBUG(std::string("onLocalDescription: type=") + (type?type:"(null)") +
+                          ", polite=" + (self->_polite ? "true" : "false") +
+                          ", sdpLen=" + std::to_string(sdp ? (int)std::strlen(sdp) : 0));
 
         if (self->_signalingCallbacks.onLocalDescription) {
             self->_signalingCallbacks.onLocalDescription(type, sdp);
@@ -70,6 +98,8 @@ namespace EntropyEngine::Networking {
         auto* self = static_cast<WebRTCConnection*>(user);
         if (self->_destroying.load(std::memory_order_acquire)) return;
 
+        ENTROPY_LOG_DEBUG(std::string("onLocalCandidate: mid=") + (mid?mid:"(null)") +
+                          ", len=" + std::to_string(cand ? (int)std::strlen(cand) : 0));
         if (self->_signalingCallbacks.onLocalCandidate) {
             self->_signalingCallbacks.onLocalCandidate(cand, mid);
         }
@@ -106,8 +136,12 @@ namespace EntropyEngine::Networking {
             }
 
             if (newState != self->_state) {
+                ENTROPY_LOG_INFO(std::string("PeerConnection state change: ") + rtcStateToString(state) +
+                                 " => " + connStateToString(newState));
                 self->_state = newState;
                 pending = newState;
+            } else {
+                ENTROPY_LOG_DEBUG(std::string("PeerConnection state change (no mapped transition): ") + rtcStateToString(state));
             }
         }
 
@@ -124,6 +158,8 @@ namespace EntropyEngine::Networking {
         if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
             return;
         }
+
+        ENTROPY_LOG_INFO(std::string("Incoming data channel negotiated: ") + label);
 
         std::lock_guard<std::mutex> lock(self->_mutex);
         std::string_view labelView(label);
@@ -152,7 +188,7 @@ namespace EntropyEngine::Networking {
             return;
         }
 
-        ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label);
+        ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label + ", id=" + std::to_string(id));
 
         // Only transition to Connected for reliable channel matching our current channel ID
         std::string_view labelView(label);
@@ -188,6 +224,8 @@ namespace EntropyEngine::Networking {
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
             return;
         }
+
+        ENTROPY_LOG_INFO(std::string("Data channel closed: ") + label + ", id=" + std::to_string(id));
 
         // Only transition to Disconnected for reliable channel
         std::string_view labelView(label);
@@ -421,18 +459,29 @@ namespace EntropyEngine::Networking {
         bool offerCollision = isOffer && _makingOffer.load(std::memory_order_acquire);
 
         if (offerCollision) {
+            ENTROPY_LOG_WARNING(std::string("Offer glare detected: incoming ") + type +
+                                ", polite=" + (_polite ? "true" : "false"));
             if (!_polite) {
-                // Impolite peer ignores the incoming offer
-                return Result<void>::ok();
-            }
-            // Polite peer rolls back its local offer to accept remote offer
-            int rollbackResult = rtcSetRemoteDescription(_peerConnectionId, "", "rollback");
-            if (rollbackResult < 0) {
-                ENTROPY_LOG_WARNING("Rollback failed or unsupported; ignoring incoming offer");
-                return Result<void>::ok();
+                // Harden: attempt rollback even when impolite to avoid glare deadlocks in tests/CI.
+                // If rollback isn't supported, fall back to ignoring the offer to avoid thrash.
+                int rollbackResult = rtcSetRemoteDescription(_peerConnectionId, "", "rollback");
+                if (rollbackResult < 0) {
+                    ENTROPY_LOG_WARNING("Impolite peer: rollback unsupported; ignoring incoming offer to avoid glare");
+                    return Result<void>::ok();
+                } else {
+                    _makingOffer.store(false, std::memory_order_release);
+                    // Continue to set the remote offer below
+                }
             } else {
-                // After a successful rollback we are no longer making an offer
-                _makingOffer.store(false, std::memory_order_release);
+                // Polite peer rolls back its local offer to accept remote offer
+                int rollbackResult = rtcSetRemoteDescription(_peerConnectionId, "", "rollback");
+                if (rollbackResult < 0) {
+                    ENTROPY_LOG_WARNING("Polite peer: rollback failed or unsupported; ignoring incoming offer");
+                    return Result<void>::ok();
+                } else {
+                    // After a successful rollback we are no longer making an offer
+                    _makingOffer.store(false, std::memory_order_release);
+                }
             }
         }
 
@@ -441,6 +490,8 @@ namespace EntropyEngine::Networking {
             _makingOffer.store(false, std::memory_order_release);
         }
 
+        ENTROPY_LOG_DEBUG(std::string("setRemoteDescription: type=") + type +
+                          ", sdpLen=" + std::to_string((int)sdp.size()));
         int result = rtcSetRemoteDescription(_peerConnectionId, sdp.c_str(), type.c_str());
         if (result < 0) {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to set remote description");
@@ -456,6 +507,8 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::InvalidParameter, "Peer connection not initialized");
         }
 
+        ENTROPY_LOG_DEBUG(std::string("addRemoteCandidate: mid=") + mid +
+                          ", len=" + std::to_string((int)candidate.size()));
         int result = rtcAddRemoteCandidate(_peerConnectionId, candidate.c_str(), mid.c_str());
         if (result < 0) {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to add remote candidate");
@@ -497,6 +550,8 @@ namespace EntropyEngine::Networking {
         config.enableIceTcp = _config.enableIceTcp;
         config.maxMessageSize = _config.maxMessageSize;
 
+        ENTROPY_LOG_INFO("Creating PeerConnection (ICE-TCP=" + std::string(config.enableIceTcp ? "on" : "off") +
+                         ", bindAddress=" + (_config.bindAddress.empty()?"":_config.bindAddress) + ")");
         _peerConnectionId = rtcCreatePeerConnection(&config);
         if (_peerConnectionId < 0) {
             throw std::runtime_error("Failed to create peer connection");
@@ -510,6 +565,7 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::setupDataChannel() {
+        ENTROPY_LOG_INFO("Creating reliable data channel: label=" + _dataChannelLabel);
         _dataChannelId = rtcCreateDataChannel(_peerConnectionId, _dataChannelLabel.c_str());
         if (_dataChannelId < 0) {
             throw std::runtime_error("Failed to create data channel");
@@ -524,6 +580,7 @@ namespace EntropyEngine::Networking {
         init.reliability.unordered = true;
         init.reliability.maxRetransmits = 0;
 
+        ENTROPY_LOG_INFO("Creating unreliable data channel: label=" + _unreliableChannelLabel);
         _unreliableDataChannelId = rtcCreateDataChannelEx(_peerConnectionId,
             _unreliableChannelLabel.c_str(), &init);
         if (_unreliableDataChannelId < 0) {

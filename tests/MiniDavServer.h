@@ -270,6 +270,93 @@ private:
             }
         }
 
+        // General HTTP test harness routes (non-WebDAV)
+        // Handle a set of httpbin-like endpoints to remove external dependencies in tests.
+        auto endsWithInt = [](const std::string& base, const std::string& pfx, int& outVal) -> bool {
+            if (base.rfind(pfx, 0) != 0) return false;
+            std::string rest = base.substr(pfx.size());
+            if (rest.empty()) return false;
+            // Extract leading digits
+            size_t i = 0;
+            bool neg = false;
+            if (rest[0] == '-') { neg = true; i = 1; }
+            for (; i < rest.size() && std::isdigit((unsigned char)rest[i]); ++i) {}
+            if (i == (neg ? 1 : 0)) return false;
+            try {
+                outVal = std::stoi(rest.substr(0, i));
+                return true;
+            } catch (...) { return false; }
+        };
+
+        // /status/<code>
+        {
+            int code = 0;
+            if (endsWithInt(path, "/status/", code)) {
+                sendSimple(cs, code);
+                return;
+            }
+        }
+
+        // /bytes/<n>
+        {
+            int nbytes = -1;
+            if (endsWithInt(path, "/bytes/", nbytes) && nbytes >= 0) {
+                std::string body;
+                if (method == "GET") {
+                    body.resize((size_t)nbytes);
+                    // Fill with deterministic pattern 'A'..'Z'
+                    for (int i = 0; i < nbytes; ++i) body[(size_t)i] = (char)('A' + (i % 26));
+                }
+                std::unordered_map<std::string,std::string> hdrs;
+                hdrs["Content-Length"] = std::to_string((size_t)nbytes);
+                sendRaw(cs, 200, "application/octet-stream", body, hdrs);
+                return;
+            }
+        }
+
+        // /delay/<seconds>
+        {
+            int sec = -1;
+            if (endsWithInt(path, "/delay/", sec) && sec >= 0) {
+#ifdef _WIN32
+                Sleep((DWORD)(sec * 1000));
+#else
+                std::this_thread::sleep_for(std::chrono::seconds(sec));
+#endif
+                sendRaw(cs, 200, "text/plain", "delayed");
+                return;
+            }
+        }
+
+        // /headers (echo selected headers)
+        if (path == "/headers") {
+            std::string body;
+            // Echo back specific headers in expected casing for tests
+            auto it1 = headers.find("x-custom-header");
+            if (it1 != headers.end()) body += std::string("X-Custom-Header: ") + it1->second + "\n";
+            auto it2 = headers.find("x-another-header");
+            if (it2 != headers.end()) body += std::string("X-Another-Header: ") + it2->second + "\n";
+            auto ua = headers.find("user-agent");
+            if (ua != headers.end()) body += std::string("User-Agent: ") + ua->second + "\n";
+            sendRaw(cs, 200, "text/plain", body);
+            return;
+        }
+
+        // /post (echo request body)
+        if (method == "POST" && path == "/post") {
+            std::string ctype = "application/octet-stream";
+            if (auto it = headers.find("content-type"); it != headers.end()) ctype = it->second;
+            sendRaw(cs, 200, ctype, body);
+            return;
+        }
+
+        // /get - simple OK endpoint
+        if (method == "GET" && path.rfind("/get", 0) == 0) {
+            std::string resp = "ok";
+            sendRaw(cs, 200, "text/plain", resp);
+            return;
+        }
+
         if (!starts_with(path, _base)) {
             sendSimple(cs, 404);
             return;

@@ -13,6 +13,8 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <EntropyCore.h>
+#include <Logging/Logger.h>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Networking::Testing;
@@ -23,8 +25,8 @@ using namespace EntropyEngine::Networking::Testing;
  * These tests verify WebRTC peer-to-peer connections using in-process signaling.
  * Two WebRTCConnection instances exchange signaling data directly without an external server.
  *
- * Note: These tests require network access for STUN servers and may take several seconds
- * to complete due to ICE gathering and connection establishment.
+ * Note: These tests are hermetic: in-process signaling, loopback-only host ICE,
+ * ICE-TCP enabled, and a bounded port range. No external STUN/TURN is required.
  */
 
 // Integration test - requires network and takes time (~5-10 seconds)
@@ -364,11 +366,12 @@ TEST(WebRTCIntegrationTests, TwoPeerCustomDataChannelLabel) {
     InProcessSignaling signaling;
     auto [callbacks1, callbacks2] = signaling.createCallbackPair();
 
-    WebRTCConfig config = localHermeticRtcConfig();
+    // Use paired configs so one peer is polite and the other is impolite to avoid offer glare
+    auto [config1, config2] = localHermeticRtcConfigPair();
 
     // Create connections with custom channel label
-    WebRTCConnection peer1(config, callbacks1, "custom-channel");
-    WebRTCConnection peer2(config, callbacks2, "custom-channel");
+    WebRTCConnection peer1(config1, callbacks1, "custom-channel");
+    WebRTCConnection peer2(config2, callbacks2, "custom-channel");
     signaling.setPeers(&peer1, &peer2);
 
     std::atomic<bool> peer1Connected{false};
@@ -390,6 +393,11 @@ TEST(WebRTCIntegrationTests, TwoPeerCustomDataChannelLabel) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    if (!(peer1.isConnected() && peer2.isConnected())) {
+        ENTROPY_LOG_ERROR("TwoPeerCustomDataChannelLabel: timed out waiting for Connected");
+        ENTROPY_LOG_ERROR("diagnostic: descriptions=" + std::to_string(signaling.getDescriptionsExchanged()) +
+                          ", candidates=" + std::to_string(signaling.getCandidatesExchanged()));
+    }
     ASSERT_TRUE(peer1.isConnected() && peer2.isConnected());
 
     // Test message exchange on custom channel
@@ -445,8 +453,13 @@ TEST(WebRTCIntegrationTests, TwoPeerMultipleICEServers) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    if (!(peer1.isConnected() && peer2.isConnected())) {
+        ENTROPY_LOG_ERROR("TwoPeerMultipleICEServers: timed out waiting for Connected (hermetic)");
+        ENTROPY_LOG_ERROR("diagnostic: descriptions=" + std::to_string(signaling.getDescriptionsExchanged()) +
+                          ", candidates=" + std::to_string(signaling.getCandidatesExchanged()));
+    }
     EXPECT_TRUE(peer1.isConnected() && peer2.isConnected())
-        << "Connection should succeed with multiple ICE servers";
+        << "Hermetic loopback connection (ICE host over TCP) should succeed";
 
     // Verify signaling occurred
     EXPECT_GE(signaling.getDescriptionsExchanged(), 2);

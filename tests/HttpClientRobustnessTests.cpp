@@ -57,11 +57,18 @@ TEST_F(HttpClientRobustnessTests, ConnectionRefused) {
     EXPECT_FALSE(resp.statusMessage.empty());
 }
 
-// Test timeout on slow server
+// Test timeout on slow server (local harness)
 TEST_F(HttpClientRobustnessTests, TimeoutHandling) {
+    // Local server with delay endpoint to avoid external dependency
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.host = "httpbin.org";
+    req.scheme = "http";
+    req.host = host;
     req.path = "/delay/10"; // 10 second delay
 
     RequestOptions opts;
@@ -72,15 +79,11 @@ TEST_F(HttpClientRobustnessTests, TimeoutHandling) {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start);
 
-    // Should timeout or fail fast with a server error (e.g., proxy/CDN may return 5xx quickly)
-    // Accept either a cURL timeout (statusCode==0) or a non-success HTTP status (>=400).
-    if (resp.statusCode == 0) {
-        EXPECT_NE(resp.statusMessage.find("cURL error"), std::string::npos);
-    } else {
-        EXPECT_GE(resp.statusCode, 400);
-    }
+    // Should timeout (statusCode==0) in ~2 seconds
+    EXPECT_EQ(resp.statusCode, 0);
+    EXPECT_NE(resp.statusMessage.find("cURL error"), std::string::npos);
 
-    // Should timeout/fail around 2 seconds, not wait 10
+    // Should timeout around 2 seconds, not wait 10
     EXPECT_LT(elapsed.count(), 4000);
 }
 
@@ -102,11 +105,17 @@ TEST_F(HttpClientRobustnessTests, HttpsRealServer) {
     EXPECT_FALSE(resp.body.empty());
 }
 
-// Test POST with body
+// Test POST with body (local harness)
 TEST_F(HttpClientRobustnessTests, PostWithJsonBody) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     HttpRequest req;
     req.method = HttpMethod::POST;
-    req.host = "httpbin.org";
+    req.scheme = "http";
+    req.host = host;
     req.path = "/post";
 
     std::string jsonBody = R"({"test": "data", "number": 42, "nested": {"key": "value"}})";
@@ -127,11 +136,17 @@ TEST_F(HttpClientRobustnessTests, PostWithJsonBody) {
     EXPECT_NE(respBody.find("data"), std::string::npos);
 }
 
-// Test custom headers
+// Test custom headers (local harness)
 TEST_F(HttpClientRobustnessTests, CustomHeaders) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.host = "httpbin.org";
+    req.scheme = "http";
+    req.host = host;
     req.path = "/headers";
     req.headers["x-custom-header"] = "test-value-12345";
     req.headers["x-another-header"] = "another-value";
@@ -144,20 +159,25 @@ TEST_F(HttpClientRobustnessTests, CustomHeaders) {
 
     EXPECT_TRUE(resp.isSuccess());
 
-    // httpbin echoes headers back
     std::string body(resp.body.begin(), resp.body.end());
     EXPECT_NE(body.find("X-Custom-Header"), std::string::npos);
     EXPECT_NE(body.find("test-value-12345"), std::string::npos);
     EXPECT_NE(body.find("X-Another-Header"), std::string::npos);
 }
 
-// Test connection reuse (same host multiple requests)
+// Test connection reuse (same host multiple requests) - local harness
 TEST_F(HttpClientRobustnessTests, ConnectionReuse) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     // Make multiple requests to same host
     for (int i = 0; i < 5; i++) {
         HttpRequest req;
         req.method = HttpMethod::GET;
-        req.host = "httpbin.org";
+        req.scheme = "http";
+        req.host = host;
         req.path = "/get?request=" + std::to_string(i);
 
         RequestOptions opts;
@@ -229,11 +249,17 @@ TEST_F(HttpClientRobustnessTests, HttpMethods) {
     }
 }
 
-// Test response size limit
+// Test response size limit (local harness)
 TEST_F(HttpClientRobustnessTests, ResponseSizeLimit) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.host = "httpbin.org";
+    req.scheme = "http";
+    req.host = host;
     req.path = "/bytes/2048"; // Request 2KB
 
     RequestOptions opts;
@@ -247,11 +273,17 @@ TEST_F(HttpClientRobustnessTests, ResponseSizeLimit) {
     EXPECT_NE(resp.statusMessage.find("cURL error"), std::string::npos);
 }
 
-// Test empty response
+// Test empty response (local harness)
 TEST_F(HttpClientRobustnessTests, EmptyResponse) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.host = "httpbin.org";
+    req.scheme = "http";
+    req.host = host;
     req.path = "/bytes/0"; // Request 0 bytes
 
     RequestOptions opts;
@@ -263,8 +295,13 @@ TEST_F(HttpClientRobustnessTests, EmptyResponse) {
     EXPECT_TRUE(resp.body.empty());
 }
 
-// Test HTTP status codes
+// Test HTTP status codes (local harness)
 TEST_F(HttpClientRobustnessTests, HttpStatusCodes) {
+    DavTree tree; tree.addDir("/");
+    MiniDavServer server(tree, "/dav/");
+    server.start();
+    auto host = std::string("127.0.0.1:") + std::to_string(server.port());
+
     struct StatusTest {
         std::string path;
         int expectedStatus;
@@ -282,15 +319,15 @@ TEST_F(HttpClientRobustnessTests, HttpStatusCodes) {
     for (const auto& test : tests) {
         HttpRequest req;
         req.method = HttpMethod::GET;
-        req.host = "httpbin.org";
+        req.scheme = "http";
+        req.host = host;
         req.path = test.path;
 
         RequestOptions opts;
         opts.totalDeadline = std::chrono::milliseconds(30000);
 
         auto resp = client.execute(req, opts);
-        // Allow transient upstream issues (httpbin can return 5xx/429 sporadically)
-        EXPECT_TRUE(resp.statusCode == test.expectedStatus || resp.statusCode == 502 || resp.statusCode == 429 || (resp.statusCode >= 500 && resp.statusCode < 600))
+        EXPECT_EQ(resp.statusCode, test.expectedStatus)
             << "Path: " << test.path << ", got status: " << resp.statusCode;
     }
 }
