@@ -42,10 +42,23 @@ namespace EntropyEngine::Networking {
  * auto batcher = std::make_shared<BatchManager>(session);
  *
  * // Caller computes hash from entity metadata
- * auto hash = computePropertyHash(entityId, appId, typeName, "transform.position");
+ * auto hash = computePropertyHash(entityId, componentType, "transform.position");
  * batcher->updateProperty(hash, PropertyType::Vec3, position);
  *
- * // Application calls processBatch() periodically via WorkContract
+ * // Application schedules periodic batch processing
+ * // Example using std::thread and timer:
+ * std::atomic<bool> running{true};
+ * std::thread batchThread([&]() {
+ *     while (running) {
+ *         batcher->processBatch();
+ *         std::this_thread::sleep_for(std::chrono::milliseconds(batcher->getBatchInterval()));
+ *     }
+ * });
+ *
+ * // Optional: Set callback for dropped batches (backpressure monitoring)
+ * batcher->setOnBatchDropped([](size_t droppedCount) {
+ *     LOG_WARNING("Dropped batch with " + std::to_string(droppedCount) + " updates due to backpressure");
+ * });
  * @endcode
  */
 class BatchManager {
@@ -71,7 +84,7 @@ public:
      * @param type Property type
      * @param value Property value
      */
-    void updateProperty(PropertyHash128 hash, PropertyType type, const PropertyValue& value);
+    void updateProperty(PropertyHash hash, PropertyType type, const PropertyValue& value);
 
     /**
      * @brief Process pending updates and send a batch
@@ -117,6 +130,12 @@ public:
     };
     Stats getStats() const;
 
+    /**
+     * @brief Set callback for dropped batches (backpressure monitoring)
+     * @param callback Function called when a batch is dropped, receives the number of updates that were dropped
+     */
+    void setOnBatchDropped(std::function<void(size_t)> callback);
+
 private:
     struct PendingUpdate {
         PropertyType type;
@@ -129,7 +148,7 @@ private:
     SessionHandle _session;          // Session handle
 
     // Pending updates (keyed by property hash)
-    std::unordered_map<PropertyHash128, PendingUpdate> _pendingUpdates;
+    std::unordered_map<PropertyHash, PendingUpdate> _pendingUpdates;
     mutable std::mutex _mutex;
 
     // Batch scheduling
@@ -146,6 +165,9 @@ private:
     // Backpressure tracking
     std::atomic<uint32_t> _pendingBatchCount{0}; // Batches waiting to send
     static constexpr uint32_t MAX_PENDING_BATCHES = 3;
+
+    // Callbacks
+    std::function<void(size_t)> _onBatchDropped;
 };
 
 } // namespace EntropyEngine::Networking

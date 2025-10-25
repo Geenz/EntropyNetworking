@@ -167,14 +167,12 @@ int main() {
                     // Compute property hashes for position and rotation
                     auto posHash = computePropertyHash(
                         entityIds[i],
-                        "com.entropy.demo",
                         "Transform",
                         "position"
                     );
 
                     auto rotHash = computePropertyHash(
                         entityIds[i],
-                        "com.entropy.demo",
                         "Transform",
                         "rotation"
                     );

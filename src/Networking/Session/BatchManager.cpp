@@ -27,7 +27,7 @@ BatchManager::~BatchManager() {
     flush();
 }
 
-void BatchManager::updateProperty(PropertyHash128 hash, PropertyType type, const PropertyValue& value) {
+void BatchManager::updateProperty(PropertyHash hash, PropertyType type, const PropertyValue& value) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     // Check if this property already has a pending update (deduplication)
@@ -69,9 +69,13 @@ BatchManager::Stats BatchManager::getStats() const {
     return _stats;
 }
 
+void BatchManager::setOnBatchDropped(std::function<void(size_t)> callback) {
+    _onBatchDropped = std::move(callback);
+}
+
 void BatchManager::processBatch() {
     // Move pending updates out of the accumulator
-    std::unordered_map<PropertyHash128, PendingUpdate> updates;
+    std::unordered_map<PropertyHash, PendingUpdate> updates;
     {
         std::lock_guard<std::mutex> lock(_mutex);
         if (_pendingUpdates.empty()) {
@@ -84,8 +88,14 @@ void BatchManager::processBatch() {
     // Check backpressure
     if (_pendingBatchCount >= MAX_PENDING_BATCHES) {
         // Too many batches pending, drop this one
-        std::lock_guard<std::mutex> lock(_statsMutex);
-        _stats.batchesDropped++;
+        size_t dropped = updates.size();
+        {
+            std::lock_guard<std::mutex> lock(_statsMutex);
+            _stats.batchesDropped++;
+        }
+        if (_onBatchDropped) {
+            _onBatchDropped(dropped);
+        }
         adjustBatchRate(); // Slow down
         return;
     }

@@ -21,7 +21,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+          vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
       - name: Configure CMake (VS 2022, x64, Release)
         run: >
@@ -78,7 +78,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+          vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
       - name: Configure CMake (Ninja, Release)
         run: >
@@ -148,7 +148,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 'c59b04f668d20c7dd83f478835e8266a3cc51270'
+          vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
       # Build x64 Release
       - name: Configure CMake (Ninja, Release, x64)

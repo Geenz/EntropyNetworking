@@ -39,15 +39,15 @@ Result<void> SessionHandle::sendEntityDestroyed(uint64_t entityId) const {
 }
 
 Result<void> SessionHandle::sendPropertyUpdate(
-    uint64_t entityId,
-    const std::string& propertyName,
+    PropertyHash hash,
+    PropertyType type,
     const PropertyValue& value
 ) const {
     auto* mgr = manager();
     if (!mgr) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
-    return mgr->sendPropertyUpdate(*this, entityId, propertyName, value);
+    return mgr->sendPropertyUpdate(*this, hash, type, value);
 }
 
 Result<void> SessionHandle::sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData) const {

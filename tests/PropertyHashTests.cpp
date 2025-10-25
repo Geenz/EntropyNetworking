@@ -14,54 +14,46 @@ using namespace EntropyEngine::Networking;
 
 TEST(PropertyHashTests, Determinism) {
     // Same inputs should produce same hash
-    auto hash1 = computePropertyHash(42, "com.example.app", "Player", "position");
-    auto hash2 = computePropertyHash(42, "com.example.app", "Player", "position");
+    auto hash1 = computePropertyHash(42, "Player", "position");
+    auto hash2 = computePropertyHash(42, "Player", "position");
 
     EXPECT_EQ(hash1, hash2);
 }
 
 TEST(PropertyHashTests, DifferentEntityIds) {
     // Different entity IDs should produce different hashes
-    auto hash1 = computePropertyHash(42, "com.example.app", "Player", "position");
-    auto hash2 = computePropertyHash(43, "com.example.app", "Player", "position");
+    auto hash1 = computePropertyHash(42, "Player", "position");
+    auto hash2 = computePropertyHash(43, "Player", "position");
 
     EXPECT_NE(hash1, hash2);
 }
 
-TEST(PropertyHashTests, DifferentAppIds) {
-    // Different app IDs should produce different hashes
-    auto hash1 = computePropertyHash(42, "com.example.app1", "Player", "position");
-    auto hash2 = computePropertyHash(42, "com.example.app2", "Player", "position");
+TEST(PropertyHashTests, DifferentComponentTypes) {
+    // Different component types should produce different hashes
+    auto hash1 = computePropertyHash(42, "Player", "position");
+    auto hash2 = computePropertyHash(42, "Enemy", "position");
 
     EXPECT_NE(hash1, hash2);
 }
 
-TEST(PropertyHashTests, DifferentTypeNames) {
-    // Different type names should produce different hashes
-    auto hash1 = computePropertyHash(42, "com.example.app", "Player", "position");
-    auto hash2 = computePropertyHash(42, "com.example.app", "Enemy", "position");
-
-    EXPECT_NE(hash1, hash2);
-}
-
-TEST(PropertyHashTests, DifferentFieldNames) {
-    // Different field names should produce different hashes
-    auto hash1 = computePropertyHash(42, "com.example.app", "Player", "position");
-    auto hash2 = computePropertyHash(42, "com.example.app", "Player", "velocity");
+TEST(PropertyHashTests, DifferentPropertyNames) {
+    // Different property names should produce different hashes
+    auto hash1 = computePropertyHash(42, "Player", "position");
+    auto hash2 = computePropertyHash(42, "Player", "velocity");
 
     EXPECT_NE(hash1, hash2);
 }
 
 TEST(PropertyHashTests, NotNull) {
     // Valid hash should not be null
-    auto hash = computePropertyHash(42, "com.example.app", "Player", "position");
+    auto hash = computePropertyHash(42, "Player", "position");
 
     EXPECT_FALSE(hash.isNull());
 }
 
 TEST(PropertyHashTests, NullHash) {
     // Default-constructed hash should be null
-    PropertyHash128 hash;
+    PropertyHash hash;
 
     EXPECT_TRUE(hash.isNull());
     EXPECT_EQ(hash.high, 0);
@@ -69,11 +61,11 @@ TEST(PropertyHashTests, NullHash) {
 }
 
 TEST(PropertyHashTests, HashMapUsage) {
-    // PropertyHash128 should be usable in std::unordered_map
-    std::unordered_map<PropertyHash128, std::string> map;
+    // PropertyHash should be usable in std::unordered_map
+    std::unordered_map<PropertyHash, std::string> map;
 
-    auto hash1 = computePropertyHash(42, "app", "Player", "position");
-    auto hash2 = computePropertyHash(43, "app", "Player", "position");
+    auto hash1 = computePropertyHash(42, "Player", "position");
+    auto hash2 = computePropertyHash(43, "Player", "position");
 
     map[hash1] = "value1";
     map[hash2] = "value2";
@@ -85,9 +77,9 @@ TEST(PropertyHashTests, HashMapUsage) {
 
 TEST(PropertyHashTests, Comparison) {
     // Test comparison operators
-    auto hash1 = computePropertyHash(1, "app", "Type", "field");
-    auto hash2 = computePropertyHash(2, "app", "Type", "field");
-    auto hash3 = computePropertyHash(1, "app", "Type", "field");
+    auto hash1 = computePropertyHash(1, "Type", "field");
+    auto hash2 = computePropertyHash(2, "Type", "field");
+    auto hash3 = computePropertyHash(1, "Type", "field");
 
     EXPECT_EQ(hash1, hash3);
     EXPECT_NE(hash1, hash2);

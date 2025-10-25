@@ -42,7 +42,9 @@ enum class NetworkError {
     RegistryFull,               ///< Registry has reached capacity limit
     EntityNotFound,             ///< Entity ID not found
     AlreadyExists,              ///< Entity or property already exists
-    WouldBlock                  ///< Operation would block (non-blocking backpressure)
+    WouldBlock,                 ///< Operation would block (non-blocking backpressure)
+    ResourceLimitExceeded,      ///< Resource limit exceeded (entities, properties, etc.)
+    HandshakeFailed             ///< Handshake protocol failed
 };
 
 /**
@@ -68,6 +70,8 @@ inline const char* errorToString(NetworkError error) {
         case NetworkError::EntityNotFound: return "Entity not found";
         case NetworkError::AlreadyExists: return "Already exists";
         case NetworkError::WouldBlock: return "Would block";
+        case NetworkError::ResourceLimitExceeded: return "Resource limit exceeded";
+        case NetworkError::HandshakeFailed: return "Handshake failed";
         default: return "Unknown error";
     }
 }

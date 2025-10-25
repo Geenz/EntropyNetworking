@@ -15,28 +15,25 @@
 namespace EntropyEngine {
 namespace Networking {
 
-PropertyHash128 computePropertyHash(
+PropertyHash computePropertyHash(
     uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    const std::string& fieldName)
+    const std::string& componentType,
+    const std::string& propertyName)
 {
-    // Prepare input buffer: entityId (8 bytes, big-endian) + appId + typeName + fieldName
+    // Prepare input buffer: entityId (8 bytes, big-endian) + componentType + propertyName
     std::vector<uint8_t> input;
+    input.reserve(8 + componentType.size() + propertyName.size());
 
     // Add entityId as big-endian uint64
     for (int i = 7; i >= 0; --i) {
         input.push_back(static_cast<uint8_t>((entityId >> (i * 8)) & 0xFF));
     }
 
-    // Add appId
-    input.insert(input.end(), appId.begin(), appId.end());
+    // Add componentType
+    input.insert(input.end(), componentType.begin(), componentType.end());
 
-    // Add typeName
-    input.insert(input.end(), typeName.begin(), typeName.end());
-
-    // Add fieldName
-    input.insert(input.end(), fieldName.begin(), fieldName.end());
+    // Add propertyName
+    input.insert(input.end(), propertyName.begin(), propertyName.end());
 
     // Compute SHA-256
     uint8_t hash[SHA256_DIGEST_LENGTH];
@@ -56,7 +53,7 @@ PropertyHash128 computePropertyHash(
         low = (low << 8) | hash[i];
     }
 
-    return PropertyHash128{high, low};
+    return PropertyHash{high, low};
 }
 
 } // namespace Networking
