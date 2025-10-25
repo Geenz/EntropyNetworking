@@ -157,14 +157,14 @@ public:
      * @brief Sends single property update
      *
      * Sends individual property change. For bulk updates, use sendPropertyUpdateBatch().
-     * @param entityId Entity owning the property
-     * @param propertyName Name of the property
+     * @param hash Pre-computed property hash
+     * @param type Property type
      * @param value Property value
      * @return Result indicating success or failure
      */
     Result<void> sendPropertyUpdate(
-        uint64_t entityId,
-        const std::string& propertyName,
+        PropertyHash hash,
+        PropertyType type,
         const PropertyValue& value
     ) const;
 

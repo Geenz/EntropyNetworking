@@ -88,7 +88,7 @@ void SessionManager::returnSlotToFreeList(uint32_t index) {
     }
 }
 
-SessionHandle SessionManager::createSession(ConnectionHandle connection) {
+SessionHandle SessionManager::createSession(ConnectionHandle connection, PropertyRegistry* externalRegistry) {
     if (!connection.valid()) {
         return SessionHandle();  // Invalid connection
     }
@@ -112,8 +112,8 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection) {
             return SessionHandle();
         }
 
-        // Create NetworkSession wrapping the connection
-        slot.session = std::make_unique<NetworkSession>(connPtr);
+        // Create NetworkSession wrapping the connection and optional external registry
+        slot.session = std::make_unique<NetworkSession>(connPtr, externalRegistry);
 
         return SessionHandle(this, index, generation);
     } catch (const std::exception& e) {
@@ -269,8 +269,8 @@ Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, ui
 
 Result<void> SessionManager::sendPropertyUpdate(
     const SessionHandle& handle,
-    uint64_t entityId,
-    const std::string& propertyName,
+    PropertyHash hash,
+    PropertyType type,
     const PropertyValue& value
 ) {
     if (!validateHandle(handle)) {
@@ -286,7 +286,7 @@ Result<void> SessionManager::sendPropertyUpdate(
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendPropertyUpdate(entityId, propertyName, value);
+    return slot.session->sendPropertyUpdate(hash, type, value);
 }
 
 Result<void> SessionManager::sendPropertyUpdateBatch(

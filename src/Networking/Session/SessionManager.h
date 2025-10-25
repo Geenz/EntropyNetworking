@@ -101,9 +101,11 @@ public:
      * NetworkSession instance internally.
      *
      * @param connection Connection handle to wrap
+     * @param externalRegistry Optional external PropertyRegistry to share across sessions.
+     *                        If nullptr, each session creates its own internal registry.
      * @return SessionHandle for operations, or invalid if full or connection invalid
      */
-    SessionHandle createSession(ConnectionHandle connection);
+    SessionHandle createSession(ConnectionHandle connection, PropertyRegistry* externalRegistry = nullptr);
 
     // Callback configuration
 
@@ -172,8 +174,8 @@ public:
      */
     Result<void> sendPropertyUpdate(
         const SessionHandle& handle,
-        uint64_t entityId,
-        const std::string& propertyName,
+        PropertyHash hash,
+        PropertyType type,
         const PropertyValue& value
     );
 

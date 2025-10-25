@@ -40,7 +40,13 @@ public:
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
 
-    NetworkSession(NetworkConnection* connection);
+    /**
+     * @brief Construct a NetworkSession
+     * @param connection Network connection to wrap
+     * @param externalRegistry Optional external PropertyRegistry to share across sessions.
+     *                        If nullptr, creates an internal registry (for single-session use).
+     */
+    NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry = nullptr);
     ~NetworkSession() override;
 
     // Connection management
@@ -49,11 +55,19 @@ public:
     bool isConnected() const;
     ConnectionState getState() const;
 
+    // Handshake
+    Result<void> performHandshake(const std::string& clientType, const std::string& clientId);
+    bool isHandshakeComplete() const { return _handshakeComplete; }
+
+    // Diagnostics
+    const std::string& getSessionId() const noexcept { return _sessionId; }
+
     // Send protocol messages
     Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId,
-                                   const std::string& typeName, uint64_t parentId);
+                                   const std::string& typeName, uint64_t parentId,
+                                   const std::vector<PropertyMetadata>& properties = {});
     Result<void> sendEntityDestroyed(uint64_t entityId);
-    Result<void> sendPropertyUpdate(uint64_t entityId, const std::string& propertyName,
+    Result<void> sendPropertyUpdate(PropertyHash hash, PropertyType type,
                                     const PropertyValue& value);
     Result<void> sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData);
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData);
@@ -65,20 +79,27 @@ public:
     void setSceneSnapshotCallback(SceneSnapshotCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
-    // Property registry access
-    PropertyRegistry& getPropertyRegistry() { return _propertyRegistry; }
-    const PropertyRegistry& getPropertyRegistry() const { return _propertyRegistry; }
+    // Property registry access (always valid after construction)
+    PropertyRegistry& getPropertyRegistry() { return *_propertyRegistry; }
+    const PropertyRegistry& getPropertyRegistry() const { return *_propertyRegistry; }
 
     // Statistics
     ConnectionStats getStats() const;
 
 private:
+    static std::string generateSessionId();
+
     void onMessageReceived(const std::vector<uint8_t>& data);
     void onConnectionStateChanged(ConnectionState state);
     void handleReceivedMessage(const std::vector<uint8_t>& data);
 
     NetworkConnection* _connection; // Not owned, managed by ConnectionManager
-    PropertyRegistry _propertyRegistry;
+
+    // Registry ownership model: external (non-owning) or internal (owned)
+    PropertyRegistry* _propertyRegistry{nullptr};
+    std::unique_ptr<PropertyRegistry> _ownedRegistry; // used when no external provided
+
+    std::string _sessionId;
 
     // Callbacks
     EntityCreatedCallback _entityCreatedCallback;
@@ -88,6 +109,14 @@ private:
     ErrorCallback _errorCallback;
 
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
+    std::atomic<uint32_t> _nextSendSequence{0};
+    std::atomic<uint32_t> _lastReceivedSequence{0};
+
+    // Handshake state
+    bool _handshakeComplete{false};
+    std::string _clientType;
+    std::string _clientId;
+
     mutable std::mutex _mutex;
 };
 

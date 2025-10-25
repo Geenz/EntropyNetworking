@@ -20,26 +20,30 @@ namespace Networking {
  * @brief 128-bit property hash for per-instance property identification
  *
  * Uniquely identifies a property on a specific entity instance. Computed using
- * SHA-256(entityId || appId || typeName || fieldName) truncated to 128 bits.
+ * SHA-256(entityId || componentType || propertyName) truncated to 128 bits.
  *
- * The hash provides per-instance uniqueness and namespace isolation at ecosystem scale.
+ * The hash is computed ONCE on property creation and provides per-instance
+ * uniqueness at ecosystem scale. Each property on each entity has a unique hash.
+ *
+ * Example: Entity 42's Transform.position has a different hash than
+ * Entity 99's Transform.position.
  */
-struct PropertyHash128 {
+struct PropertyHash {
     uint64_t high{0};   ///< High 64 bits of hash
     uint64_t low{0};    ///< Low 64 bits of hash
 
-    PropertyHash128() = default;
-    PropertyHash128(uint64_t h, uint64_t l) : high(h), low(l) {}
+    PropertyHash() = default;
+    PropertyHash(uint64_t h, uint64_t l) : high(h), low(l) {}
 
-    bool operator==(const PropertyHash128& other) const {
+    bool operator==(const PropertyHash& other) const {
         return high == other.high && low == other.low;
     }
 
-    bool operator!=(const PropertyHash128& other) const {
+    bool operator!=(const PropertyHash& other) const {
         return !(*this == other);
     }
 
-    bool operator<(const PropertyHash128& other) const {
+    bool operator<(const PropertyHash& other) const {
         if (high != other.high) {
             return high < other.high;
         }
@@ -61,31 +65,49 @@ struct PropertyHash128 {
  * Computes a 128-bit hash using SHA-256. The hash is deterministic and provides
  * per-instance property identification with ecosystem-scale collision resistance.
  *
- * Hash construction: SHA-256(entityId || appId || typeName || fieldName)
- * - entityId: 8 bytes (big-endian)
- * - appId: UTF-8 string
- * - typeName: UTF-8 string
- * - fieldName: UTF-8 string
+ * Hash construction: SHA-256(entityId || componentType || propertyName)
+ * - entityId: 8 bytes (big-endian uint64)
+ * - componentType: UTF-8 string (e.g., "Transform", "Player")
+ * - propertyName: UTF-8 string (e.g., "position", "health")
  *
  * Result is truncated to 128 bits (high 128 bits of SHA-256 output).
  *
+ * The hash should be computed ONCE on property registration and stored/reused.
+ * Never recompute the hash - it is a stable identifier for the property instance.
+ *
  * @param entityId Entity instance identifier
- * @param appId Application identifier
- * @param typeName Entity type name
- * @param fieldName Property field name
+ * @param componentType Component type name (e.g., "Transform")
+ * @param propertyName Property name within the component (e.g., "position")
  * @return 128-bit property hash
  *
  * @code
- * auto hash = computePropertyHash(42, "com.example.app", "Player", "position");
- * // hash uniquely identifies Player.position property on entity 42
+ * // Compute hash once when property is created
+ * auto hash = computePropertyHash(42, "Transform", "position");
+ * // hash uniquely identifies Transform.position property on entity 42
+ *
+ * // Different entity = different hash
+ * auto hash2 = computePropertyHash(99, "Transform", "position");
+ * // hash != hash2 (different entity IDs)
  * @endcode
  */
-PropertyHash128 computePropertyHash(
+PropertyHash computePropertyHash(
     uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    const std::string& fieldName
+    const std::string& componentType,
+    const std::string& propertyName
 );
+
+/**
+ * @brief Convert PropertyHash to string for logging/diagnostics
+ * @param hash PropertyHash to convert
+ * @return String representation in format "high:low" (hex)
+ */
+inline std::string toString(const PropertyHash& hash) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%016llx:%016llx",
+             static_cast<unsigned long long>(hash.high),
+             static_cast<unsigned long long>(hash.low));
+    return std::string(buf);
+}
 
 } // namespace Networking
 } // namespace EntropyEngine
@@ -93,10 +115,16 @@ PropertyHash128 computePropertyHash(
 // Hash function for std::unordered_map support
 namespace std {
     template<>
-    struct hash<EntropyEngine::Networking::PropertyHash128> {
-        size_t operator()(const EntropyEngine::Networking::PropertyHash128& h) const noexcept {
-            // Combine high and low using XOR and rotation
-            return static_cast<size_t>(h.high ^ (h.low << 1));
+    struct hash<EntropyEngine::Networking::PropertyHash> {
+        static inline uint64_t splitmix64(uint64_t x) {
+            x += 0x9e3779b97f4a7c15ull;
+            x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+            x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+            return x ^ (x >> 31);
+        }
+        size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
+            uint64_t combined = h.high ^ (h.low + 0x9e3779b97f4a7c15ull + (h.high << 6) + (h.high >> 2));
+            return static_cast<size_t>(splitmix64(combined));
         }
     };
 }
