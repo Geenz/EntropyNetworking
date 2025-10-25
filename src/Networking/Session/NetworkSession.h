@@ -89,6 +89,7 @@ public:
     // Network diagnostics
     uint64_t getDuplicatePacketCount() const { return _duplicatePacketsReceived.load(std::memory_order_relaxed); }
     uint64_t getPacketLossEventCount() const { return _packetLossEvents.load(std::memory_order_relaxed); }
+    uint64_t getSequenceUpdateFailureCount() const { return _sequenceUpdateFailures.load(std::memory_order_relaxed); }
 
 private:
     static std::string generateSessionId();
@@ -119,6 +120,7 @@ private:
     // Network diagnostics counters
     std::atomic<uint64_t> _duplicatePacketsReceived{0};
     std::atomic<uint64_t> _packetLossEvents{0};
+    std::atomic<uint64_t> _sequenceUpdateFailures{0};  // CAS retry exhaustion
 
     // Handshake state
     bool _handshakeComplete{false};

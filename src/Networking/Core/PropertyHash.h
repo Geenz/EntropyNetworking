@@ -137,7 +137,7 @@ namespace std {
             return x ^ (x >> 31);
         }
         size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
-            // Cache h.high to avoid redundant loads and improve optimization
+            // Cache h.high for readability (multiple uses in expression)
             uint64_t high = h.high;
             uint64_t combined = high ^ (h.low + 0x9e3779b97f4a7c15ull + (high << 6) + (high >> 2));
             return static_cast<size_t>(splitmix64(combined));
