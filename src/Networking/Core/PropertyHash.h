@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <string>
 #include <functional>
+#include <sstream>
+#include <iomanip>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -102,11 +104,10 @@ PropertyHash computePropertyHash(
  * @return String representation in format "high:low" (hex)
  */
 inline std::string toString(const PropertyHash& hash) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%016llx:%016llx",
-             static_cast<unsigned long long>(hash.high),
-             static_cast<unsigned long long>(hash.low));
-    return std::string(buf);
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0') << std::setw(16) << hash.high
+        << ':' << std::setw(16) << hash.low;
+    return oss.str();
 }
 
 } // namespace Networking
@@ -116,6 +117,19 @@ inline std::string toString(const PropertyHash& hash) {
 namespace std {
     template<>
     struct hash<EntropyEngine::Networking::PropertyHash> {
+        /**
+         * @brief SplitMix64 hash mixing function
+         *
+         * High-quality 64-bit hash finalizer from the SplitMix64 PRNG algorithm.
+         * Used to distribute combined hash bits uniformly across the hash space.
+         *
+         * The constants and bit operations provide excellent avalanche properties,
+         * ensuring small changes in input produce large changes in output.
+         *
+         * @param x Input value to mix
+         * @return Mixed 64-bit hash value with good distribution
+         * @see https://xorshift.di.unimi.it/splitmix64.c
+         */
         static inline uint64_t splitmix64(uint64_t x) {
             x += 0x9e3779b97f4a7c15ull;
             x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;

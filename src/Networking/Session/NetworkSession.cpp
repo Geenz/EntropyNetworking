@@ -8,6 +8,7 @@
  */
 
 #include "NetworkSession.h"
+#include "../Core/TimeUtils.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -205,9 +206,7 @@ Result<void> NetworkSession::sendPropertyUpdate(
         auto message = builder.initRoot<Message>();
         auto batch = message.initPropertyUpdateBatch();
 
-        batch.setTimestamp(static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()));
+        batch.setTimestamp(getCurrentTimestampMicros());
         batch.setSequence(_nextSendSequence.fetch_add(1, std::memory_order_relaxed));
 
         auto updates = batch.initUpdates(1);
