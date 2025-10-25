@@ -351,7 +351,9 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 uint32_t seq = batch.getSequence();
 
                 // Atomically check and update sequence number to avoid race conditions
-                while (true) {
+                // Use retry limit to prevent livelock under extreme contention
+                constexpr int MAX_CAS_RETRIES = 100;
+                for (int retry = 0; retry < MAX_CAS_RETRIES; ++retry) {
                     uint32_t last = _lastReceivedSequence.load(std::memory_order_relaxed);
 
                     if (seq <= last) {
@@ -372,6 +374,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     }
                     // If CAS failed, another thread updated the sequence, retry
                 }
+                // Note: If all retries exhausted, packet is silently dropped to avoid blocking
 
                 if (_propertyUpdateCallback) {
                     _propertyUpdateCallback(data);

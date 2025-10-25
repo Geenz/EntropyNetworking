@@ -78,7 +78,7 @@ struct PropertyUpdate {
 }
 
 struct PropertyUpdateBatch {
-    timestamp @0 :UInt64;            # Microseconds since epoch
+    timestamp @0 :UInt64;            # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
     sequence @1 :UInt32;             # Monotonic sequence number
     updates @2 :List(PropertyUpdate);
 }
@@ -93,7 +93,7 @@ struct PropertyRegistration {
     componentType @2 :Text;          # e.g., "Transform", "Player"
     propertyName @3 :Text;           # e.g., "position", "health"
     type @4 :PropertyType;
-    registeredAt @5 :UInt64;         # Microseconds since epoch
+    registeredAt @5 :UInt64;         # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
 }
 
 struct EntityCreated {

@@ -87,6 +87,14 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
     // Register new property: emplace returns iterator to inserted element
     auto [insertedIt, success] = _registry.emplace(metadata.hash, std::move(metadata));
 
+    // Verify insertion succeeded (should always succeed given earlier checks and lock)
+    if (!success) {
+        return Result<void>::err(
+            NetworkError::AlreadyExists,
+            "Unexpected failure to insert property into registry (hash already exists)"
+        );
+    }
+
     // Track by entity ID for bulk unregister (access from emplaced element)
     _entityProperties[insertedIt->second.entityId].insert(insertedIt->first);
 
