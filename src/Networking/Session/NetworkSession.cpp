@@ -138,7 +138,7 @@ Result<void> NetworkSession::sendEntityCreated(
             pr.setEntityId(pm.entityId);
             pr.setComponentType(pm.componentType);
             pr.setPropertyName(pm.propertyName);
-            pr.setType(static_cast<::PropertyType>(pm.type));
+            pr.setType(static_cast<::PropertyType>(toCapnpPropertyType(pm.type)));
             pr.setRegisteredAt(pm.registeredAt);
         }
 
@@ -215,7 +215,7 @@ Result<void> NetworkSession::sendPropertyUpdate(
         auto ph = update.initPropertyHash();
         ph.setHigh(hash.high);
         ph.setLow(hash.low);
-        update.setExpectedType(static_cast<::PropertyType>(type));
+        update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(type)));
 
         auto valueBuilder = update.initValue();
         std::visit([&valueBuilder](const auto& v) {
