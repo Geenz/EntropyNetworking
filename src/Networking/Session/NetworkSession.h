@@ -86,6 +86,10 @@ public:
     // Statistics
     ConnectionStats getStats() const;
 
+    // Network diagnostics
+    uint64_t getDuplicatePacketCount() const { return _duplicatePacketsReceived.load(std::memory_order_relaxed); }
+    uint64_t getPacketLossEventCount() const { return _packetLossEvents.load(std::memory_order_relaxed); }
+
 private:
     static std::string generateSessionId();
 
@@ -111,6 +115,10 @@ private:
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
     std::atomic<uint32_t> _nextSendSequence{0};
     std::atomic<uint32_t> _lastReceivedSequence{0};
+
+    // Network diagnostics counters
+    std::atomic<uint64_t> _duplicatePacketsReceived{0};
+    std::atomic<uint64_t> _packetLossEvents{0};
 
     // Handshake state
     bool _handshakeComplete{false};

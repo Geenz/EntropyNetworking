@@ -84,13 +84,11 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
         return Result<void>::err(NetworkError::ResourceLimitExceeded, "Global property limit exceeded");
     }
 
-    // Register new property (optimized with emplace and move)
-    PropertyHash hashKey = metadata.hash; // Save key before moving
-    uint64_t entityId = metadata.entityId; // Save entity ID before moving
-    _registry.emplace(hashKey, std::move(metadata));
+    // Register new property: emplace returns iterator to inserted element
+    auto [insertedIt, success] = _registry.emplace(metadata.hash, std::move(metadata));
 
-    // Track by entity ID for bulk unregister
-    _entityProperties[entityId].insert(hashKey);
+    // Track by entity ID for bulk unregister (access from emplaced element)
+    _entityProperties[insertedIt->second.entityId].insert(insertedIt->first);
 
     return Result<void>::ok();
 }
