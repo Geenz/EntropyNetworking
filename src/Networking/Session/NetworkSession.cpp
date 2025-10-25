@@ -349,18 +349,29 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
             case Message::PROPERTY_UPDATE_BATCH: {
                 auto batch = message.getPropertyUpdateBatch();
                 uint32_t seq = batch.getSequence();
-                uint32_t last = _lastReceivedSequence.load(std::memory_order_relaxed);
 
-                if (seq <= last) {
-                    // Duplicate or old packet received - track for diagnostics
-                    _duplicatePacketsReceived.fetch_add(1, std::memory_order_relaxed);
-                    return;
+                // Atomically check and update sequence number to avoid race conditions
+                while (true) {
+                    uint32_t last = _lastReceivedSequence.load(std::memory_order_relaxed);
+
+                    if (seq <= last) {
+                        // Duplicate or old packet received - track for diagnostics
+                        _duplicatePacketsReceived.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
+
+                    if (seq > last + 1) {
+                        // Gap detected; packet loss event - track for diagnostics
+                        _packetLossEvents.fetch_add(1, std::memory_order_relaxed);
+                    }
+
+                    // Atomically update if still valid
+                    if (_lastReceivedSequence.compare_exchange_weak(
+                        last, seq, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                        break;
+                    }
+                    // If CAS failed, another thread updated the sequence, retry
                 }
-                if (seq > last + 1) {
-                    // Gap detected; packet loss event - track for diagnostics
-                    _packetLossEvents.fetch_add(1, std::memory_order_relaxed);
-                }
-                _lastReceivedSequence.store(seq, std::memory_order_relaxed);
 
                 if (_propertyUpdateCallback) {
                     _propertyUpdateCallback(data);
