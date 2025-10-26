@@ -143,14 +143,14 @@ namespace std {
             return x ^ (x >> 31);
         }
         size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
-            // Cache h.high for readability (multiple uses in expression)
-            uint64_t high = h.high;
+            // Use h.high directly (used only twice)
+
 
             // Combine high and low using boost::hash_combine-inspired formula
             // Uses golden ratio for optimal bit distribution
             // Bit shifts (<<6, >>2) and XOR provide avalanche properties:
             // small input changes cascade to large output changes
-            uint64_t combined = high ^ (h.low + GOLDEN_RATIO_64 + (high << 6) + (high >> 2));
+            uint64_t combined = h.high ^ (h.low + GOLDEN_RATIO_64 + (h.high << 6) + (h.high >> 2));
 
             return static_cast<size_t>(splitmix64(combined));
         }
