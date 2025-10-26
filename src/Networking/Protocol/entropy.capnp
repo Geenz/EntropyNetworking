@@ -78,7 +78,7 @@ struct PropertyUpdate {
 }
 
 struct PropertyUpdateBatch {
-    timestamp @0 :UInt64;            # Microseconds since epoch
+    timestamp @0 :UInt64;            # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
     sequence @1 :UInt32;             # Monotonic sequence number
     updates @2 :List(PropertyUpdate);
 }
@@ -89,8 +89,11 @@ struct PropertyUpdateBatch {
 
 struct PropertyRegistration {
     propertyHash @0 :PropertyHash128;
-    propertyName @1 :Text;           # For debugging/registry
-    type @2 :PropertyType;
+    entityId @1 :UInt64;
+    componentType @2 :Text;          # e.g., "Transform", "Player"
+    propertyName @3 :Text;           # e.g., "position", "health"
+    type @4 :PropertyType;
+    registeredAt @5 :UInt64;         # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
 }
 
 struct EntityCreated {
@@ -108,6 +111,28 @@ struct EntityDestroyed {
 struct PropertySnapshot {
     propertyHash @0 :PropertyHash128;
     value @1 :PropertyValue;
+}
+
+# ============================================================================
+# Property Registry Messages (Reliable Channel)
+# ============================================================================
+
+struct RegisterPropertiesRequest {
+    properties @0 :List(PropertyRegistration);
+}
+
+struct RegisterPropertiesResponse {
+    succeeded @0 :List(PropertyHash128);
+    failed @1 :List(PropertyHash128);
+    errors @2 :List(Text);           # Error message for each failed hash
+}
+
+struct UnregisterEntityRequest {
+    entityId @0 :UInt64;
+}
+
+struct UnregisterEntityResponse {
+    removedHashes @0 :List(PropertyHash128);
 }
 
 # ============================================================================
@@ -218,5 +243,11 @@ struct Message {
         handshakeResponse @10 :HandshakeResponse;
         heartbeat @11 :Heartbeat;
         heartbeatResponse @12 :HeartbeatResponse;
+
+        # Property registry
+        registerPropertiesRequest @13 :RegisterPropertiesRequest;
+        registerPropertiesResponse @14 :RegisterPropertiesResponse;
+        unregisterEntityRequest @15 :UnregisterEntityRequest;
+        unregisterEntityResponse @16 :UnregisterEntityResponse;
     }
 }

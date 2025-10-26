@@ -9,10 +9,17 @@
 
 /**
  * @file PropertyRegistry.h
- * @brief Thread-safe property registry for network protocol
+ * @brief Thread-safe global property registry for Canvas server
  *
- * Maintains mappings from property hashes to their metadata (name, type, entity).
- * Used by Canvas and Portals to validate property updates and provide debugging info.
+ * The PropertyRegistry is the single source of truth for all properties across
+ * all entities in the Canvas ecosystem. It serves as the global type registry,
+ * validating property types and preventing malicious updates.
+ *
+ * Key responsibilities:
+ * - Register property instances with their types
+ * - Validate property value types on every update (SECURITY CRITICAL)
+ * - Track which properties belong to which entities
+ * - Enable efficient entity cleanup on destruction
  */
 
 #pragma once
@@ -22,6 +29,7 @@
 #include "NetworkTypes.h"
 #include "ErrorCodes.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <optional>
 #include <shared_mutex>
@@ -30,39 +38,61 @@ namespace EntropyEngine {
 namespace Networking {
 
 /**
- * @brief Metadata for a registered property
+ * @brief Metadata for a registered property instance
  *
- * Stored in the registry to enable type validation and debugging.
+ * Each property instance on each entity gets its own unique hash and metadata.
+ * The hash is computed once and stored - never recomputed.
  */
 struct PropertyMetadata {
-    std::string propertyName;   ///< Field name (e.g., "position")
-    PropertyType type;          ///< Property type
-    EntityId entityId;          ///< Owner entity ID
-    AppId appId;                ///< Application ID
-    TypeName typeName;          ///< Entity type name (e.g., "Player")
+    PropertyHash hash;              ///< Unique 128-bit identifier (computed once)
+    uint64_t entityId;              ///< Owner entity ID
+    std::string componentType;      ///< Component type (e.g., "Transform", "Player")
+    std::string propertyName;       ///< Property name (e.g., "position", "health")
+    PropertyType type;              ///< Property type (e.g., Vec3, Float32)
+    uint64_t registeredAt;          ///< Timestamp when registered (microseconds since epoch)
 
     PropertyMetadata() = default;
     PropertyMetadata(
-        std::string name,
+        PropertyHash h,
+        uint64_t entity,
+        std::string component,
+        std::string prop,
         PropertyType t,
-        EntityId entity,
-        AppId app,
-        TypeName type_name
-    ) : propertyName(std::move(name))
-      , type(t)
+        uint64_t timestamp
+    ) : hash(h)
       , entityId(entity)
-      , appId(std::move(app))
-      , typeName(std::move(type_name))
+      , componentType(std::move(component))
+      , propertyName(std::move(prop))
+      , type(t)
+      , registeredAt(timestamp)
     {}
+
+    /**
+     * @brief Check if metadata matches another instance (for idempotent registration)
+     *
+     * Compares all fields except registeredAt.
+     */
+    bool matches(const PropertyMetadata& other) const {
+        return hash == other.hash &&
+               entityId == other.entityId &&
+               componentType == other.componentType &&
+               propertyName == other.propertyName &&
+               type == other.type;
+    }
 };
 
 /**
- * @brief Thread-safe registry mapping property hashes to metadata
+ * @brief Thread-safe global property registry
  *
- * Properties are registered when entities are created. The registry enables:
- * - Type validation on property updates
- * - Debug information (reverse lookup hash → name)
- * - Entity cleanup (unregister all properties for an entity)
+ * The PropertyRegistry is Canvas's single source of truth for all properties.
+ * One instance on the server tracks ALL properties across ALL entities.
+ *
+ * Registration is idempotent: re-registering the same property (same hash + metadata)
+ * updates the timestamp and returns success. This allows clients to re-register
+ * on reconnection without errors.
+ *
+ * SECURITY: Always call validatePropertyValue() before applying property updates.
+ * This prevents bad actors from crashing the server by sending wrong types.
  *
  * Thread Safety: All methods are thread-safe using shared_mutex
  * (multiple readers, single writer).
@@ -70,25 +100,31 @@ struct PropertyMetadata {
  * @code
  * PropertyRegistry registry;
  *
- * // Register property
- * auto hash = computePropertyHash(42, "app", "Player", "position");
- * PropertyMetadata meta{"position", PropertyType::Vec3, 42, "app", "Player"};
- * auto result = registry.registerProperty(hash, meta);
+ * // Register property once when entity created
+ * auto hash = computePropertyHash(42, "Transform", "position");
+ * PropertyMetadata meta{hash, 42, "Transform", "position", PropertyType::Vec3, now};
+ * auto result = registry.registerProperty(meta);
  *
- * // Lookup later
- * if (auto found = registry.lookupProperty(hash)) {
- *     // Validate type matches
- *     if (found->type == PropertyType::Vec3) {
- *         // Process update
- *     }
+ * // SECURITY: Validate on every update
+ * PropertyValue incomingValue = getFromNetwork();
+ * auto validation = registry.validatePropertyValue(hash, incomingValue);
+ * if (validation.success()) {
+ *     applyUpdate(hash, incomingValue);  // Safe
+ * } else {
+ *     LOG_ERROR("Rejected malicious update: " + validation.errorMessage);
  * }
  *
  * // Cleanup when entity destroyed
- * registry.unregisterEntity(42);
+ * auto removedHashes = registry.unregisterEntity(42);
  * @endcode
  */
 class PropertyRegistry {
 public:
+    // Resource limits (configurable)
+    static constexpr size_t MAX_PROPERTIES_PER_ENTITY = 1000;
+    static constexpr size_t MAX_TOTAL_PROPERTIES = 1'000'000;
+    static constexpr size_t MAX_NAME_LENGTH = 256;
+
     PropertyRegistry() = default;
     ~PropertyRegistry() = default;
 
@@ -101,17 +137,31 @@ public:
     /**
      * @brief Register a property in the registry
      *
-     * Adds property metadata to the registry. Detects hash collisions:
-     * if the same hash is already registered with different metadata,
-     * returns HashCollision error.
+     * Registers a property instance with its metadata. This is idempotent:
+     * re-registering the same property (same hash + metadata) updates the
+     * timestamp and returns success.
      *
-     * @param hash Property hash
-     * @param metadata Property metadata
-     * @return Result indicating success or error (HashCollision, RegistryFull)
+     * Returns error if:
+     * - Hash collision (same hash, different metadata)
+     * - Invalid metadata (empty componentType or propertyName)
+     * - Invalid type (PropertyType enum out of range)
+     *
+     * @param metadata Property metadata (includes hash)
+     * @return Result indicating success or error
      *
      * @threadsafety Thread-safe (write lock)
      */
-    Result<void> registerProperty(PropertyHash128 hash, PropertyMetadata metadata);
+    Result<void> registerProperty(PropertyMetadata metadata);
+
+    /**
+     * @brief Check if a property is registered
+     *
+     * @param hash Property hash
+     * @return true if registered, false otherwise
+     *
+     * @threadsafety Thread-safe (read lock)
+     */
+    bool isRegistered(PropertyHash hash) const;
 
     /**
      * @brief Lookup property metadata by hash
@@ -121,23 +171,99 @@ public:
      *
      * @threadsafety Thread-safe (read lock)
      */
-    std::optional<PropertyMetadata> lookupProperty(PropertyHash128 hash) const;
+    std::optional<PropertyMetadata> lookup(PropertyHash hash) const;
+
+    /**
+     * @brief Validate property type (hash → type check)
+     *
+     * Checks that the registered property has the expected type.
+     *
+     * @param hash Property hash
+     * @param expectedType Expected type
+     * @return true if property exists and type matches, false otherwise
+     *
+     * @threadsafety Thread-safe (read lock)
+     */
+    bool validateType(PropertyHash hash, PropertyType expectedType) const;
+
+    /**
+     * @brief Validate property value type (SECURITY CRITICAL)
+     *
+     * Validates that a property value's type matches the registered type.
+     * ALWAYS call this before applying property updates to prevent bad actors
+     * from crashing the server with type confusion attacks.
+     *
+     * Returns error if:
+     * - Property not registered (UnknownProperty)
+     * - Type mismatch (TypeMismatch)
+     *
+     * @param hash Property hash
+     * @param value Property value to validate
+     * @return Result indicating success or error
+     *
+     * @threadsafety Thread-safe (read lock)
+     *
+     * @code
+     * // SECURE: Validate before applying
+     * auto validation = registry.validatePropertyValue(hash, value);
+     * if (validation.success()) {
+     *     applyUpdate(hash, value);
+     * } else {
+     *     LOG_ERROR("Rejected: " + validation.errorMessage);
+     * }
+     *
+     * // INSECURE: NEVER do this!
+     * // applyUpdate(hash, value);  // ← Can crash from type mismatch!
+     * @endcode
+     */
+    Result<void> validatePropertyValue(PropertyHash hash, const PropertyValue& value) const;
+
+    /**
+     * @brief Get all property hashes for an entity
+     *
+     * Returns a vector of all property hashes registered for the given entity.
+     * Useful for debugging and entity inspection.
+     *
+     * @param entityId Entity ID
+     * @return Vector of property hashes (empty if entity not found)
+     *
+     * @threadsafety Thread-safe (read lock)
+     */
+    std::vector<PropertyHash> getEntityProperties(uint64_t entityId) const;
 
     /**
      * @brief Unregister all properties for an entity
      *
-     * Removes all property registrations associated with the given entity ID.
-     * Used when an entity is destroyed to clean up registry.
+     * Removes all property registrations for the given entity.
+     * Used when an entity is destroyed to clean up the registry.
+     *
+     * Returns a vector of all removed property hashes. Callers can use this
+     * to remove corresponding data from ECS, network buffers, etc.
      *
      * @param entityId Entity to unregister
-     * @return Number of properties removed
+     * @return Vector of removed property hashes
      *
      * @threadsafety Thread-safe (write lock)
      */
-    size_t unregisterEntity(EntityId entityId);
+    std::vector<PropertyHash> unregisterEntity(uint64_t entityId);
+
+    /**
+     * @brief Unregister a single property
+     *
+     * Removes a single property registration.
+     *
+     * @param hash Property hash to unregister
+     * @return true if property was removed, false if not found
+     *
+     * @threadsafety Thread-safe (write lock)
+     */
+    bool unregisterProperty(PropertyHash hash);
 
     /**
      * @brief Get all registered properties (for debugging)
+     *
+     * Returns a vector of all property metadata in the registry.
+     * Warning: This copies the entire registry - expensive for large registries.
      *
      * @return Vector of all property metadata
      *
@@ -166,6 +292,8 @@ public:
     /**
      * @brief Clear all registrations
      *
+     * Removes all properties from the registry.
+     *
      * @threadsafety Thread-safe (write lock)
      */
     void clear();
@@ -173,11 +301,11 @@ public:
 private:
     mutable std::shared_mutex _mutex;
 
-    /// Map: PropertyHash128 → PropertyMetadata
-    std::unordered_map<PropertyHash128, PropertyMetadata> _registry;
+    /// Map: PropertyHash → PropertyMetadata
+    std::unordered_map<PropertyHash, PropertyMetadata> _registry;
 
-    /// Map: EntityId → vector of PropertyHash128 (for bulk unregister)
-    std::unordered_map<EntityId, std::vector<PropertyHash128>> _entityProperties;
+    /// Map: EntityId → set of PropertyHash (for entity cleanup)
+    std::unordered_map<uint64_t, std::unordered_set<PropertyHash>> _entityProperties;
 };
 
 } // namespace Networking

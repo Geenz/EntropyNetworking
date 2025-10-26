@@ -99,5 +99,29 @@ PropertyType getPropertyType(const PropertyValue& value);
  */
 const char* propertyTypeToString(PropertyType type);
 
+/**
+ * @brief Convert C++ PropertyType to Cap'n Proto PropertyType enum
+ *
+ * Provides explicit, safe conversion between C++ and Cap'n Proto enum types
+ * rather than relying on implicit static_cast which assumes matching ordinals.
+ *
+ * Note: Return type is uint16_t to avoid including capnp headers here.
+ * Cast result to ::PropertyType when using with Cap'n Proto builders.
+ *
+ * @param type The C++ PropertyType
+ * @return The corresponding Cap'n Proto PropertyType ordinal
+ */
+uint16_t toCapnpPropertyType(PropertyType type);
+
+/**
+ * @brief Convert Cap'n Proto PropertyType to C++ PropertyType enum
+ *
+ * Provides explicit, safe conversion between Cap'n Proto and C++ enum types.
+ *
+ * @param capnpType The Cap'n Proto PropertyType ordinal
+ * @return The corresponding C++ PropertyType
+ */
+PropertyType fromCapnpPropertyType(uint16_t capnpType);
+
 } // namespace Networking
 } // namespace EntropyEngine

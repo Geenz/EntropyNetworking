@@ -8,15 +8,30 @@
  */
 
 #include "NetworkSession.h"
+#include "../Core/TimeUtils.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 
 namespace EntropyEngine::Networking {
 
-NetworkSession::NetworkSession(NetworkConnection* connection)
+std::string NetworkSession::generateSessionId() {
+    static std::atomic<uint64_t> ctr{0};
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return "session-" + std::to_string(now) + "-" + std::to_string(ctr.fetch_add(1, std::memory_order_relaxed));
+}
+
+NetworkSession::NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry)
     : _connection(connection)
+    , _propertyRegistry(externalRegistry)
+    , _sessionId(generateSessionId())
 {
+    // If no external registry provided, create and own one
+    if (!_propertyRegistry) {
+        _ownedRegistry = std::make_unique<PropertyRegistry>();
+        _propertyRegistry = _ownedRegistry.get();
+    }
+
     if (_connection) {
         _connection->retain();
 
@@ -61,33 +76,77 @@ ConnectionState NetworkSession::getState() const {
     return _state;
 }
 
-Result<void> NetworkSession::sendEntityCreated(
-    uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    uint64_t parentId)
-{
+Result<void> NetworkSession::performHandshake(const std::string& clientType, const std::string& clientId) {
+    _clientType = clientType;
+    _clientId = clientId;
+
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
-        auto entityCreated = message.initEntityCreated();
+        auto msg = builder.initRoot<Message>();
+        auto hs = msg.initHandshake();
+        hs.setProtocolVersion(1);
+        hs.setClientType(clientType);
+        hs.setClientId(clientId);
 
-        entityCreated.setEntityId(entityId);
-        entityCreated.setAppId(appId);
-        entityCreated.setTypeName(typeName);
-        entityCreated.setParentId(parentId);
-        // Properties will be sent separately via property updates
+        auto ser = serialize(builder);
+        if (ser.failed()) {
+            return Result<void>::err(ser.error, ser.errorMessage);
+        }
+
+        return _connection->send(ser.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendEntityCreated(
+    uint64_t entityId,
+    const std::string& appId,
+    const std::string& typeName,
+    uint64_t parentId,
+    const std::vector<PropertyMetadata>& properties)
+{
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto ec = message.initEntityCreated();
+        ec.setEntityId(entityId);
+        ec.setAppId(appId);
+        ec.setTypeName(typeName);
+        ec.setParentId(parentId);
+
+        auto list = ec.initProperties(properties.size());
+        for (size_t i = 0; i < properties.size(); ++i) {
+            const auto& pm = properties[i];
+            auto pr = list[i];
+            auto ph = pr.initPropertyHash();
+            ph.setHigh(pm.hash.high);
+            ph.setLow(pm.hash.low);
+            pr.setEntityId(pm.entityId);
+            pr.setComponentType(pm.componentType);
+            pr.setPropertyName(pm.propertyName);
+            pr.setType(static_cast<::PropertyType>(toCapnpPropertyType(pm.type)));
+            pr.setRegisteredAt(pm.registeredAt);
+        }
 
         auto serialized = serialize(builder);
         if (serialized.failed()) {
             return Result<void>::err(serialized.error, serialized.errorMessage);
         }
 
-        // EntityCreated goes on reliable channel
         return _connection->send(serialized.value);
 
     } catch (const std::exception& e) {
@@ -98,6 +157,10 @@ Result<void> NetworkSession::sendEntityCreated(
 Result<void> NetworkSession::sendEntityDestroyed(uint64_t entityId) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
     }
 
     try {
@@ -120,14 +183,22 @@ Result<void> NetworkSession::sendEntityDestroyed(uint64_t entityId) {
 }
 
 Result<void> NetworkSession::sendPropertyUpdate(
-    uint64_t entityId,
-    const std::string& propertyName,
+    PropertyHash hash,
+    PropertyType type,
     const PropertyValue& value)
 {
-    // For now, this is a simple single-property update
-    // In Phase 4, this will be batched by BatchManager
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    // Optional: validate against registry before send
+    auto validateResult = _propertyRegistry->validatePropertyValue(hash, value);
+    if (validateResult.failed()) {
+        return validateResult;
     }
 
     try {
@@ -135,33 +206,38 @@ Result<void> NetworkSession::sendPropertyUpdate(
         auto message = builder.initRoot<Message>();
         auto batch = message.initPropertyUpdateBatch();
 
-        // Single update batch
-        batch.setTimestamp(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count());
-        batch.setSequence(0); // TODO: sequence tracking
+        batch.setTimestamp(getCurrentTimestampMicros());
+        batch.setSequence(_nextSendSequence.fetch_add(1, std::memory_order_relaxed));
 
         auto updates = batch.initUpdates(1);
         auto update = updates[0];
 
-        // Compute property hash
-        // TODO: Get appId and typeName from entity registry
-        auto hash = computePropertyHash(entityId, "unknown", "unknown", propertyName);
-        update.getPropertyHash().setHigh(hash.high);
-        update.getPropertyHash().setLow(hash.low);
+        auto ph = update.initPropertyHash();
+        ph.setHigh(hash.high);
+        ph.setLow(hash.low);
+        update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(type)));
 
-        // Set type and value
-        PropertyType type = getPropertyType(value);
-        update.setExpectedType(static_cast<::PropertyType>(type));
-
-        // TODO: Set property value from PropertyValue variant
+        auto valueBuilder = update.initValue();
+        std::visit([&valueBuilder](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, int32_t>) valueBuilder.setInt32(v);
+            else if constexpr (std::is_same_v<T, int64_t>) valueBuilder.setInt64(v);
+            else if constexpr (std::is_same_v<T, float>) valueBuilder.setFloat32(v);
+            else if constexpr (std::is_same_v<T, double>) valueBuilder.setFloat64(v);
+            else if constexpr (std::is_same_v<T, Vec2>) { auto b = valueBuilder.initVec2(); b.setX(v.x); b.setY(v.y); }
+            else if constexpr (std::is_same_v<T, Vec3>) { auto b = valueBuilder.initVec3(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); }
+            else if constexpr (std::is_same_v<T, Vec4>) { auto b = valueBuilder.initVec4(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
+            else if constexpr (std::is_same_v<T, Quat>) { auto b = valueBuilder.initQuat(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
+            else if constexpr (std::is_same_v<T, std::string>) valueBuilder.setString(v);
+            else if constexpr (std::is_same_v<T, bool>) valueBuilder.setBool(v);
+            else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+        }, value);
 
         auto serialized = serialize(builder);
         if (serialized.failed()) {
             return Result<void>::err(serialized.error, serialized.errorMessage);
         }
 
-        // PropertyUpdate goes on unreliable channel
         return _connection->sendUnreliable(serialized.value);
 
     } catch (const std::exception& e) {
@@ -271,6 +347,46 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
             }
 
             case Message::PROPERTY_UPDATE_BATCH: {
+                auto batch = message.getPropertyUpdateBatch();
+                uint32_t seq = batch.getSequence();
+
+                // Atomically check and update sequence number to avoid race conditions
+                // Use retry limit to prevent livelock under extreme contention
+                constexpr int MAX_CAS_RETRIES = 100;
+                bool updateSucceeded = false;
+                for (int retry = 0; retry < MAX_CAS_RETRIES; ++retry) {
+                    uint32_t last = _lastReceivedSequence.load(std::memory_order_relaxed);
+
+                    // Track packet loss before attempting CAS
+                    bool isGap = (seq > last + 1);
+                    if (isGap) {
+                        _packetLossEvents.fetch_add(1, std::memory_order_relaxed);
+                    }
+
+                    // Atomically update if still valid
+                    if (_lastReceivedSequence.compare_exchange_weak(
+                        last, seq, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                        updateSucceeded = true;
+                        break;
+                    }
+
+                    // CAS failed - verify if packet is truly a duplicate
+                    uint32_t current = _lastReceivedSequence.load(std::memory_order_relaxed);
+                    if (seq <= current) {
+                        // Packet is genuinely old/duplicate relative to current state
+                        _duplicatePacketsReceived.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
+                    // Otherwise, another thread raced ahead - retry with new value
+                }
+
+                // Track CAS retry exhaustion for diagnostics
+                if (!updateSucceeded) {
+                    _sequenceUpdateFailures.fetch_add(1, std::memory_order_relaxed);
+                    // Packet dropped - do not invoke callback
+                    return;
+                }
+
                 if (_propertyUpdateCallback) {
                     _propertyUpdateCallback(data);
                 }
@@ -280,6 +396,20 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
             case Message::SCENE_SNAPSHOT_CHUNK: {
                 if (_sceneSnapshotCallback) {
                     _sceneSnapshotCallback(data);
+                }
+                break;
+            }
+
+            case Message::HANDSHAKE_RESPONSE: {
+                auto resp = message.getHandshakeResponse();
+                if (resp.getSuccess()) {
+                    _handshakeComplete = true;
+                } else {
+                    if (_errorCallback) {
+                        _errorCallback(NetworkError::HandshakeFailed,
+                                     std::string(resp.getErrorMessage().cStr()));
+                    }
+                    disconnect();
                 }
                 break;
             }
