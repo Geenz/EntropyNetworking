@@ -357,14 +357,9 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 for (int retry = 0; retry < MAX_CAS_RETRIES; ++retry) {
                     uint32_t last = _lastReceivedSequence.load(std::memory_order_relaxed);
 
-                    if (seq <= last) {
-                        // Duplicate or old packet received - track for diagnostics
-                        _duplicatePacketsReceived.fetch_add(1, std::memory_order_relaxed);
-                        return;
-                    }
-
-                    if (seq > last + 1) {
-                        // Gap detected; packet loss event - track for diagnostics
+                    // Track packet loss before attempting CAS
+                    bool isGap = (seq > last + 1);
+                    if (isGap) {
                         _packetLossEvents.fetch_add(1, std::memory_order_relaxed);
                     }
 
@@ -374,7 +369,15 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                         updateSucceeded = true;
                         break;
                     }
-                    // If CAS failed, another thread updated the sequence, retry
+
+                    // CAS failed - verify if packet is truly a duplicate
+                    uint32_t current = _lastReceivedSequence.load(std::memory_order_relaxed);
+                    if (seq <= current) {
+                        // Packet is genuinely old/duplicate relative to current state
+                        _duplicatePacketsReceived.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
+                    // Otherwise, another thread raced ahead - retry with new value
                 }
 
                 // Track CAS retry exhaustion for diagnostics

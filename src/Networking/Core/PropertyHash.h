@@ -117,6 +117,12 @@ inline std::string toString(const PropertyHash& hash) {
 namespace std {
     template<>
     struct hash<EntropyEngine::Networking::PropertyHash> {
+        // SplitMix64 mixing constants - chosen for optimal avalanche properties
+        // These specific values ensure good bit distribution across all output bits
+        static constexpr uint64_t GOLDEN_RATIO_64 = 0x9e3779b97f4a7c15ull;  // φ * 2^64
+        static constexpr uint64_t SPLITMIX64_MIX1 = 0xbf58476d1ce4e5b9ull;  // First mixing multiplier
+        static constexpr uint64_t SPLITMIX64_MIX2 = 0x94d049bb133111ebull;  // Second mixing multiplier
+
         /**
          * @brief SplitMix64 hash mixing function
          *
@@ -131,9 +137,9 @@ namespace std {
          * @see https://xorshift.di.unimi.it/splitmix64.c
          */
         static inline uint64_t splitmix64(uint64_t x) {
-            x += 0x9e3779b97f4a7c15ull;
-            x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
-            x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+            x += GOLDEN_RATIO_64;
+            x = (x ^ (x >> 30)) * SPLITMIX64_MIX1;
+            x = (x ^ (x >> 27)) * SPLITMIX64_MIX2;
             return x ^ (x >> 31);
         }
         size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
@@ -141,10 +147,10 @@ namespace std {
             uint64_t high = h.high;
 
             // Combine high and low using boost::hash_combine-inspired formula
-            // Uses golden ratio constant (0x9e3779b97f4a7c15) for good distribution
+            // Uses golden ratio for optimal bit distribution
             // Bit shifts (<<6, >>2) and XOR provide avalanche properties:
             // small input changes cascade to large output changes
-            uint64_t combined = high ^ (h.low + 0x9e3779b97f4a7c15ull + (high << 6) + (high >> 2));
+            uint64_t combined = high ^ (h.low + GOLDEN_RATIO_64 + (high << 6) + (high >> 2));
 
             return static_cast<size_t>(splitmix64(combined));
         }
