@@ -158,6 +158,13 @@ namespace EntropyEngine::Networking {
 
         self->_signalingState.store(state, std::memory_order_release);
 
+        // Defensive cleanup to avoid stale negotiation flags between episodes
+        if (state == RTC_SIGNALING_STABLE) {
+            self->_ignoreOffer.store(false, std::memory_order_release);
+            self->_isSettingRemoteAnswerPending.store(false, std::memory_order_release);
+            // Note: We intentionally do not force-clear _makingOffer here; it's managed by offer/answer paths
+        }
+
         const char* stateStr = "unknown";
         switch (state) {
             case RTC_SIGNALING_STABLE: stateStr = "stable"; break;
@@ -210,17 +217,27 @@ namespace EntropyEngine::Networking {
 
         ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label + ", id=" + std::to_string(id));
 
-        // Only transition to Connected for reliable channel matching our current channel ID
         std::string_view labelView(label);
-        if (labelView != self->_dataChannelLabel) return;
-
         std::optional<ConnectionState> pending;
+
         {
             std::lock_guard<std::mutex> lock(self->_mutex);
+
+            // Update cached channel open state for both reliable and unreliable channels
+            if (id == self->_dataChannelId) {
+                self->_dataChannelOpen.store(true, std::memory_order_release);
+            } else if (id == self->_unreliableDataChannelId) {
+                self->_unreliableDataChannelOpen.store(true, std::memory_order_release);
+            }
+
+            // Only transition to Connected for reliable channel
+            if (labelView != self->_dataChannelLabel) return;
+
             // Verify this is our current reliable channel (not a stale/replaced one)
             if (id != self->_dataChannelId) {
                 return;
             }
+
             if (self->_state != ConnectionState::Connected) {
                 self->_state = ConnectionState::Connected;
 
@@ -257,13 +274,22 @@ namespace EntropyEngine::Networking {
 
         ENTROPY_LOG_INFO(std::string("Data channel closed: ") + label + ", id=" + std::to_string(id));
 
-        // Only transition to Disconnected for reliable channel
         std::string_view labelView(label);
-        if (labelView != self->_dataChannelLabel) return;
-
         std::optional<ConnectionState> pending;
+
         {
             std::lock_guard<std::mutex> lock(self->_mutex);
+
+            // Update cached channel open state for both reliable and unreliable channels
+            if (id == self->_dataChannelId) {
+                self->_dataChannelOpen.store(false, std::memory_order_release);
+            } else if (id == self->_unreliableDataChannelId) {
+                self->_unreliableDataChannelOpen.store(false, std::memory_order_release);
+            }
+
+            // Only transition to Disconnected for reliable channel
+            if (labelView != self->_dataChannelLabel) return;
+
             if (self->_state != ConnectionState::Disconnected && self->_state != ConnectionState::Failed) {
                 self->_state = ConnectionState::Disconnected;
                 pending = ConnectionState::Disconnected;
@@ -392,14 +418,8 @@ namespace EntropyEngine::Networking {
                 "Failed to trigger ICE restart");
         }
 
-        // Check channel state outside mutex to avoid potential deadlock
-        int dataChannelId = -1;
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            dataChannelId = _dataChannelId;
-        }
-
-        bool channelStillOpen = wasEstablished && dataChannelId >= 0 && rtcIsOpen(dataChannelId);
+        // Use cached channel state (lock-free, no deadlock, no race condition)
+        bool channelStillOpen = wasEstablished && _dataChannelOpen.load(std::memory_order_acquire);
 
         {
             std::lock_guard<std::mutex> lock(_mutex);
@@ -451,78 +471,104 @@ namespace EntropyEngine::Networking {
     }
 
     Result<void> WebRTCConnection::send(const std::vector<uint8_t>& data) {
-        std::lock_guard<std::mutex> lock(_mutex);
-
         if (_state != ConnectionState::Connected) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        if (_dataChannelId < 0 || !rtcIsOpen(_dataChannelId)) {
+        // Prefer cached open state and snapshot ID under lock to avoid races
+        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        int id;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            id = _dataChannelId;
+        }
+
+        if (!open || id < 0) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
-        int result = rtcSendMessage(_dataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data");
         }
 
-        _stats.bytesSent += data.size();
-        _stats.messagesSent++;
-        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _stats.bytesSent += data.size();
+            _stats.messagesSent++;
+            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
 
         return Result<void>::ok();
     }
 
     Result<void> WebRTCConnection::trySend(const std::vector<uint8_t>& data) {
-        std::lock_guard<std::mutex> lock(_mutex);
-
         if (_state != ConnectionState::Connected) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        if (_dataChannelId < 0 || !rtcIsOpen(_dataChannelId)) {
+        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        int id;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            id = _dataChannelId;
+        }
+
+        if (!open || id < 0) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
-        int buffered = rtcGetBufferedAmount(_dataChannelId);
+        int buffered = rtcGetBufferedAmount(id);
         if (buffered > 0) {
             return Result<void>::err(NetworkError::WouldBlock, "WebRTC data channel backpressured");
         }
 
-        int result = rtcSendMessage(_dataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to trySend data");
         }
 
-        _stats.bytesSent += data.size();
-        _stats.messagesSent++;
-        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _stats.bytesSent += data.size();
+            _stats.messagesSent++;
+            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
 
         return Result<void>::ok();
     }
 
     Result<void> WebRTCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
-        std::lock_guard<std::mutex> lock(_mutex);
-
         if (_state != ConnectionState::Connected) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        if (_unreliableDataChannelId < 0 || !rtcIsOpen(_unreliableDataChannelId)) {
+        bool open = _unreliableDataChannelOpen.load(std::memory_order_acquire);
+        int id;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            id = _unreliableDataChannelId;
+        }
+
+        if (!open || id < 0) {
+            // Fallback to reliable channel
             return send(data);
         }
 
-        int result = rtcSendMessage(_unreliableDataChannelId, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+        int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send unreliable data");
         }
 
-        _stats.bytesSent += data.size();
-        _stats.messagesSent++;
-        _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _stats.bytesSent += data.size();
+            _stats.messagesSent++;
+            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
 
         return Result<void>::ok();
     }
@@ -577,7 +623,11 @@ namespace EntropyEngine::Networking {
             pcId = _peerConnectionId;
         }
 
-        // Set remote description - libdatachannel handles implicit rollback
+        // Set remote description
+        // Note: When a polite peer accepts a remote offer during an ongoing local negotiation,
+        // libdatachannel's C API performs an implicit rollback of the local offer. We rely on
+        // this behavior here (tested against libdatachannel version bundled via vcpkg). If you
+        // observe anomalies, add diagnostics around signaling transitions to verify stability.
         int result = rtcSetRemoteDescription(pcId, sdp.c_str(), type.c_str());
 
         {
@@ -595,6 +645,8 @@ namespace EntropyEngine::Networking {
             if (isOffer) {
                 // Accepting remote offer (ours was implicitly rolled back or we weren't making one)
                 _makingOffer.store(false, std::memory_order_release);
+                // End of this glare/offer episode: ensure ignoreOffer is cleared
+                _ignoreOffer.store(false, std::memory_order_release);
             } else if (type == "answer") {
                 // Received answer to our offer - negotiation complete
                 _makingOffer.store(false, std::memory_order_release);
@@ -618,7 +670,8 @@ namespace EntropyEngine::Networking {
         for (const auto& [candidate, mid] : toFlush) {
             int candResult = rtcAddRemoteCandidate(pcId, candidate.c_str(), mid.c_str());
             if (candResult < 0) {
-                ENTROPY_LOG_WARNING("Failed to add queued remote candidate");
+                ENTROPY_LOG_WARNING(std::string("Failed to add queued remote candidate (mid=") + mid + ", len=" +
+                                    std::to_string(candidate.size()) + ")");
             }
         }
 

@@ -136,6 +136,10 @@ namespace EntropyEngine::Networking {
         int _dataChannelId = -1;
         int _unreliableDataChannelId = -1;
 
+        // Cached channel state to avoid rtcIsOpen() race conditions and deadlock
+        std::atomic<bool> _dataChannelOpen{false};
+        std::atomic<bool> _unreliableDataChannelOpen{false};
+
         std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
         std::atomic<bool> _destroying{false};
 
