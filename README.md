@@ -387,3 +387,4 @@ This library is part of the Entropy Engine project. Contributions should follow:
 - Lock-free designs where possible
 - Comprehensive testing (maintain test coverage)
 - Documentation standards (see `DOCUMENTATION.md`)
+
