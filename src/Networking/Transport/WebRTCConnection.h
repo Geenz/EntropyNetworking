@@ -149,10 +149,10 @@ namespace EntropyEngine::Networking {
         // Internal lifecycle state tracking (requires mutex)
         LifecycleState _lifecycleState{LifecycleState::NeverConnected};
 
-        // Perfect negotiation: signaling state and ICE candidate gating (requires mutex)
-        rtcSignalingState _signalingState{RTC_SIGNALING_STABLE};
+        // Perfect negotiation: signaling state and ICE candidate gating
+        std::atomic<rtcSignalingState> _signalingState{RTC_SIGNALING_STABLE};
         std::atomic<bool> _haveRemoteDescription{false};
-        std::vector<std::pair<std::string, std::string>> _pendingRemoteCandidates; // {candidate, mid}
+        std::vector<std::pair<std::string, std::string>> _pendingRemoteCandidates; // {candidate, mid} (requires mutex)
 
         mutable std::mutex _mutex;
         ConnectionStats _stats;

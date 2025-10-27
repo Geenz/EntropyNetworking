@@ -156,8 +156,7 @@ namespace EntropyEngine::Networking {
         auto* self = static_cast<WebRTCConnection*>(user);
         if (self->_destroying.load(std::memory_order_acquire)) return;
 
-        std::lock_guard<std::mutex> lock(self->_mutex);
-        self->_signalingState = state;
+        self->_signalingState.store(state, std::memory_order_release);
 
         const char* stateStr = "unknown";
         switch (state) {
@@ -393,11 +392,20 @@ namespace EntropyEngine::Networking {
                 "Failed to trigger ICE restart");
         }
 
+        // Check channel state outside mutex to avoid potential deadlock
+        int dataChannelId = -1;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            dataChannelId = _dataChannelId;
+        }
+
+        bool channelStillOpen = wasEstablished && dataChannelId >= 0 && rtcIsOpen(dataChannelId);
+
         {
             std::lock_guard<std::mutex> lock(_mutex);
             // If reconnecting from an already-established connection, and data channels
             // are still open, transition directly to Connected since onOpenCallback won't fire again
-            if (wasEstablished && _dataChannelId >= 0 && rtcIsOpen(_dataChannelId)) {
+            if (channelStillOpen) {
                 ENTROPY_LOG_INFO("Optimistically transitioning to Connected (data channel still open)");
                 _state = ConnectionState::Connected;
                 _lifecycleState = LifecycleState::Established;
@@ -544,7 +552,7 @@ namespace EntropyEngine::Networking {
 
             // Calculate readyForOffer - EXACT Mozilla formula
             const bool readyForOffer = !_makingOffer.load(std::memory_order_acquire) &&
-                (_signalingState == RTC_SIGNALING_STABLE ||
+                (_signalingState.load(std::memory_order_acquire) == RTC_SIGNALING_STABLE ||
                  _isSettingRemoteAnswerPending.load(std::memory_order_acquire));
 
             const bool offerCollision = isOffer && !readyForOffer;
