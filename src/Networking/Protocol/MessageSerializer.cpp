@@ -97,6 +97,10 @@ Result<std::vector<uint8_t>> compress(const std::vector<uint8_t>& data, int comp
 
 Result<std::vector<uint8_t>> decompress(const std::vector<uint8_t>& compressedData) {
     try {
+        // Maximum decompressed size to prevent decompression bomb attacks
+        // Set to match largest transport limit (XPC @ 64 MiB)
+        static constexpr size_t MAX_DECOMPRESSED_SIZE = 64ull * 1024ull * 1024ull;
+
         // Get decompressed size
         unsigned long long decompressedSize = ZSTD_getFrameContentSize(
             compressedData.data(),
@@ -117,8 +121,17 @@ Result<std::vector<uint8_t>> decompress(const std::vector<uint8_t>& compressedDa
             );
         }
 
+        // Protect against decompression bomb attacks
+        if (decompressedSize > MAX_DECOMPRESSED_SIZE) {
+            return Result<std::vector<uint8_t>>::err(
+                NetworkError::DecompressionFailed,
+                "Decompressed size (" + std::to_string(decompressedSize) +
+                " bytes) exceeds maximum allowed (" + std::to_string(MAX_DECOMPRESSED_SIZE) + " bytes)"
+            );
+        }
+
         // Allocate buffer for decompressed data
-        std::vector<uint8_t> decompressed(decompressedSize);
+        std::vector<uint8_t> decompressed(static_cast<size_t>(decompressedSize));
 
         // Decompress
         size_t actualSize = ZSTD_decompress(
