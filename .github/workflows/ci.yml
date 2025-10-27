@@ -133,9 +133,13 @@ jobs:
           name: EntropyNetworking-Linux-gcc-14
           path: EntropyNetworking-Linux-gcc-14/**
 
-  build-and-test-macos:
-    name: Build and test (macOS, AppleClang)
+  build-macos:
+    name: Build (macOS, ${{ matrix.arch }}, ${{ matrix.config }})
     runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+        config: [Release, Debug]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -150,115 +154,109 @@ jobs:
         with:
           vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
-      # Build x64 Release
-      - name: Configure CMake (Ninja, Release, x64)
+      - name: Set architecture variables
+        id: arch
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            echo "cmake_arch=x86_64" >> $GITHUB_OUTPUT
+            echo "triplet=x64-osx" >> $GITHUB_OUTPUT
+          else
+            echo "cmake_arch=arm64" >> $GITHUB_OUTPUT
+            echo "triplet=arm64-osx" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure CMake
         run: >
-          cmake -S . -B build-release-x64 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTS=OFF
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+          -DBUILD_TESTS=${{ matrix.arch == 'arm64' && matrix.config == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_EXAMPLES=OFF
-          -DVCPKG_TARGET_TRIPLET=x64-osx
-          -DCMAKE_OSX_ARCHITECTURES=x86_64
+          -DVCPKG_TARGET_TRIPLET=${{ steps.arch.outputs.triplet }}
+          -DCMAKE_OSX_ARCHITECTURES=${{ steps.arch.outputs.cmake_arch }}
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-      - name: Build (Release, x64)
-        run: cmake --build build-release-x64
+      - name: Build
+        run: cmake --build build
 
-      - name: Install package (Release, x64)
-        run: cmake --install build-release-x64 --prefix "${{ github.workspace }}/install-x64"
-
-      # Build arm64 Release with tests
-      - name: Configure CMake (Ninja, Release, arm64)
-        run: >
-          cmake -S . -B build-release-arm64 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTS=ON
-          -DBUILD_EXAMPLES=OFF
-          -DVCPKG_TARGET_TRIPLET=arm64-osx
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
-      - name: Build tests (Release, arm64)
-        run: cmake --build build-release-arm64 --target EntropyNetworkingTests
-
-      - name: Run tests (ctest, verbose)
-        working-directory: build-release-arm64
+      - name: Run tests (arm64 Release only)
+        if: matrix.arch == 'arm64' && matrix.config == 'Release'
+        working-directory: build
         run: ctest -VV --output-on-failure
 
-      - name: Install package (Release, arm64)
-        run: cmake --install build-release-arm64 --prefix "${{ github.workspace }}/install-arm64"
-
-      # Build x64 Debug
-      - name: Configure CMake (Ninja, Debug, x64)
-        run: >
-          cmake -S . -B build-debug-x64 -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DBUILD_TESTS=OFF
-          -DBUILD_EXAMPLES=OFF
-          -DVCPKG_TARGET_TRIPLET=x64-osx
-          -DCMAKE_OSX_ARCHITECTURES=x86_64
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
-      - name: Build (Debug, x64)
-        run: cmake --build build-debug-x64
-
-      - name: Install package (Debug, x64)
-        run: cmake --install build-debug-x64 --prefix "${{ github.workspace }}/install-x64-debug"
-
-      # Build arm64 Debug
-      - name: Configure CMake (Ninja, Debug, arm64)
-        run: >
-          cmake -S . -B build-debug-arm64 -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DBUILD_TESTS=OFF
-          -DBUILD_EXAMPLES=OFF
-          -DVCPKG_TARGET_TRIPLET=arm64-osx
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
-      - name: Build (Debug, arm64)
-        run: cmake --build build-debug-arm64
-
-      - name: Install package (Debug, arm64)
-        run: cmake --install build-debug-arm64 --prefix "${{ github.workspace }}/install-arm64-debug"
-
-      # Create universal binaries with lipo
-      - name: Create universal binaries
-        run: |
-          mkdir -p "${{ github.workspace }}/EntropyNetworking-macOS-universal/lib"
-          mkdir -p "${{ github.workspace }}/EntropyNetworking-macOS-universal/debug/lib"
-
-          # Combine Release libraries
-          lipo -create \
-            "${{ github.workspace }}/install-x64/lib/libEntropyNetworking.a" \
-            "${{ github.workspace }}/install-arm64/lib/libEntropyNetworking.a" \
-            -output "${{ github.workspace }}/EntropyNetworking-macOS-universal/lib/libEntropyNetworking.a"
-
-          # Combine Debug libraries
-          lipo -create \
-            "${{ github.workspace }}/install-x64-debug/lib/libEntropyNetworking.a" \
-            "${{ github.workspace }}/install-arm64-debug/lib/libEntropyNetworking.a" \
-            -output "${{ github.workspace }}/EntropyNetworking-macOS-universal/debug/lib/libEntropyNetworking.a"
-
-          # Copy headers and cmake files from arm64 build (they're identical)
-          cp -r "${{ github.workspace }}/install-arm64/include" "${{ github.workspace }}/EntropyNetworking-macOS-universal/"
-          cp -r "${{ github.workspace }}/install-arm64/lib/cmake" "${{ github.workspace }}/EntropyNetworking-macOS-universal/lib/" || true
-
-          # Verify universal binaries
-          echo "Release library architectures:"
-          lipo -info "${{ github.workspace }}/EntropyNetworking-macOS-universal/lib/libEntropyNetworking.a"
-          echo "Debug library architectures:"
-          lipo -info "${{ github.workspace }}/EntropyNetworking-macOS-universal/debug/lib/libEntropyNetworking.a"
+      - name: Install package
+        run: cmake --install build --prefix "${{ github.workspace }}/install"
 
       - name: Upload CTest logs
-        if: always()
+        if: always() && matrix.arch == 'arm64' && matrix.config == 'Release'
         uses: actions/upload-artifact@v4
         with:
           name: ctest-logs-macos
           path: |
-            build-release-arm64/Testing/Temporary/LastTest.log
-            build-release-arm64/Testing/**/Test.xml
-            build-release-arm64/Testing/Temporary/LastTestsFailed.log
+            build/Testing/Temporary/LastTest.log
+            build/Testing/**/Test.xml
+            build/Testing/Temporary/LastTestsFailed.log
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-${{ matrix.arch }}-${{ matrix.config }}
+          path: install/**
+
+  package-macos-universal:
+    name: Create macOS universal binary
+    runs-on: macos-latest
+    needs: build-macos
+    steps:
+      - name: Download x64 Release
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-x64-Release
+          path: install-x64-release
+
+      - name: Download arm64 Release
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-arm64-Release
+          path: install-arm64-release
+
+      - name: Download x64 Debug
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-x64-Debug
+          path: install-x64-debug
+
+      - name: Download arm64 Debug
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-macOS-arm64-Debug
+          path: install-arm64-debug
+
+      - name: Create universal binaries with lipo
+        run: |
+          mkdir -p EntropyNetworking-macOS-universal/lib
+          mkdir -p EntropyNetworking-macOS-universal/debug/lib
+
+          # Combine Release libraries
+          lipo -create \
+            install-x64-release/lib/libEntropyNetworking.a \
+            install-arm64-release/lib/libEntropyNetworking.a \
+            -output EntropyNetworking-macOS-universal/lib/libEntropyNetworking.a
+
+          # Combine Debug libraries
+          lipo -create \
+            install-x64-debug/lib/libEntropyNetworking.a \
+            install-arm64-debug/lib/libEntropyNetworking.a \
+            -output EntropyNetworking-macOS-universal/debug/lib/libEntropyNetworking.a
+
+          # Copy headers and cmake files from arm64 build (they're identical)
+          cp -r install-arm64-release/include EntropyNetworking-macOS-universal/
+          cp -r install-arm64-release/lib/cmake EntropyNetworking-macOS-universal/lib/ || true
+
+          # Verify universal binaries
+          echo "Release library architectures:"
+          lipo -info EntropyNetworking-macOS-universal/lib/libEntropyNetworking.a
+          echo "Debug library architectures:"
+          lipo -info EntropyNetworking-macOS-universal/debug/lib/libEntropyNetworking.a
 
       - name: Upload macOS universal package artifact
         uses: actions/upload-artifact@v4
