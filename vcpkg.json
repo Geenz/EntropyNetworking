@@ -1,6 +1,6 @@
 {
   "name": "entropynetworking",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Networking library for the Entropy Engine",
   "dependencies": [
     "entropycore",
