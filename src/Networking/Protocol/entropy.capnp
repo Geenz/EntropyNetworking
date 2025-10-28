@@ -154,6 +154,9 @@ struct PropertyDefinitionData {
     type @1 :PropertyType;           # Property type
     offset @2 :UInt64;               # Byte offset within component struct
     size @3 :UInt64;                 # Size in bytes
+    required @4 :Bool = true;        # Whether this property must be present (default: true)
+    defaultValue @5 :PropertyValue;  # Optional default value (check hasDefaultValue)
+    hasDefaultValue @6 :Bool = false; # Whether defaultValue is set
 }
 
 struct ComponentSchemaData {
@@ -266,12 +269,22 @@ struct Handshake {
     protocolVersion @0 :UInt32;
     clientType @1 :Text;             # "portal", "paint", "canvas"
     clientId @2 :Text;
+
+    # Capability flags (added for protocol evolution)
+    supportsSchemaMetadata @3 :Bool = false;  # Supports required/defaultValue in PropertyDefinitionData
+    supportsSchemaAck @4 :Bool = false;       # Supports acknowledgment of schema registration
+    supportsSchemaAdvert @5 :Bool = false;    # Supports schema advertisement/discovery
 }
 
 struct HandshakeResponse {
     success @0 :Bool;
     serverId @1 :Text;
     errorMessage @2 :Text;
+
+    # Server capabilities
+    supportsSchemaMetadata @3 :Bool = false;
+    supportsSchemaAck @4 :Bool = false;
+    supportsSchemaAdvert @5 :Bool = false;
 }
 
 struct Heartbeat {

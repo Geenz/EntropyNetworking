@@ -13,6 +13,95 @@
 namespace EntropyEngine {
 namespace Networking {
 
+namespace {
+    // Helper to serialize PropertyValue to Cap'n Proto
+    void serializePropertyValue(const PropertyValue& value, ::PropertyValue::Builder builder) {
+        if (std::holds_alternative<int32_t>(value)) {
+            builder.setInt32(std::get<int32_t>(value));
+        } else if (std::holds_alternative<int64_t>(value)) {
+            builder.setInt64(std::get<int64_t>(value));
+        } else if (std::holds_alternative<float>(value)) {
+            builder.setFloat32(std::get<float>(value));
+        } else if (std::holds_alternative<double>(value)) {
+            builder.setFloat64(std::get<double>(value));
+        } else if (std::holds_alternative<Vec2>(value)) {
+            auto vec = std::get<Vec2>(value);
+            auto vecBuilder = builder.initVec2();
+            vecBuilder.setX(vec.x);
+            vecBuilder.setY(vec.y);
+        } else if (std::holds_alternative<Vec3>(value)) {
+            auto vec = std::get<Vec3>(value);
+            auto vecBuilder = builder.initVec3();
+            vecBuilder.setX(vec.x);
+            vecBuilder.setY(vec.y);
+            vecBuilder.setZ(vec.z);
+        } else if (std::holds_alternative<Vec4>(value)) {
+            auto vec = std::get<Vec4>(value);
+            auto vecBuilder = builder.initVec4();
+            vecBuilder.setX(vec.x);
+            vecBuilder.setY(vec.y);
+            vecBuilder.setZ(vec.z);
+            vecBuilder.setW(vec.w);
+        } else if (std::holds_alternative<Quat>(value)) {
+            auto quat = std::get<Quat>(value);
+            auto quatBuilder = builder.initQuat();
+            quatBuilder.setX(quat.x);
+            quatBuilder.setY(quat.y);
+            quatBuilder.setZ(quat.z);
+            quatBuilder.setW(quat.w);
+        } else if (std::holds_alternative<std::string>(value)) {
+            builder.setString(std::get<std::string>(value));
+        } else if (std::holds_alternative<bool>(value)) {
+            builder.setBool(std::get<bool>(value));
+        } else if (std::holds_alternative<std::vector<uint8_t>>(value)) {
+            const auto& bytes = std::get<std::vector<uint8_t>>(value);
+            builder.setBytes(kj::ArrayPtr<const uint8_t>(bytes.data(), bytes.size()));
+        }
+        // Note: Array types not serialized for default values (not commonly used as defaults)
+    }
+
+    // Helper to deserialize PropertyValue from Cap'n Proto
+    PropertyValue deserializePropertyValue(::PropertyValue::Reader reader) {
+        switch (reader.which()) {
+            case ::PropertyValue::INT32:
+                return reader.getInt32();
+            case ::PropertyValue::INT64:
+                return reader.getInt64();
+            case ::PropertyValue::FLOAT32:
+                return reader.getFloat32();
+            case ::PropertyValue::FLOAT64:
+                return reader.getFloat64();
+            case ::PropertyValue::VEC2: {
+                auto vec = reader.getVec2();
+                return Vec2{vec.getX(), vec.getY()};
+            }
+            case ::PropertyValue::VEC3: {
+                auto vec = reader.getVec3();
+                return Vec3{vec.getX(), vec.getY(), vec.getZ()};
+            }
+            case ::PropertyValue::VEC4: {
+                auto vec = reader.getVec4();
+                return Vec4{vec.getX(), vec.getY(), vec.getZ(), vec.getW()};
+            }
+            case ::PropertyValue::QUAT: {
+                auto quat = reader.getQuat();
+                return Quat{quat.getX(), quat.getY(), quat.getZ(), quat.getW()};
+            }
+            case ::PropertyValue::STRING:
+                return std::string(reader.getString().cStr());
+            case ::PropertyValue::BOOL:
+                return reader.getBool();
+            case ::PropertyValue::BYTES: {
+                auto bytes = reader.getBytes();
+                return std::vector<uint8_t>(bytes.begin(), bytes.end());
+            }
+            default:
+                // For unsupported types, return int32(0) as placeholder
+                return int32_t{0};
+        }
+    }
+} // anonymous namespace
+
 void serializePropertyDefinition(
     const PropertyDefinition& definition,
     PropertyDefinitionData::Builder builder)
@@ -21,6 +110,15 @@ void serializePropertyDefinition(
     builder.setType(static_cast<::PropertyType>(toCapnpPropertyType(definition.type)));
     builder.setOffset(definition.offset);
     builder.setSize(definition.size);
+    builder.setRequired(definition.required);
+
+    if (definition.defaultValue.has_value()) {
+        builder.setHasDefaultValue(true);
+        auto defaultValueBuilder = builder.initDefaultValue();
+        serializePropertyValue(definition.defaultValue.value(), defaultValueBuilder);
+    } else {
+        builder.setHasDefaultValue(false);
+    }
 }
 
 PropertyDefinition deserializePropertyDefinition(
@@ -31,6 +129,14 @@ PropertyDefinition deserializePropertyDefinition(
     definition.type = fromCapnpPropertyType(static_cast<uint16_t>(reader.getType()));
     definition.offset = reader.getOffset();
     definition.size = reader.getSize();
+    definition.required = reader.getRequired();
+
+    if (reader.getHasDefaultValue()) {
+        definition.defaultValue = deserializePropertyValue(reader.getDefaultValue());
+    } else {
+        definition.defaultValue = std::nullopt;
+    }
+
     return definition;
 }
 
