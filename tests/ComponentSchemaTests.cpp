@@ -419,3 +419,168 @@ TEST(ComponentSchemaTests, TestVector_VersionDifferentiation) {
     EXPECT_EQ(v2.value.toCanonicalString(), "App.Component@2{value:Float32:0:4}");
     EXPECT_EQ(v3.value.toCanonicalString(), "App.Component@3{value:Float32:0:4}");
 }
+
+// ============================================================================
+// Property Metadata Tests
+// ============================================================================
+// Tests for required flag and defaultValue functionality
+
+TEST(ComponentSchemaTests, PropertyMetadata_DefaultRequired) {
+    // Properties are required by default
+    std::vector<PropertyDefinition> props = {
+        {"health", PropertyType::Int32, 0, 4}
+    };
+
+    auto result = ComponentSchema::create("App", "Health", 1, props, 4, false);
+    ASSERT_TRUE(result.success());
+
+    EXPECT_TRUE(result.value.properties[0].required);
+    EXPECT_FALSE(result.value.properties[0].defaultValue.has_value());
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_OptionalWithDefault) {
+    // Optional property with default value
+    std::vector<PropertyDefinition> props = {
+        {"score", PropertyType::Int32, 0, 4, false, int32_t{0}}
+    };
+
+    auto result = ComponentSchema::create("App", "Player", 1, props, 4, false);
+    ASSERT_TRUE(result.success());
+
+    EXPECT_FALSE(result.value.properties[0].required);
+    ASSERT_TRUE(result.value.properties[0].defaultValue.has_value());
+
+    // Verify the default value
+    auto& defaultVal = result.value.properties[0].defaultValue.value();
+    EXPECT_TRUE(std::holds_alternative<int32_t>(defaultVal));
+    EXPECT_EQ(std::get<int32_t>(defaultVal), 0);
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_DefaultValueTypeMismatch) {
+    // Default value type doesn't match property type - should fail
+    std::vector<PropertyDefinition> props = {
+        {"health", PropertyType::Int32, 0, 4, true, float{100.0f}}  // Wrong type
+    };
+
+    auto result = ComponentSchema::create("App", "Health", 1, props, 4, false);
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(result.error, NetworkError::SchemaValidationFailed);
+    EXPECT_NE(result.errorMessage.find("defaultValue type mismatch"), std::string::npos);
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_MultipleDefaults) {
+    // Multiple properties with different default values
+    std::vector<PropertyDefinition> props = {
+        {"health", PropertyType::Int32, 0, 4, true, int32_t{100}},
+        {"speed", PropertyType::Float32, 4, 4, false, float{5.0f}},
+        {"name", PropertyType::String, 8, 64, false, std::string{"Player"}}
+    };
+
+    auto result = ComponentSchema::create("App", "Character", 1, props, 72, false);
+    ASSERT_TRUE(result.success());
+
+    // Verify health (required with default)
+    EXPECT_TRUE(result.value.properties[0].required);
+    ASSERT_TRUE(result.value.properties[0].defaultValue.has_value());
+    EXPECT_EQ(std::get<int32_t>(result.value.properties[0].defaultValue.value()), 100);
+
+    // Verify speed (optional with default)
+    EXPECT_FALSE(result.value.properties[1].required);
+    ASSERT_TRUE(result.value.properties[1].defaultValue.has_value());
+    EXPECT_FLOAT_EQ(std::get<float>(result.value.properties[1].defaultValue.value()), 5.0f);
+
+    // Verify name (optional with default)
+    EXPECT_FALSE(result.value.properties[2].required);
+    ASSERT_TRUE(result.value.properties[2].defaultValue.has_value());
+    EXPECT_EQ(std::get<std::string>(result.value.properties[2].defaultValue.value()), "Player");
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_Vec3Default) {
+    // Vector type with default value
+    Vec3 defaultPos{0.0f, 0.0f, 0.0f};
+    std::vector<PropertyDefinition> props = {
+        {"position", PropertyType::Vec3, 0, 12, false, defaultPos}
+    };
+
+    auto result = ComponentSchema::create("App", "Transform", 1, props, 12, false);
+    ASSERT_TRUE(result.success());
+
+    EXPECT_FALSE(result.value.properties[0].required);
+    ASSERT_TRUE(result.value.properties[0].defaultValue.has_value());
+
+    auto& defaultVal = result.value.properties[0].defaultValue.value();
+    EXPECT_TRUE(std::holds_alternative<Vec3>(defaultVal));
+    auto& vec = std::get<Vec3>(defaultVal);
+    EXPECT_FLOAT_EQ(vec.x, 0.0f);
+    EXPECT_FLOAT_EQ(vec.y, 0.0f);
+    EXPECT_FLOAT_EQ(vec.z, 0.0f);
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_DoesNotAffectStructuralHash) {
+    // Metadata (required, defaultValue) should NOT affect structural hash
+    std::vector<PropertyDefinition> props1 = {
+        {"health", PropertyType::Int32, 0, 4, true}  // Required, no default
+    };
+
+    std::vector<PropertyDefinition> props2 = {
+        {"health", PropertyType::Int32, 0, 4, false, int32_t{100}}  // Optional with default
+    };
+
+    auto result1 = ComponentSchema::create("App", "A", 1, props1, 4, false);
+    auto result2 = ComponentSchema::create("App", "B", 1, props2, 4, false);
+
+    ASSERT_TRUE(result1.success());
+    ASSERT_TRUE(result2.success());
+
+    // Structural hashes should be identical (metadata not included)
+    EXPECT_EQ(result1.value.structuralHash, result2.value.structuralHash);
+
+    // Type hashes should be different (different app/component names)
+    EXPECT_NE(result1.value.typeHash, result2.value.typeHash);
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_OptionalWithoutDefault) {
+    // Optional property without default is allowed
+    std::vector<PropertyDefinition> props = {
+        {"nickname", PropertyType::String, 0, 64, false}  // Optional, no default
+    };
+
+    auto result = ComponentSchema::create("App", "Player", 1, props, 64, false);
+    ASSERT_TRUE(result.success());
+
+    EXPECT_FALSE(result.value.properties[0].required);
+    EXPECT_FALSE(result.value.properties[0].defaultValue.has_value());
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_ArrayTypeDefault) {
+    // Array type with default value
+    std::vector<int32_t> defaultArray{1, 2, 3};
+    std::vector<PropertyDefinition> props = {
+        {"values", PropertyType::Int32Array, 0, 24, false, defaultArray}
+    };
+
+    auto result = ComponentSchema::create("App", "Data", 1, props, 24, false);
+    ASSERT_TRUE(result.success());
+
+    ASSERT_TRUE(result.value.properties[0].defaultValue.has_value());
+    auto& defaultVal = result.value.properties[0].defaultValue.value();
+    EXPECT_TRUE(std::holds_alternative<std::vector<int32_t>>(defaultVal));
+    auto& array = std::get<std::vector<int32_t>>(defaultVal);
+    EXPECT_EQ(array.size(), 3);
+    EXPECT_EQ(array[0], 1);
+    EXPECT_EQ(array[1], 2);
+    EXPECT_EQ(array[2], 3);
+}
+
+TEST(ComponentSchemaTests, PropertyMetadata_BoolDefault) {
+    // Boolean property with default
+    std::vector<PropertyDefinition> props = {
+        {"enabled", PropertyType::Bool, 0, 1, false, true}
+    };
+
+    auto result = ComponentSchema::create("App", "Feature", 1, props, 1, false);
+    ASSERT_TRUE(result.success());
+
+    ASSERT_TRUE(result.value.properties[0].defaultValue.has_value());
+    EXPECT_TRUE(std::get<bool>(result.value.properties[0].defaultValue.value()));
+}

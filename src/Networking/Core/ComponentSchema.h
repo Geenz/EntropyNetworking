@@ -14,6 +14,7 @@
 #include "ErrorCodes.h"
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -22,24 +23,34 @@ namespace Networking {
  * @brief Property definition within a component schema
  *
  * Describes a single property/field within a component type, including
- * its name, type, memory layout offset, and size.
+ * its name, type, memory layout offset, size, and metadata.
+ *
+ * Metadata fields (required, defaultValue) support cross-application
+ * compatibility checking but are NOT included in structural or type hashes.
+ * This allows applications to add default values or change required status
+ * without breaking compatibility.
  */
 struct PropertyDefinition {
     std::string name;           ///< Property name (e.g., "position", "health")
     PropertyType type;          ///< Property type from PropertyTypes.h
     size_t offset;              ///< Byte offset within component struct
     size_t size;                ///< Size in bytes
+    bool required = true;       ///< Whether this property must be present (default: true)
+    std::optional<PropertyValue> defaultValue = std::nullopt;  ///< Optional default value
 
     /**
      * @brief Equality comparison for property definitions
      *
-     * Two definitions are equal if all fields match exactly.
+     * Two definitions are equal if all fields match exactly, including metadata.
+     * Note: Structural hash only uses name/type/offset/size (not metadata).
      */
     bool operator==(const PropertyDefinition& other) const {
         return name == other.name &&
                type == other.type &&
                offset == other.offset &&
-               size == other.size;
+               size == other.size &&
+               required == other.required &&
+               defaultValue == other.defaultValue;
     }
 
     bool operator!=(const PropertyDefinition& other) const {

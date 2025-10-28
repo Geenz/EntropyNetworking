@@ -234,6 +234,20 @@ Result<ComponentSchema> ComponentSchema::create(
             );
         }
 
+        // Validate defaultValue type matches property type if provided
+        if (prop.defaultValue.has_value()) {
+            if (!validatePropertyType(prop.defaultValue.value(), prop.type)) {
+                std::string errorMsg = std::format(
+                    "Property '{}' has defaultValue with mismatched type (expected {})",
+                    prop.name, propertyTypeToString(prop.type));
+                ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
+                return Result<ComponentSchema>::err(
+                    NetworkError::SchemaValidationFailed,
+                    "Property '" + prop.name + "' has defaultValue type mismatch"
+                );
+            }
+        }
+
         // Check that property fits within totalSize
         if (prop.offset + prop.size > totalSize) {
             std::string errorMsg = std::format(
