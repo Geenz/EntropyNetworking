@@ -206,12 +206,27 @@ struct UnpublishSchemaResponse {
     errorMessage @1 :Text;
 }
 
+# SchemaNack - Optional negative acknowledgment for unknown schemas
+#
+# Sent when a peer receives a message referencing an unknown ComponentTypeHash.
+# This is OPTIONAL feedback controlled by SchemaNackPolicy:
+# - Only sent when policy is enabled (default: disabled)
+# - Subject to per-schema rate limiting (default: 1000ms interval)
+# - Triggered by unknown ComponentTypeHash in ENTITY_CREATED messages
+# - Receiver should respond by advertising or registering the schema
+#
+# This is NOT a required acknowledgment - peers may silently drop unknown schemas.
+# Applications control NACK behavior via SchemaNackPolicy for their use case.
 struct SchemaNack {
-    typeHash @0 :PropertyHash128;    # Unknown ComponentTypeHash
-    reason @1 :Text;                 # Human-readable reason for NACK
+    typeHash @0 :PropertyHash128;    # Unknown ComponentTypeHash that triggered the NACK
+    reason @1 :Text;                 # Human-readable reason (e.g., "Schema not found in registry")
     timestamp @2 :UInt64;            # When the NACK occurred (microseconds since epoch)
 }
 
+# SchemaAdvertisement - Proactive schema notification
+#
+# Sent to inform peers about available schemas without requiring a request.
+# Can be used in response to SchemaNack or proactively during connection setup.
 struct SchemaAdvertisement {
     typeHash @0 :PropertyHash128;    # ComponentTypeHash being advertised
     appId @1 :Text;                  # Application ID

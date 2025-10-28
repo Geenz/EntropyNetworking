@@ -400,6 +400,13 @@ Result<void> NetworkSession::sendSchemaNack(ComponentTypeHash typeHash, const st
         return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
     }
 
+    // Check global policy - if disabled, don't send NACK but still count it
+    auto& policy = SchemaNackPolicy::instance();
+    if (!policy.isEnabled()) {
+        // Policy disabled - metrics counted, but no NACK sent
+        return Result<void>::ok();
+    }
+
     // Check if we should send NACK (rate limiting)
     if (!_nackTracker.shouldSendNack(typeHash)) {
         // Rate limited - silently skip
@@ -528,6 +535,29 @@ void NetworkSession::setSchemaAdvertisementCallback(SchemaAdvertisementCallback 
     _schemaAdvertisementCallback = std::move(callback);
 }
 
+void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
+    // ALWAYS increment unknown schema counter, regardless of policy
+    _unknownSchemaDrops.fetch_add(1, std::memory_order_relaxed);
+
+    // ALWAYS emit rate-limited log
+    auto& policy = SchemaNackPolicy::instance();
+    auto logInterval = std::chrono::milliseconds(policy.getLogIntervalMs());
+    if (_logRateLimiter.shouldLog(typeHash, logInterval)) {
+        std::string typeHashStr = Networking::toString(typeHash);
+        std::string logMessage = "Unknown schema encountered: " + typeHashStr +
+                                 " (error: " + std::string(errorToString(NetworkError::SchemaNotFound)) + ")";
+        ENTROPY_LOG_WARNING(logMessage);
+    }
+
+    // If policy enabled, enqueue NACK feedback asynchronously (non-blocking)
+    if (policy.isEnabled()) {
+        // sendSchemaNack already handles rate limiting via SchemaNackTracker
+        // and uses the non-blocking reliable send path (_connection->send())
+        // The send() call enqueues the message without blocking the caller
+        sendSchemaNack(typeHash, "Schema not found in registry");
+    }
+}
+
 ConnectionStats NetworkSession::getStats() const {
     if (!_connection) {
         return ConnectionStats{};
@@ -566,8 +596,31 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         // Dispatch based on message type
         switch (message.which()) {
             case Message::ENTITY_CREATED: {
+                auto entityCreated = message.getEntityCreated();
+
+                // Validate all ComponentTypeHash values in properties if schema registry is available
+                if (_schemaRegistry) {
+                    auto properties = entityCreated.getProperties();
+                    for (auto prop : properties) {
+                        if (prop.hasComponentType()) {
+                            auto componentTypeReader = prop.getComponentType();
+                            ComponentTypeHash typeHash{
+                                componentTypeReader.getHigh(),
+                                componentTypeReader.getLow()
+                            };
+
+                            // Check if schema is registered
+                            if (!_schemaRegistry->isRegistered(typeHash)) {
+                                // Handle unknown schema: increment metrics, log, and optionally send NACK
+                                handleUnknownSchema(typeHash);
+                            }
+                        }
+                    }
+                }
+
+                // Invoke callback regardless of schema validation
+                // Application layer decides how to handle entities with unknown schemas
                 if (_entityCreatedCallback) {
-                    auto entityCreated = message.getEntityCreated();
                     _entityCreatedCallback(
                         entityCreated.getEntityId(),
                         std::string(entityCreated.getAppId().cStr()),

@@ -8,6 +8,7 @@
  */
 
 #include "SchemaNackTracker.h"
+#include <algorithm>
 
 namespace EntropyEngine {
 namespace Networking {

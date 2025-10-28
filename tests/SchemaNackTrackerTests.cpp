@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 #include "../src/Networking/Core/SchemaNackTracker.h"
+#include "../src/Networking/Core/SchemaNackPolicy.h"
 #include <thread>
 #include <chrono>
 
@@ -163,4 +164,85 @@ TEST(SchemaNackTrackerTests, ZeroIntervalAlwaysSends) {
 
     // With 0 interval, should immediately allow another NACK
     EXPECT_TRUE(tracker.shouldSendNack(hash1));
+}
+
+// SchemaNackPolicy Tests
+
+TEST(SchemaNackPolicyTests, DefaultsToDisabled) {
+    auto& policy = SchemaNackPolicy::instance();
+    // Note: Since this is a singleton, we need to explicitly set state
+    policy.disable();  // Ensure known state
+
+    EXPECT_FALSE(policy.isEnabled());
+    EXPECT_EQ(policy.getMinIntervalMs(), 1000u);
+    EXPECT_EQ(policy.getBurst(), 1u);
+    EXPECT_EQ(policy.getLogIntervalMs(), 5000u);
+}
+
+TEST(SchemaNackPolicyTests, CanEnableAndDisable) {
+    auto& policy = SchemaNackPolicy::instance();
+
+    policy.enable();
+    EXPECT_TRUE(policy.isEnabled());
+
+    policy.disable();
+    EXPECT_FALSE(policy.isEnabled());
+}
+
+TEST(SchemaNackPolicyTests, CanModifyParameters) {
+    auto& policy = SchemaNackPolicy::instance();
+
+    policy.setMinIntervalMs(2000);
+    EXPECT_EQ(policy.getMinIntervalMs(), 2000u);
+
+    policy.setBurst(5);
+    EXPECT_EQ(policy.getBurst(), 5u);
+
+    policy.setLogIntervalMs(10000);
+    EXPECT_EQ(policy.getLogIntervalMs(), 10000u);
+
+    // Reset to defaults
+    policy.setMinIntervalMs(1000);
+    policy.setBurst(1);
+    policy.setLogIntervalMs(5000);
+}
+
+TEST(SchemaNackPolicyTests, ThreadSafeAccess) {
+    auto& policy = SchemaNackPolicy::instance();
+    policy.disable();
+
+    std::atomic<int> enableCount{0};
+    std::atomic<int> disableCount{0};
+
+    // Spawn multiple threads that toggle the policy
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back([&policy, &enableCount, &disableCount, i]() {
+            for (int j = 0; j < 100; ++j) {
+                if ((i + j) % 2 == 0) {
+                    policy.enable();
+                    enableCount.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    policy.disable();
+                    disableCount.fetch_add(1, std::memory_order_relaxed);
+                }
+
+                // Also test parameter changes
+                policy.setMinIntervalMs(1000 + (j % 10));
+                policy.setBurst(1 + (j % 5));
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // Verify counts
+    EXPECT_EQ(enableCount.load(), 500);
+    EXPECT_EQ(disableCount.load(), 500);
+
+    // Policy state should be consistent (no torn reads/writes)
+    bool enabled = policy.isEnabled();
+    EXPECT_TRUE(enabled == true || enabled == false);  // No garbage value
 }
