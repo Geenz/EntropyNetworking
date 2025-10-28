@@ -8,6 +8,7 @@ add_executable(EntropyNetworkingTests
     PropertyHashTests.cpp
     PropertyRegistryTests.cpp
     PropertyTypesTests.cpp
+    ComponentSchemaTests.cpp
     ConnectionManagerTests.cpp
     WebRTCConnectionTests.cpp
     WebRTCIntegrationTests.cpp

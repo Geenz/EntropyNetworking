@@ -62,6 +62,16 @@ struct PropertyHash {
 };
 
 /**
+ * @brief Type alias for component type identification
+ *
+ * ComponentTypeHash identifies a component type across applications.
+ * Computed from appId, componentName, schemaVersion, and structural hash.
+ *
+ * Uses the same 128-bit hash structure as PropertyHash for consistency.
+ */
+using ComponentTypeHash = PropertyHash;
+
+/**
  * @brief Compute property hash from components
  *
  * Computes a 128-bit hash using SHA-256. The hash is deterministic and provides
