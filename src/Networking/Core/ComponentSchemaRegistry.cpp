@@ -10,6 +10,7 @@
 #include "ComponentSchemaRegistry.h"
 #include <Logging/Logger.h>
 #include <algorithm>
+#include <format>
 
 namespace EntropyEngine {
 namespace Networking {

@@ -7,6 +7,7 @@
 #include "../src/Networking/Session/SessionManager.h"
 #include "../src/Networking/Session/BatchManager.h"
 #include "../src/Networking/Core/ConnectionTypes.h"
+#include "../src/Networking/Core/ComponentSchema.h"
 #include <EntropyCore.h>
 #include <Concurrency/WorkService.h>
 #include <Concurrency/WorkContractGroup.h>
@@ -146,6 +147,25 @@ int main() {
 
             cout << "\n=== Starting property update simulation ===" << endl;
 
+            // Create a ComponentTypeHash for Transform component
+            vector<PropertyDefinition> transformProps = {
+                {"position", PropertyType::Vec3, 0, sizeof(Vec3)},
+                {"rotation", PropertyType::Quat, sizeof(Vec3), sizeof(Quat)}
+            };
+            auto transformSchemaResult = ComponentSchema::create(
+                "BatchDemo",
+                "Transform",
+                1,
+                transformProps,
+                sizeof(Vec3) + sizeof(Quat),
+                false
+            );
+            if (transformSchemaResult.failed()) {
+                cerr << "Failed to create Transform schema: " << transformSchemaResult.errorMessage << endl;
+                return;
+            }
+            ComponentTypeHash transformTypeHash = transformSchemaResult.value.typeHash;
+
             random_device rd;
             mt19937 gen(rd());
             uniform_real_distribution<float> posDist(-10.0f, 10.0f);
@@ -167,13 +187,13 @@ int main() {
                     // Compute property hashes for position and rotation
                     auto posHash = computePropertyHash(
                         entityIds[i],
-                        "Transform",
+                        transformTypeHash,
                         "position"
                     );
 
                     auto rotHash = computePropertyHash(
                         entityIds[i],
-                        "Transform",
+                        transformTypeHash,
                         "rotation"
                     );
 

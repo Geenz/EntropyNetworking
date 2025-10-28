@@ -9,6 +9,7 @@
 
 #include "NetworkSession.h"
 #include "../Core/TimeUtils.h"
+#include "../Protocol/ComponentSchemaSerializer.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -21,9 +22,12 @@ std::string NetworkSession::generateSessionId() {
     return "session-" + std::to_string(now) + "-" + std::to_string(ctr.fetch_add(1, std::memory_order_relaxed));
 }
 
-NetworkSession::NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry)
+NetworkSession::NetworkSession(NetworkConnection* connection,
+                               PropertyRegistry* externalRegistry,
+                               ComponentSchemaRegistry* schemaRegistry)
     : _connection(connection)
     , _propertyRegistry(externalRegistry)
+    , _schemaRegistry(schemaRegistry)
     , _sessionId(generateSessionId())
 {
     // If no external registry provided, create and own one
@@ -265,6 +269,123 @@ Result<void> NetworkSession::sendSceneSnapshot(const std::vector<uint8_t>& snaps
     return _connection->send(snapshotData);
 }
 
+Result<void> NetworkSession::sendRegisterSchema(const ComponentSchema& schema) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initRegisterSchemaRequest();
+
+        // Serialize the schema using ComponentSchemaSerializer
+        auto schemaBuilder = request.initSchema();
+        serializeComponentSchema(schema, schemaBuilder);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Schema messages go on reliable channel
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendQueryPublicSchemas() {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        message.initQueryPublicSchemasRequest();
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendPublishSchema(ComponentTypeHash typeHash) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initPublishSchemaRequest();
+
+        auto hashBuilder = request.initTypeHash();
+        hashBuilder.setHigh(typeHash.high);
+        hashBuilder.setLow(typeHash.low);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUnpublishSchema(ComponentTypeHash typeHash) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initUnpublishSchemaRequest();
+
+        auto hashBuilder = request.initTypeHash();
+        hashBuilder.setHigh(typeHash.high);
+        hashBuilder.setLow(typeHash.low);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
 void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
     std::lock_guard<std::mutex> lock(_mutex);
     _entityCreatedCallback = std::move(callback);
@@ -288,6 +409,26 @@ void NetworkSession::setSceneSnapshotCallback(SceneSnapshotCallback callback) {
 void NetworkSession::setErrorCallback(ErrorCallback callback) {
     std::lock_guard<std::mutex> lock(_mutex);
     _errorCallback = std::move(callback);
+}
+
+void NetworkSession::setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _registerSchemaResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _queryPublicSchemasResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _publishSchemaResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _unpublishSchemaResponseCallback = std::move(callback);
 }
 
 ConnectionStats NetworkSession::getStats() const {
@@ -412,6 +553,61 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                                      std::string(resp.getErrorMessage().cStr()));
                     }
                     disconnect();
+                }
+                break;
+            }
+
+            case Message::REGISTER_SCHEMA_RESPONSE: {
+                if (_registerSchemaResponseCallback) {
+                    auto resp = message.getRegisterSchemaResponse();
+                    _registerSchemaResponseCallback(
+                        resp.getSuccess(),
+                        std::string(resp.getErrorMessage().cStr())
+                    );
+                }
+                break;
+            }
+
+            case Message::QUERY_PUBLIC_SCHEMAS_RESPONSE: {
+                if (_queryPublicSchemasResponseCallback) {
+                    auto resp = message.getQueryPublicSchemasResponse();
+                    auto schemasReader = resp.getSchemas();
+
+                    std::vector<ComponentSchema> schemas;
+                    schemas.reserve(schemasReader.size());
+
+                    for (auto schemaReader : schemasReader) {
+                        auto result = deserializeComponentSchema(schemaReader);
+                        if (result.success()) {
+                            schemas.push_back(std::move(result.value));
+                        } else if (_errorCallback) {
+                            _errorCallback(result.error, result.errorMessage);
+                        }
+                    }
+
+                    _queryPublicSchemasResponseCallback(schemas);
+                }
+                break;
+            }
+
+            case Message::PUBLISH_SCHEMA_RESPONSE: {
+                if (_publishSchemaResponseCallback) {
+                    auto resp = message.getPublishSchemaResponse();
+                    _publishSchemaResponseCallback(
+                        resp.getSuccess(),
+                        std::string(resp.getErrorMessage().cStr())
+                    );
+                }
+                break;
+            }
+
+            case Message::UNPUBLISH_SCHEMA_RESPONSE: {
+                if (_unpublishSchemaResponseCallback) {
+                    auto resp = message.getUnpublishSchemaResponse();
+                    _unpublishSchemaResponseCallback(
+                        resp.getSuccess(),
+                        std::string(resp.getErrorMessage().cStr())
+                    );
                 }
                 break;
             }

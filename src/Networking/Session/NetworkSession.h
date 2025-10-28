@@ -12,6 +12,7 @@
 #include "../Transport/NetworkConnection.h"
 #include "../Protocol/MessageSerializer.h"
 #include "../Core/PropertyRegistry.h"
+#include "../Core/ComponentSchemaRegistry.h"
 #include "../Core/ErrorCodes.h"
 #include <EntropyCore.h>
 #include <memory>
@@ -40,13 +41,23 @@ public:
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
 
+    // Schema message callbacks
+    using RegisterSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using QueryPublicSchemasResponseCallback = std::function<void(const std::vector<ComponentSchema>& schemas)>;
+    using PublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using UnpublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
      * @param externalRegistry Optional external PropertyRegistry to share across sessions.
      *                        If nullptr, creates an internal registry (for single-session use).
+     * @param schemaRegistry Optional ComponentSchemaRegistry for schema operations.
+     *                      If nullptr, schema operations will not be available.
      */
-    NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry = nullptr);
+    NetworkSession(NetworkConnection* connection,
+                   PropertyRegistry* externalRegistry = nullptr,
+                   ComponentSchemaRegistry* schemaRegistry = nullptr);
     ~NetworkSession() override;
 
     // Connection management
@@ -72,6 +83,12 @@ public:
     Result<void> sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData);
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData);
 
+    // Send schema protocol messages
+    Result<void> sendRegisterSchema(const ComponentSchema& schema);
+    Result<void> sendQueryPublicSchemas();
+    Result<void> sendPublishSchema(ComponentTypeHash typeHash);
+    Result<void> sendUnpublishSchema(ComponentTypeHash typeHash);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -79,9 +96,19 @@ public:
     void setSceneSnapshotCallback(SceneSnapshotCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
+    // Schema message callbacks
+    void setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback);
+    void setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback);
+    void setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback);
+    void setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback);
+
     // Property registry access (always valid after construction)
     PropertyRegistry& getPropertyRegistry() { return *_propertyRegistry; }
     const PropertyRegistry& getPropertyRegistry() const { return *_propertyRegistry; }
+
+    // Schema registry access (may be nullptr if not configured)
+    ComponentSchemaRegistry* getSchemaRegistry() { return _schemaRegistry; }
+    const ComponentSchemaRegistry* getSchemaRegistry() const { return _schemaRegistry; }
 
     // Statistics
     ConnectionStats getStats() const;
@@ -104,6 +131,9 @@ private:
     PropertyRegistry* _propertyRegistry{nullptr};
     std::unique_ptr<PropertyRegistry> _ownedRegistry; // used when no external provided
 
+    // Schema registry: external (non-owning), optional
+    ComponentSchemaRegistry* _schemaRegistry{nullptr};
+
     std::string _sessionId;
 
     // Callbacks
@@ -112,6 +142,12 @@ private:
     PropertyUpdateCallback _propertyUpdateCallback;
     SceneSnapshotCallback _sceneSnapshotCallback;
     ErrorCallback _errorCallback;
+
+    // Schema callbacks
+    RegisterSchemaResponseCallback _registerSchemaResponseCallback;
+    QueryPublicSchemasResponseCallback _queryPublicSchemasResponseCallback;
+    PublishSchemaResponseCallback _publishSchemaResponseCallback;
+    UnpublishSchemaResponseCallback _unpublishSchemaResponseCallback;
 
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
     std::atomic<uint32_t> _nextSendSequence{0};

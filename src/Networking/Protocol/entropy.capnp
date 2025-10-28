@@ -24,6 +24,16 @@ enum PropertyType {
     string @8;
     bool @9;
     bytes @10;
+
+    # Array types
+    int32Array @11;
+    int64Array @12;
+    float32Array @13;
+    float64Array @14;
+    vec2Array @15;
+    vec3Array @16;
+    vec4Array @17;
+    quatArray @18;
 }
 
 struct Vec2 {

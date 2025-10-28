@@ -13,6 +13,7 @@
 #include <vector>
 #include <algorithm>
 #include <sstream>
+#include <format>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -166,8 +167,8 @@ Result<ComponentSchema> ComponentSchema::create(
             );
         }
 
-        // Check for valid property type
-        if (static_cast<int>(prop.type) < 0 || static_cast<int>(prop.type) > 11) {
+        // Check for valid property type (Bytes=10, QuatArray=18)
+        if (static_cast<int>(prop.type) < 0 || static_cast<int>(prop.type) > 18) {
             std::string errorMsg = std::format("Property '{}' has invalid type: {}",
                 prop.name, static_cast<int>(prop.type));
             ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);

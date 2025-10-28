@@ -9,6 +9,7 @@
 
 #include "PropertyRegistry.h"
 #include <mutex>
+#include <format>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -22,6 +23,10 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
             case PropertyType::Vec2: case PropertyType::Vec3: case PropertyType::Vec4:
             case PropertyType::Quat: case PropertyType::String:
             case PropertyType::Bool: case PropertyType::Bytes:
+            case PropertyType::Int32Array: case PropertyType::Int64Array:
+            case PropertyType::Float32Array: case PropertyType::Float64Array:
+            case PropertyType::Vec2Array: case PropertyType::Vec3Array:
+            case PropertyType::Vec4Array: case PropertyType::QuatArray:
                 return true;
             default: return false;
         }

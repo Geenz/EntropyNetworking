@@ -30,6 +30,16 @@ PropertyType getPropertyType(const PropertyValue& value) {
     if (std::holds_alternative<bool>(value)) return PropertyType::Bool;
     if (std::holds_alternative<std::vector<uint8_t>>(value)) return PropertyType::Bytes;
 
+    // Array types
+    if (std::holds_alternative<std::vector<int32_t>>(value)) return PropertyType::Int32Array;
+    if (std::holds_alternative<std::vector<int64_t>>(value)) return PropertyType::Int64Array;
+    if (std::holds_alternative<std::vector<float>>(value)) return PropertyType::Float32Array;
+    if (std::holds_alternative<std::vector<double>>(value)) return PropertyType::Float64Array;
+    if (std::holds_alternative<std::vector<Vec2>>(value)) return PropertyType::Vec2Array;
+    if (std::holds_alternative<std::vector<Vec3>>(value)) return PropertyType::Vec3Array;
+    if (std::holds_alternative<std::vector<Vec4>>(value)) return PropertyType::Vec4Array;
+    if (std::holds_alternative<std::vector<Quat>>(value)) return PropertyType::QuatArray;
+
     // Should never reach here
     return PropertyType::Int32;
 }
@@ -47,6 +57,14 @@ const char* propertyTypeToString(PropertyType type) {
         case PropertyType::String: return "String";
         case PropertyType::Bool: return "Bool";
         case PropertyType::Bytes: return "Bytes";
+        case PropertyType::Int32Array: return "Int32Array";
+        case PropertyType::Int64Array: return "Int64Array";
+        case PropertyType::Float32Array: return "Float32Array";
+        case PropertyType::Float64Array: return "Float64Array";
+        case PropertyType::Vec2Array: return "Vec2Array";
+        case PropertyType::Vec3Array: return "Vec3Array";
+        case PropertyType::Vec4Array: return "Vec4Array";
+        case PropertyType::QuatArray: return "QuatArray";
         default: return "Unknown";
     }
 }
@@ -66,6 +84,14 @@ uint16_t toCapnpPropertyType(PropertyType type) {
         case PropertyType::String: return static_cast<uint16_t>(::PropertyType::STRING);
         case PropertyType::Bool: return static_cast<uint16_t>(::PropertyType::BOOL);
         case PropertyType::Bytes: return static_cast<uint16_t>(::PropertyType::BYTES);
+        case PropertyType::Int32Array: return static_cast<uint16_t>(::PropertyType::INT32_ARRAY);
+        case PropertyType::Int64Array: return static_cast<uint16_t>(::PropertyType::INT64_ARRAY);
+        case PropertyType::Float32Array: return static_cast<uint16_t>(::PropertyType::FLOAT32_ARRAY);
+        case PropertyType::Float64Array: return static_cast<uint16_t>(::PropertyType::FLOAT64_ARRAY);
+        case PropertyType::Vec2Array: return static_cast<uint16_t>(::PropertyType::VEC2_ARRAY);
+        case PropertyType::Vec3Array: return static_cast<uint16_t>(::PropertyType::VEC3_ARRAY);
+        case PropertyType::Vec4Array: return static_cast<uint16_t>(::PropertyType::VEC4_ARRAY);
+        case PropertyType::QuatArray: return static_cast<uint16_t>(::PropertyType::QUAT_ARRAY);
         default: return static_cast<uint16_t>(::PropertyType::INT32);  // Fallback
     }
 }
@@ -86,6 +112,14 @@ PropertyType fromCapnpPropertyType(uint16_t capnpType) {
         case ::PropertyType::STRING: return PropertyType::String;
         case ::PropertyType::BOOL: return PropertyType::Bool;
         case ::PropertyType::BYTES: return PropertyType::Bytes;
+        case ::PropertyType::INT32_ARRAY: return PropertyType::Int32Array;
+        case ::PropertyType::INT64_ARRAY: return PropertyType::Int64Array;
+        case ::PropertyType::FLOAT32_ARRAY: return PropertyType::Float32Array;
+        case ::PropertyType::FLOAT64_ARRAY: return PropertyType::Float64Array;
+        case ::PropertyType::VEC2_ARRAY: return PropertyType::Vec2Array;
+        case ::PropertyType::VEC3_ARRAY: return PropertyType::Vec3Array;
+        case ::PropertyType::VEC4_ARRAY: return PropertyType::Vec4Array;
+        case ::PropertyType::QUAT_ARRAY: return PropertyType::QuatArray;
         default: return PropertyType::Int32;  // Fallback
     }
 }
