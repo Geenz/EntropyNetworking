@@ -14,43 +14,77 @@
 #include <algorithm>
 #include <sstream>
 #include <format>
+#include <iomanip>
 
 namespace EntropyEngine {
 namespace Networking {
 
+namespace {
+    /**
+     * @brief Validate that a string is a valid ASCII identifier
+     *
+     * Valid identifiers:
+     * - Contain only [a-zA-Z0-9_]
+     * - Start with letter or underscore
+     * - Non-empty
+     */
+    bool isAsciiIdentifier(const std::string& str) {
+        if (str.empty()) {
+            return false;
+        }
+
+        // First character must be letter or underscore
+        char first = str[0];
+        if (!((first >= 'a' && first <= 'z') ||
+              (first >= 'A' && first <= 'Z') ||
+              first == '_')) {
+            return false;
+        }
+
+        // All characters must be alphanumeric or underscore
+        for (char c : str) {
+            if (!((c >= 'a' && c <= 'z') ||
+                  (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') ||
+                  c == '_')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+} // anonymous namespace
+
 PropertyHash ComponentSchema::computeStructuralHash(
     const std::vector<PropertyDefinition>& properties)
 {
-    // Prepare input buffer: concatenate all property definitions
-    // Format for each property: name || type (4 bytes) || offset (8 bytes) || size (8 bytes)
-    std::vector<uint8_t> input;
+    // Sort properties by name (ASCII lexicographic order)
+    auto sortedProps = properties;
+    std::sort(sortedProps.begin(), sortedProps.end(),
+              [](const PropertyDefinition& a, const PropertyDefinition& b) {
+                  return a.name < b.name;
+              });
 
-    for (const auto& prop : properties) {
-        // Add property name
-        input.insert(input.end(), prop.name.begin(), prop.name.end());
-
-        // Add type as 4-byte uint32 (big-endian)
-        uint32_t typeValue = static_cast<uint32_t>(prop.type);
-        for (int i = 3; i >= 0; --i) {
-            input.push_back(static_cast<uint8_t>((typeValue >> (i * 8)) & 0xFF));
+    // Build canonical string for properties: prop1:type1:offset1:size1,prop2:...
+    std::ostringstream oss;
+    for (size_t i = 0; i < sortedProps.size(); ++i) {
+        if (i > 0) {
+            oss << ",";
         }
 
-        // Add offset as 8-byte uint64 (big-endian)
-        uint64_t offsetValue = static_cast<uint64_t>(prop.offset);
-        for (int i = 7; i >= 0; --i) {
-            input.push_back(static_cast<uint8_t>((offsetValue >> (i * 8)) & 0xFF));
-        }
-
-        // Add size as 8-byte uint64 (big-endian)
-        uint64_t sizeValue = static_cast<uint64_t>(prop.size);
-        for (int i = 7; i >= 0; --i) {
-            input.push_back(static_cast<uint8_t>((sizeValue >> (i * 8)) & 0xFF));
-        }
+        const auto& prop = sortedProps[i];
+        oss << prop.name << ":"
+            << propertyTypeToString(prop.type) << ":"
+            << prop.offset << ":"
+            << prop.size;
     }
 
-    // Compute SHA-256
+    std::string canonical = oss.str();
+
+    // Hash the UTF-8 bytes
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(input.data(), input.size(), hash);
+    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()),
+           canonical.size(), hash);
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;
@@ -75,34 +109,20 @@ ComponentTypeHash ComponentSchema::computeTypeHash(
     uint32_t schemaVersion,
     const PropertyHash& structuralHash)
 {
-    // Prepare input buffer: appId || componentName || schemaVersion (4 bytes) || structuralHash (16 bytes)
-    std::vector<uint8_t> input;
-    input.reserve(appId.size() + componentName.size() + 4 + 16);
+    // Build canonical string: {appId}.{componentName}@{version}{structuralHashHex}
+    std::ostringstream oss;
+    oss << appId << "." << componentName << "@" << schemaVersion << "{"
+        << std::hex << std::setfill('0')
+        << std::setw(16) << structuralHash.high
+        << std::setw(16) << structuralHash.low
+        << "}";
 
-    // Add appId
-    input.insert(input.end(), appId.begin(), appId.end());
+    std::string canonical = oss.str();
 
-    // Add componentName
-    input.insert(input.end(), componentName.begin(), componentName.end());
-
-    // Add schemaVersion as 4-byte uint32 (big-endian)
-    for (int i = 3; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((schemaVersion >> (i * 8)) & 0xFF));
-    }
-
-    // Add structuralHash high (8 bytes, big-endian)
-    for (int i = 7; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((structuralHash.high >> (i * 8)) & 0xFF));
-    }
-
-    // Add structuralHash low (8 bytes, big-endian)
-    for (int i = 7; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((structuralHash.low >> (i * 8)) & 0xFF));
-    }
-
-    // Compute SHA-256
+    // Hash the UTF-8 bytes
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(input.data(), input.size(), hash);
+    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()),
+           canonical.size(), hash);
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;
@@ -138,12 +158,36 @@ Result<ComponentSchema> ComponentSchema::create(
         );
     }
 
+    // Validate appId is ASCII identifier
+    if (!isAsciiIdentifier(appId)) {
+        std::string errorMsg = std::format(
+            "Component schema validation failed: appId '{}' must be ASCII identifier [a-zA-Z0-9_]",
+            appId);
+        ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
+        return Result<ComponentSchema>::err(
+            NetworkError::InvalidParameter,
+            "appId must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
+        );
+    }
+
     // Validate component name
     if (componentName.empty()) {
         ENTROPY_LOG_ERROR("Component schema validation failed: componentName is empty");
         return Result<ComponentSchema>::err(
             NetworkError::InvalidParameter,
             "componentName cannot be empty"
+        );
+    }
+
+    // Validate componentName is ASCII identifier
+    if (!isAsciiIdentifier(componentName)) {
+        std::string errorMsg = std::format(
+            "Component schema validation failed: componentName '{}' must be ASCII identifier [a-zA-Z0-9_]",
+            componentName);
+        ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
+        return Result<ComponentSchema>::err(
+            NetworkError::InvalidParameter,
+            "componentName must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
         );
     }
 
@@ -164,6 +208,18 @@ Result<ComponentSchema> ComponentSchema::create(
             return Result<ComponentSchema>::err(
                 NetworkError::SchemaValidationFailed,
                 "Property name cannot be empty"
+            );
+        }
+
+        // Validate property name is ASCII identifier
+        if (!isAsciiIdentifier(prop.name)) {
+            std::string errorMsg = std::format(
+                "Component schema validation failed: property name '{}' must be ASCII identifier [a-zA-Z0-9_]",
+                prop.name);
+            ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
+            return Result<ComponentSchema>::err(
+                NetworkError::SchemaValidationFailed,
+                "Property name '" + prop.name + "' must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
             );
         }
 
@@ -305,6 +361,34 @@ Result<void> ComponentSchema::canReadFrom(const ComponentSchema& other) const {
 
     // All our properties exist in other schema with matching types/offsets/sizes
     return Result<void>::ok();
+}
+
+std::string ComponentSchema::toCanonicalString() const {
+    // Sort properties by name (ASCII lexicographic order)
+    auto sortedProps = properties;
+    std::sort(sortedProps.begin(), sortedProps.end(),
+              [](const PropertyDefinition& a, const PropertyDefinition& b) {
+                  return a.name < b.name;
+              });
+
+    // Build canonical string: {appId}.{componentName}@{version}{prop:type:offset:size,...}
+    std::ostringstream oss;
+    oss << appId << "." << componentName << "@" << schemaVersion << "{";
+
+    for (size_t i = 0; i < sortedProps.size(); ++i) {
+        if (i > 0) {
+            oss << ",";
+        }
+
+        const auto& prop = sortedProps[i];
+        oss << prop.name << ":"
+            << propertyTypeToString(prop.type) << ":"
+            << prop.offset << ":"
+            << prop.size;
+    }
+
+    oss << "}";
+    return oss.str();
 }
 
 } // namespace Networking

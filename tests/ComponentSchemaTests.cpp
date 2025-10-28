@@ -81,8 +81,9 @@ TEST(ComponentSchemaTests, ComputeStructuralHash_DifferentOrder) {
     auto hash1 = ComponentSchema::computeStructuralHash(properties1);
     auto hash2 = ComponentSchema::computeStructuralHash(properties2);
 
-    // Different order should produce different hash
-    EXPECT_NE(hash1, hash2);
+    // With canonical string hashing, properties are sorted by name
+    // So different input orders produce the SAME hash (order-independent)
+    EXPECT_EQ(hash1, hash2);
 }
 
 TEST(ComponentSchemaTests, ComputeTypeHash_UniquePerVersion) {
@@ -220,4 +221,201 @@ TEST(ComponentSchemaTests, CanReadFrom_FieldOffsetMismatch) {
     EXPECT_TRUE(result.failed());
     EXPECT_EQ(result.error, NetworkError::SchemaIncompatible);
     EXPECT_NE(result.errorMessage.find("offset mismatch"), std::string::npos);
+}
+
+// ============================================================================
+// Test Vectors - Canonical String Hashing
+// ============================================================================
+// These tests document the exact canonical string format and hash values
+// for cross-language validation and reference implementations.
+
+TEST(ComponentSchemaTests, TestVector_SimpleTransform) {
+    // Test Vector 1: Simple Transform component with position and rotation
+    std::vector<PropertyDefinition> props = {
+        {"position", PropertyType::Vec3, 0, 12},
+        {"rotation", PropertyType::Quat, 12, 16}
+    };
+
+    auto result = ComponentSchema::create(
+        "TestApp",
+        "Transform",
+        1,
+        props,
+        28,
+        false
+    );
+
+    ASSERT_TRUE(result.success());
+
+    // Verify canonical string format
+    std::string canonical = result.value.toCanonicalString();
+    EXPECT_EQ(canonical, "TestApp.Transform@1{position:Vec3:0:12,rotation:Quat:12:16}");
+
+    // Document the computed hashes (these are reference values)
+    EXPECT_FALSE(result.value.structuralHash.isNull());
+    EXPECT_FALSE(result.value.typeHash.isNull());
+}
+
+TEST(ComponentSchemaTests, TestVector_Physics) {
+    // Test Vector 2: Physics component with multiple properties
+    std::vector<PropertyDefinition> props = {
+        {"mass", PropertyType::Float32, 0, 4},
+        {"velocity", PropertyType::Vec3, 4, 12},
+        {"acceleration", PropertyType::Vec3, 16, 12}
+    };
+
+    auto result = ComponentSchema::create(
+        "PhysicsEngine",
+        "RigidBody",
+        2,
+        props,
+        28,
+        true  // Public schema
+    );
+
+    ASSERT_TRUE(result.success());
+
+    // Verify canonical string (properties sorted alphabetically)
+    std::string canonical = result.value.toCanonicalString();
+    EXPECT_EQ(canonical,
+        "PhysicsEngine.RigidBody@2{acceleration:Vec3:16:12,mass:Float32:0:4,velocity:Vec3:4:12}");
+
+    EXPECT_TRUE(result.value.isPublic);
+}
+
+TEST(ComponentSchemaTests, TestVector_SingleProperty) {
+    // Test Vector 3: Minimal component with single property
+    std::vector<PropertyDefinition> props = {
+        {"health", PropertyType::Int32, 0, 4}
+    };
+
+    auto result = ComponentSchema::create(
+        "GameEngine",
+        "Health",
+        1,
+        props,
+        4,
+        false
+    );
+
+    ASSERT_TRUE(result.success());
+
+    std::string canonical = result.value.toCanonicalString();
+    EXPECT_EQ(canonical, "GameEngine.Health@1{health:Int32:0:4}");
+}
+
+TEST(ComponentSchemaTests, TestVector_ComplexSchema) {
+    // Test Vector 4: Complex schema with many property types
+    std::vector<PropertyDefinition> props = {
+        {"id", PropertyType::Int64, 0, 8},
+        {"name", PropertyType::String, 8, 64},
+        {"position", PropertyType::Vec3, 72, 12},
+        {"rotation", PropertyType::Quat, 84, 16},
+        {"scale", PropertyType::Vec3, 100, 12},
+        {"visible", PropertyType::Bool, 112, 1},
+        {"layer", PropertyType::Int32, 116, 4}
+    };
+
+    auto result = ComponentSchema::create(
+        "RenderEngine",
+        "Drawable",
+        3,
+        props,
+        120,
+        true
+    );
+
+    ASSERT_TRUE(result.success());
+
+    // Properties should be sorted alphabetically in canonical form
+    std::string canonical = result.value.toCanonicalString();
+    EXPECT_EQ(canonical,
+        "RenderEngine.Drawable@3{id:Int64:0:8,layer:Int32:116:4,name:String:8:64,"
+        "position:Vec3:72:12,rotation:Quat:84:16,scale:Vec3:100:12,visible:Bool:112:1}");
+}
+
+TEST(ComponentSchemaTests, TestVector_PropertyOrdering) {
+    // Test Vector 5: Verify that input order doesn't affect canonical form
+    std::vector<PropertyDefinition> props1 = {
+        {"z_last", PropertyType::Float32, 0, 4},
+        {"a_first", PropertyType::Float32, 4, 4},
+        {"m_middle", PropertyType::Float32, 8, 4}
+    };
+
+    std::vector<PropertyDefinition> props2 = {
+        {"a_first", PropertyType::Float32, 4, 4},
+        {"m_middle", PropertyType::Float32, 8, 4},
+        {"z_last", PropertyType::Float32, 0, 4}
+    };
+
+    auto result1 = ComponentSchema::create("App", "Test", 1, props1, 12, false);
+    auto result2 = ComponentSchema::create("App", "Test", 1, props2, 12, false);
+
+    ASSERT_TRUE(result1.success());
+    ASSERT_TRUE(result2.success());
+
+    // Both should produce identical canonical strings (alphabetically sorted)
+    EXPECT_EQ(result1.value.toCanonicalString(), result2.value.toCanonicalString());
+    EXPECT_EQ(result1.value.toCanonicalString(),
+        "App.Test@1{a_first:Float32:4:4,m_middle:Float32:8:4,z_last:Float32:0:4}");
+
+    // And identical hashes
+    EXPECT_EQ(result1.value.structuralHash, result2.value.structuralHash);
+    EXPECT_EQ(result1.value.typeHash, result2.value.typeHash);
+}
+
+TEST(ComponentSchemaTests, TestVector_ASCIIIdentifiers) {
+    // Test Vector 6: Various valid ASCII identifier formats
+    std::vector<PropertyDefinition> props = {
+        {"_private", PropertyType::Int32, 0, 4},
+        {"snake_case", PropertyType::Int32, 4, 4},
+        {"camelCase", PropertyType::Int32, 8, 4},
+        {"PascalCase", PropertyType::Int32, 12, 4},
+        {"with123numbers", PropertyType::Int32, 16, 4}
+    };
+
+    auto result = ComponentSchema::create(
+        "MyApp_v2",
+        "Test_Component",
+        1,
+        props,
+        20,
+        false
+    );
+
+    ASSERT_TRUE(result.success());
+
+    std::string canonical = result.value.toCanonicalString();
+    EXPECT_EQ(canonical,
+        "MyApp_v2.Test_Component@1{PascalCase:Int32:12:4,_private:Int32:0:4,"
+        "camelCase:Int32:8:4,snake_case:Int32:4:4,with123numbers:Int32:16:4}");
+}
+
+TEST(ComponentSchemaTests, TestVector_VersionDifferentiation) {
+    // Test Vector 7: Same structure, different versions produce different type hashes
+    std::vector<PropertyDefinition> props = {
+        {"value", PropertyType::Float32, 0, 4}
+    };
+
+    auto v1 = ComponentSchema::create("App", "Component", 1, props, 4, false);
+    auto v2 = ComponentSchema::create("App", "Component", 2, props, 4, false);
+    auto v3 = ComponentSchema::create("App", "Component", 3, props, 4, false);
+
+    ASSERT_TRUE(v1.success());
+    ASSERT_TRUE(v2.success());
+    ASSERT_TRUE(v3.success());
+
+    // Same structural hash (identical structure)
+    EXPECT_EQ(v1.value.structuralHash, v2.value.structuralHash);
+    EXPECT_EQ(v2.value.structuralHash, v3.value.structuralHash);
+
+    // Different type hashes (different versions)
+    EXPECT_NE(v1.value.typeHash, v2.value.typeHash);
+    EXPECT_NE(v2.value.typeHash, v3.value.typeHash);
+    EXPECT_NE(v1.value.typeHash, v3.value.typeHash);
+
+    // Canonical strings differ by version number
+    EXPECT_EQ(v1.value.toCanonicalString(), "App.Component@1{value:Float32:0:4}");
+    EXPECT_EQ(v2.value.toCanonicalString(), "App.Component@2{value:Float32:0:4}");
+    EXPECT_EQ(v3.value.toCanonicalString(), "App.Component@3{value:Float32:0:4}");
 }

@@ -104,6 +104,20 @@ struct ComponentSchema {
     Result<void> canReadFrom(const ComponentSchema& other) const;
 
     /**
+     * @brief Build canonical string representation for hashing
+     *
+     * Format: "{appId}.{componentName}@{version}{prop1:type1:offset1:size1,...}"
+     * - Properties sorted by name (ASCII lexicographic order)
+     * - All identifiers must be ASCII [a-zA-Z0-9_]
+     * - Used as input for hash computation
+     *
+     * Example: "MyApp.Transform@1{position:Vec3:0:12,rotation:Quat:12:16}"
+     *
+     * @return Canonical string representation
+     */
+    std::string toCanonicalString() const;
+
+    /**
      * @brief Compute structural hash from properties
      *
      * Uses SHA-256 of concatenated field definitions:

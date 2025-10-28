@@ -9,8 +9,8 @@
 
 #include "PropertyHash.h"
 #include <openssl/sha.h>
-#include <vector>
-#include <cstring>
+#include <sstream>
+#include <iomanip>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -20,31 +20,21 @@ PropertyHash computePropertyHash(
     ComponentTypeHash componentType,
     const std::string& propertyName)
 {
-    // Prepare input buffer: entityId (8 bytes) + componentType (16 bytes) + propertyName
-    std::vector<uint8_t> input;
-    input.reserve(8 + 16 + propertyName.size());
+    // Build canonical string: {entityId}:{componentTypeHex}:{propertyName}
+    // Format: "12345:1234567890abcdeffedcba0987654321:health"
+    std::ostringstream oss;
+    oss << entityId << ":"
+        << std::hex << std::setfill('0')
+        << std::setw(16) << componentType.high
+        << std::setw(16) << componentType.low
+        << ":" << propertyName;
 
-    // Add entityId as big-endian uint64
-    for (int i = 7; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((entityId >> (i * 8)) & 0xFF));
-    }
+    std::string canonical = oss.str();
 
-    // Add componentType.high as big-endian uint64
-    for (int i = 7; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((componentType.high >> (i * 8)) & 0xFF));
-    }
-
-    // Add componentType.low as big-endian uint64
-    for (int i = 7; i >= 0; --i) {
-        input.push_back(static_cast<uint8_t>((componentType.low >> (i * 8)) & 0xFF));
-    }
-
-    // Add propertyName
-    input.insert(input.end(), propertyName.begin(), propertyName.end());
-
-    // Compute SHA-256
+    // Hash the UTF-8 bytes
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(input.data(), input.size(), hash);
+    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()),
+           canonical.size(), hash);
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;
