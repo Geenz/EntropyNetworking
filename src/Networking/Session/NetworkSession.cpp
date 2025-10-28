@@ -96,6 +96,11 @@ Result<void> NetworkSession::performHandshake(const std::string& clientType, con
         hs.setClientType(clientType);
         hs.setClientId(clientId);
 
+        // Set capability flags
+        hs.setSupportsSchemaMetadata(true);
+        hs.setSupportsSchemaAck(true);
+        hs.setSupportsSchemaAdvert(true);
+
         auto ser = serialize(builder);
         if (ser.failed()) {
             return Result<void>::err(ser.error, ser.errorMessage);
@@ -386,6 +391,88 @@ Result<void> NetworkSession::sendUnpublishSchema(ComponentTypeHash typeHash) {
     }
 }
 
+Result<void> NetworkSession::sendSchemaNack(ComponentTypeHash typeHash, const std::string& reason) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    // Check if we should send NACK (rate limiting)
+    if (!_nackTracker.shouldSendNack(typeHash)) {
+        // Rate limited - silently skip
+        return Result<void>::ok();
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto nack = message.initSchemaNack();
+
+        auto hashBuilder = nack.initTypeHash();
+        hashBuilder.setHigh(typeHash.high);
+        hashBuilder.setLow(typeHash.low);
+        nack.setReason(reason);
+        nack.setTimestamp(getCurrentTimestampMicros());
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        auto result = _connection->send(serialized.value);
+        if (result.success()) {
+            // Record that we sent the NACK
+            _nackTracker.recordNackSent(typeHash);
+        }
+
+        return result;
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendSchemaAdvertisement(
+    ComponentTypeHash typeHash,
+    const std::string& appId,
+    const std::string& componentName,
+    uint32_t schemaVersion)
+{
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto advert = message.initSchemaAdvertisement();
+
+        auto hashBuilder = advert.initTypeHash();
+        hashBuilder.setHigh(typeHash.high);
+        hashBuilder.setLow(typeHash.low);
+        advert.setAppId(appId);
+        advert.setComponentName(componentName);
+        advert.setSchemaVersion(schemaVersion);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
 void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
     std::lock_guard<std::mutex> lock(_mutex);
     _entityCreatedCallback = std::move(callback);
@@ -429,6 +516,16 @@ void NetworkSession::setPublishSchemaResponseCallback(PublishSchemaResponseCallb
 void NetworkSession::setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback) {
     std::lock_guard<std::mutex> lock(_mutex);
     _unpublishSchemaResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setSchemaNackCallback(SchemaNackCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _schemaNackCallback = std::move(callback);
+}
+
+void NetworkSession::setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _schemaAdvertisementCallback = std::move(callback);
 }
 
 ConnectionStats NetworkSession::getStats() const {
@@ -607,6 +704,35 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     _unpublishSchemaResponseCallback(
                         resp.getSuccess(),
                         std::string(resp.getErrorMessage().cStr())
+                    );
+                }
+                break;
+            }
+
+            case Message::SCHEMA_NACK: {
+                if (_schemaNackCallback) {
+                    auto nack = message.getSchemaNack();
+                    auto typeHashReader = nack.getTypeHash();
+                    ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                    _schemaNackCallback(
+                        typeHash,
+                        std::string(nack.getReason().cStr()),
+                        nack.getTimestamp()
+                    );
+                }
+                break;
+            }
+
+            case Message::SCHEMA_ADVERTISEMENT: {
+                if (_schemaAdvertisementCallback) {
+                    auto advert = message.getSchemaAdvertisement();
+                    auto typeHashReader = advert.getTypeHash();
+                    ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                    _schemaAdvertisementCallback(
+                        typeHash,
+                        std::string(advert.getAppId().cStr()),
+                        std::string(advert.getComponentName().cStr()),
+                        advert.getSchemaVersion()
                     );
                 }
                 break;

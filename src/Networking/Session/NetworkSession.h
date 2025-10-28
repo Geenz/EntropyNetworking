@@ -13,6 +13,7 @@
 #include "../Protocol/MessageSerializer.h"
 #include "../Core/PropertyRegistry.h"
 #include "../Core/ComponentSchemaRegistry.h"
+#include "../Core/SchemaNackTracker.h"
 #include "../Core/ErrorCodes.h"
 #include <EntropyCore.h>
 #include <memory>
@@ -46,6 +47,9 @@ public:
     using QueryPublicSchemasResponseCallback = std::function<void(const std::vector<ComponentSchema>& schemas)>;
     using PublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
     using UnpublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using SchemaNackCallback = std::function<void(ComponentTypeHash typeHash, const std::string& reason, uint64_t timestamp)>;
+    using SchemaAdvertisementCallback = std::function<void(ComponentTypeHash typeHash, const std::string& appId,
+                                                            const std::string& componentName, uint32_t schemaVersion)>;
 
     /**
      * @brief Construct a NetworkSession
@@ -88,6 +92,9 @@ public:
     Result<void> sendQueryPublicSchemas();
     Result<void> sendPublishSchema(ComponentTypeHash typeHash);
     Result<void> sendUnpublishSchema(ComponentTypeHash typeHash);
+    Result<void> sendSchemaNack(ComponentTypeHash typeHash, const std::string& reason);
+    Result<void> sendSchemaAdvertisement(ComponentTypeHash typeHash, const std::string& appId,
+                                          const std::string& componentName, uint32_t schemaVersion);
 
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
@@ -101,6 +108,8 @@ public:
     void setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback);
     void setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback);
     void setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback);
+    void setSchemaNackCallback(SchemaNackCallback callback);
+    void setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback);
 
     // Property registry access (always valid after construction)
     PropertyRegistry& getPropertyRegistry() { return *_propertyRegistry; }
@@ -134,6 +143,9 @@ private:
     // Schema registry: external (non-owning), optional
     ComponentSchemaRegistry* _schemaRegistry{nullptr};
 
+    // NACK tracking
+    SchemaNackTracker _nackTracker;
+
     std::string _sessionId;
 
     // Callbacks
@@ -148,6 +160,8 @@ private:
     QueryPublicSchemasResponseCallback _queryPublicSchemasResponseCallback;
     PublishSchemaResponseCallback _publishSchemaResponseCallback;
     UnpublishSchemaResponseCallback _unpublishSchemaResponseCallback;
+    SchemaNackCallback _schemaNackCallback;
+    SchemaAdvertisementCallback _schemaAdvertisementCallback;
 
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
     std::atomic<uint32_t> _nextSendSequence{0};
