@@ -206,6 +206,19 @@ struct UnpublishSchemaResponse {
     errorMessage @1 :Text;
 }
 
+struct SchemaNack {
+    typeHash @0 :PropertyHash128;    # Unknown ComponentTypeHash
+    reason @1 :Text;                 # Human-readable reason for NACK
+    timestamp @2 :UInt64;            # When the NACK occurred (microseconds since epoch)
+}
+
+struct SchemaAdvertisement {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash being advertised
+    appId @1 :Text;                  # Application ID
+    componentName @2 :Text;          # Component name
+    schemaVersion @3 :UInt32;        # Schema version
+}
+
 # ============================================================================
 # Control Messages (Reliable Channel)
 # ============================================================================
@@ -340,5 +353,7 @@ struct Message {
         publishSchemaResponse @22 :PublishSchemaResponse;
         unpublishSchemaRequest @23 :UnpublishSchemaRequest;
         unpublishSchemaResponse @24 :UnpublishSchemaResponse;
+        schemaNack @25 :SchemaNack;
+        schemaAdvertisement @26 :SchemaAdvertisement;
     }
 }
