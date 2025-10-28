@@ -9,44 +9,64 @@
 
 #include <gtest/gtest.h>
 #include "../src/Networking/Core/PropertyHash.h"
+#include "../src/Networking/Core/ComponentSchema.h"
 
 using namespace EntropyEngine::Networking;
 
+// Helper function to create a ComponentTypeHash for testing
+static ComponentTypeHash createTestComponentType(const std::string& appId, const std::string& componentName) {
+    // Create a minimal valid schema with one dummy property
+    std::vector<PropertyDefinition> props = {
+        {"dummy", PropertyType::Int32, 0, 4}
+    };
+    auto schemaResult = ComponentSchema::create(appId, componentName, 1, props, 4, false);
+    if (schemaResult.success()) {
+        return schemaResult.value.typeHash;
+    }
+    return ComponentTypeHash{0, 0};
+}
+
 TEST(PropertyHashTests, Determinism) {
     // Same inputs should produce same hash
-    auto hash1 = computePropertyHash(42, "Player", "position");
-    auto hash2 = computePropertyHash(42, "Player", "position");
+    auto typeHash = createTestComponentType("TestApp", "Player");
+    auto hash1 = computePropertyHash(42, typeHash, "position");
+    auto hash2 = computePropertyHash(42, typeHash, "position");
 
     EXPECT_EQ(hash1, hash2);
 }
 
 TEST(PropertyHashTests, DifferentEntityIds) {
     // Different entity IDs should produce different hashes
-    auto hash1 = computePropertyHash(42, "Player", "position");
-    auto hash2 = computePropertyHash(43, "Player", "position");
+    auto typeHash = createTestComponentType("TestApp", "Player");
+    auto hash1 = computePropertyHash(42, typeHash, "position");
+    auto hash2 = computePropertyHash(43, typeHash, "position");
 
     EXPECT_NE(hash1, hash2);
 }
 
 TEST(PropertyHashTests, DifferentComponentTypes) {
     // Different component types should produce different hashes
-    auto hash1 = computePropertyHash(42, "Player", "position");
-    auto hash2 = computePropertyHash(42, "Enemy", "position");
+    auto typeHash1 = createTestComponentType("TestApp", "Player");
+    auto typeHash2 = createTestComponentType("TestApp", "Enemy");
+    auto hash1 = computePropertyHash(42, typeHash1, "position");
+    auto hash2 = computePropertyHash(42, typeHash2, "position");
 
     EXPECT_NE(hash1, hash2);
 }
 
 TEST(PropertyHashTests, DifferentPropertyNames) {
     // Different property names should produce different hashes
-    auto hash1 = computePropertyHash(42, "Player", "position");
-    auto hash2 = computePropertyHash(42, "Player", "velocity");
+    auto typeHash = createTestComponentType("TestApp", "Player");
+    auto hash1 = computePropertyHash(42, typeHash, "position");
+    auto hash2 = computePropertyHash(42, typeHash, "velocity");
 
     EXPECT_NE(hash1, hash2);
 }
 
 TEST(PropertyHashTests, NotNull) {
     // Valid hash should not be null
-    auto hash = computePropertyHash(42, "Player", "position");
+    auto typeHash = createTestComponentType("TestApp", "Player");
+    auto hash = computePropertyHash(42, typeHash, "position");
 
     EXPECT_FALSE(hash.isNull());
 }
@@ -64,8 +84,9 @@ TEST(PropertyHashTests, HashMapUsage) {
     // PropertyHash should be usable in std::unordered_map
     std::unordered_map<PropertyHash, std::string> map;
 
-    auto hash1 = computePropertyHash(42, "Player", "position");
-    auto hash2 = computePropertyHash(43, "Player", "position");
+    auto typeHash = createTestComponentType("TestApp", "Player");
+    auto hash1 = computePropertyHash(42, typeHash, "position");
+    auto hash2 = computePropertyHash(43, typeHash, "position");
 
     map[hash1] = "value1";
     map[hash2] = "value2";
@@ -77,9 +98,10 @@ TEST(PropertyHashTests, HashMapUsage) {
 
 TEST(PropertyHashTests, Comparison) {
     // Test comparison operators
-    auto hash1 = computePropertyHash(1, "Type", "field");
-    auto hash2 = computePropertyHash(2, "Type", "field");
-    auto hash3 = computePropertyHash(1, "Type", "field");
+    auto typeHash = createTestComponentType("TestApp", "Type");
+    auto hash1 = computePropertyHash(1, typeHash, "field");
+    auto hash2 = computePropertyHash(2, typeHash, "field");
+    auto hash3 = computePropertyHash(1, typeHash, "field");
 
     EXPECT_EQ(hash1, hash3);
     EXPECT_NE(hash1, hash2);

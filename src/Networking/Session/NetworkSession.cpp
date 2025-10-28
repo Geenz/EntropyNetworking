@@ -136,7 +136,9 @@ Result<void> NetworkSession::sendEntityCreated(
             ph.setHigh(pm.hash.high);
             ph.setLow(pm.hash.low);
             pr.setEntityId(pm.entityId);
-            pr.setComponentType(pm.componentType);
+            auto ct = pr.initComponentType();
+            ct.setHigh(pm.componentType.high);
+            ct.setLow(pm.componentType.low);
             pr.setPropertyName(pm.propertyName);
             pr.setType(static_cast<::PropertyType>(toCapnpPropertyType(pm.type)));
             pr.setRegisteredAt(pm.registeredAt);

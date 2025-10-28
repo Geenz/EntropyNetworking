@@ -90,10 +90,10 @@ struct PropertyUpdateBatch {
 struct PropertyRegistration {
     propertyHash @0 :PropertyHash128;
     entityId @1 :UInt64;
-    componentType @2 :Text;          # e.g., "Transform", "Player"
-    propertyName @3 :Text;           # e.g., "position", "health"
+    componentType @2 :PropertyHash128;  # ComponentTypeHash from ComponentSchema
+    propertyName @3 :Text;              # e.g., "position", "health"
     type @4 :PropertyType;
-    registeredAt @5 :UInt64;         # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
+    registeredAt @5 :UInt64;            # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
 }
 
 struct EntityCreated {

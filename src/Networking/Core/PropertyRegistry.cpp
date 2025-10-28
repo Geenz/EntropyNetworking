@@ -32,13 +32,6 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
     }
 
     // Validate metadata before acquiring lock
-    if (metadata.componentType.empty() || metadata.componentType.size() > MAX_NAME_LENGTH) {
-        return Result<void>::err(
-            NetworkError::InvalidParameter,
-            "Invalid componentType length"
-        );
-    }
-
     if (metadata.propertyName.empty() || metadata.propertyName.size() > MAX_NAME_LENGTH) {
         return Result<void>::err(
             NetworkError::InvalidParameter,
@@ -61,18 +54,17 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
         }
 
         // Different metadata = collision
-        return Result<void>::err(
-            NetworkError::HashCollision,
-            "Property hash collision for (" + std::to_string(metadata.hash.high) + ":" + std::to_string(metadata.hash.low) + ")\n"
-            "Existing: entity=" + std::to_string(existing.entityId) +
-                ", component=" + existing.componentType +
-                ", property=" + existing.propertyName +
-                ", type=" + propertyTypeToString(existing.type) + "\n"
-            "Incoming: entity=" + std::to_string(metadata.entityId) +
-                ", component=" + metadata.componentType +
-                ", property=" + metadata.propertyName +
-                ", type=" + propertyTypeToString(metadata.type)
+        std::string errorMsg = std::format(
+            "Property hash collision for {}\n"
+            "Existing: entity={}, component={}, property={}, type={}\n"
+            "Incoming: entity={}, component={}, property={}, type={}",
+            toString(metadata.hash),
+            existing.entityId, toString(existing.componentType),
+            existing.propertyName, propertyTypeToString(existing.type),
+            metadata.entityId, toString(metadata.componentType),
+            metadata.propertyName, propertyTypeToString(metadata.type)
         );
+        return Result<void>::err(NetworkError::HashCollision, errorMsg);
     }
 
     // Check resource limits before inserting

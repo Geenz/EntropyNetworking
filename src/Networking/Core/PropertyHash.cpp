@@ -17,20 +17,27 @@ namespace Networking {
 
 PropertyHash computePropertyHash(
     uint64_t entityId,
-    const std::string& componentType,
+    ComponentTypeHash componentType,
     const std::string& propertyName)
 {
-    // Prepare input buffer: entityId (8 bytes, big-endian) + componentType + propertyName
+    // Prepare input buffer: entityId (8 bytes) + componentType (16 bytes) + propertyName
     std::vector<uint8_t> input;
-    input.reserve(8 + componentType.size() + propertyName.size());
+    input.reserve(8 + 16 + propertyName.size());
 
     // Add entityId as big-endian uint64
     for (int i = 7; i >= 0; --i) {
         input.push_back(static_cast<uint8_t>((entityId >> (i * 8)) & 0xFF));
     }
 
-    // Add componentType
-    input.insert(input.end(), componentType.begin(), componentType.end());
+    // Add componentType.high as big-endian uint64
+    for (int i = 7; i >= 0; --i) {
+        input.push_back(static_cast<uint8_t>((componentType.high >> (i * 8)) & 0xFF));
+    }
+
+    // Add componentType.low as big-endian uint64
+    for (int i = 7; i >= 0; --i) {
+        input.push_back(static_cast<uint8_t>((componentType.low >> (i * 8)) & 0xFF));
+    }
 
     // Add propertyName
     input.insert(input.end(), propertyName.begin(), propertyName.end());

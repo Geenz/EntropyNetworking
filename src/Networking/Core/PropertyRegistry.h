@@ -46,7 +46,7 @@ namespace Networking {
 struct PropertyMetadata {
     PropertyHash hash;              ///< Unique 128-bit identifier (computed once)
     uint64_t entityId;              ///< Owner entity ID
-    std::string componentType;      ///< Component type (e.g., "Transform", "Player")
+    ComponentTypeHash componentType; ///< Component type hash from ComponentSchema
     std::string propertyName;       ///< Property name (e.g., "position", "health")
     PropertyType type;              ///< Property type (e.g., Vec3, Float32)
     uint64_t registeredAt;          ///< Timestamp when registered (microseconds since epoch)
@@ -55,13 +55,13 @@ struct PropertyMetadata {
     PropertyMetadata(
         PropertyHash h,
         uint64_t entity,
-        std::string component,
+        ComponentTypeHash component,
         std::string prop,
         PropertyType t,
         uint64_t timestamp
     ) : hash(h)
       , entityId(entity)
-      , componentType(std::move(component))
+      , componentType(component)
       , propertyName(std::move(prop))
       , type(t)
       , registeredAt(timestamp)
@@ -101,8 +101,9 @@ struct PropertyMetadata {
  * PropertyRegistry registry;
  *
  * // Register property once when entity created
- * auto hash = computePropertyHash(42, "Transform", "position");
- * PropertyMetadata meta{hash, 42, "Transform", "position", PropertyType::Vec3, now};
+ * auto typeHash = transformSchema.typeHash;  // From ComponentSchema
+ * auto hash = computePropertyHash(42, typeHash, "position");
+ * PropertyMetadata meta{hash, 42, typeHash, "position", PropertyType::Vec3, now};
  * auto result = registry.registerProperty(meta);
  *
  * // SECURITY: Validate on every update
