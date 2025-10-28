@@ -62,6 +62,16 @@ struct PropertyHash {
 };
 
 /**
+ * @brief Type alias for component type identification
+ *
+ * ComponentTypeHash identifies a component type across applications.
+ * Computed from appId, componentName, schemaVersion, and structural hash.
+ *
+ * Uses the same 128-bit hash structure as PropertyHash for consistency.
+ */
+using ComponentTypeHash = PropertyHash;
+
+/**
  * @brief Compute property hash from components
  *
  * Computes a 128-bit hash using SHA-256. The hash is deterministic and provides
@@ -69,7 +79,7 @@ struct PropertyHash {
  *
  * Hash construction: SHA-256(entityId || componentType || propertyName)
  * - entityId: 8 bytes (big-endian uint64)
- * - componentType: UTF-8 string (e.g., "Transform", "Player")
+ * - componentType: 16 bytes (ComponentTypeHash.high + ComponentTypeHash.low)
  * - propertyName: UTF-8 string (e.g., "position", "health")
  *
  * Result is truncated to 128 bits (high 128 bits of SHA-256 output).
@@ -78,23 +88,24 @@ struct PropertyHash {
  * Never recompute the hash - it is a stable identifier for the property instance.
  *
  * @param entityId Entity instance identifier
- * @param componentType Component type name (e.g., "Transform")
+ * @param componentType Component type hash from ComponentSchema
  * @param propertyName Property name within the component (e.g., "position")
  * @return 128-bit property hash
  *
  * @code
  * // Compute hash once when property is created
- * auto hash = computePropertyHash(42, "Transform", "position");
- * // hash uniquely identifies Transform.position property on entity 42
+ * auto typeHash = schema.typeHash;
+ * auto hash = computePropertyHash(42, typeHash, "position");
+ * // hash uniquely identifies property on entity 42 with this component type
  *
  * // Different entity = different hash
- * auto hash2 = computePropertyHash(99, "Transform", "position");
+ * auto hash2 = computePropertyHash(99, typeHash, "position");
  * // hash != hash2 (different entity IDs)
  * @endcode
  */
 PropertyHash computePropertyHash(
     uint64_t entityId,
-    const std::string& componentType,
+    ComponentTypeHash componentType,
     const std::string& propertyName
 );
 

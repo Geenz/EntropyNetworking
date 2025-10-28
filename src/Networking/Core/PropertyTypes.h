@@ -40,13 +40,24 @@ enum class PropertyType {
     Quat,
     String,
     Bool,
-    Bytes
+    Bytes,
+
+    // Array types
+    Int32Array,
+    Int64Array,
+    Float32Array,
+    Float64Array,
+    Vec2Array,
+    Vec3Array,
+    Vec4Array,
+    QuatArray
 };
 
 /**
  * @brief Type-safe variant for property values
  *
  * Holds any of the supported property types in a type-safe manner.
+ * Includes scalar types and array types.
  */
 using PropertyValue = std::variant<
     int32_t,
@@ -59,7 +70,17 @@ using PropertyValue = std::variant<
     Quat,
     std::string,
     bool,
-    std::vector<uint8_t>
+    std::vector<uint8_t>,  // Bytes
+
+    // Array types
+    std::vector<int32_t>,
+    std::vector<int64_t>,
+    std::vector<float>,
+    std::vector<double>,
+    std::vector<Vec2>,
+    std::vector<Vec3>,
+    std::vector<Vec4>,
+    std::vector<Quat>
 >;
 
 /**

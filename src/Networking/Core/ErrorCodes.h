@@ -44,7 +44,14 @@ enum class NetworkError {
     AlreadyExists,              ///< Entity or property already exists
     WouldBlock,                 ///< Operation would block (non-blocking backpressure)
     ResourceLimitExceeded,      ///< Resource limit exceeded (entities, properties, etc.)
-    HandshakeFailed             ///< Handshake protocol failed
+    HandshakeFailed,            ///< Handshake protocol failed
+
+    // Component schema errors
+    SchemaNotFound,             ///< Component schema not found in registry
+    SchemaAlreadyExists,        ///< Schema already registered with different content
+    SchemaIncompatible,         ///< Schemas are structurally incompatible
+    SchemaValidationFailed,     ///< Schema field validation failed
+    SchemaNotPublic             ///< Schema is not published for discovery
 };
 
 /**
@@ -72,6 +79,11 @@ inline const char* errorToString(NetworkError error) {
         case NetworkError::WouldBlock: return "Would block";
         case NetworkError::ResourceLimitExceeded: return "Resource limit exceeded";
         case NetworkError::HandshakeFailed: return "Handshake failed";
+        case NetworkError::SchemaNotFound: return "Schema not found";
+        case NetworkError::SchemaAlreadyExists: return "Schema already exists";
+        case NetworkError::SchemaIncompatible: return "Schema incompatible";
+        case NetworkError::SchemaValidationFailed: return "Schema validation failed";
+        case NetworkError::SchemaNotPublic: return "Schema not public";
         default: return "Unknown error";
     }
 }

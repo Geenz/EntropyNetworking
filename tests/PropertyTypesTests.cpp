@@ -102,3 +102,98 @@ TEST(PropertyTypesTests, QuaternionIdentity) {
     EXPECT_EQ(identity.z, 0.0f);
     EXPECT_EQ(identity.w, 1.0f);
 }
+
+// Round-trip tests: verify all PropertyType enums can be converted to Cap'n Proto and back
+TEST(PropertyTypesTests, RoundTrip_ScalarTypes) {
+    // Test all scalar types
+    std::vector<PropertyType> scalarTypes = {
+        PropertyType::Int32,
+        PropertyType::Int64,
+        PropertyType::Float32,
+        PropertyType::Float64,
+        PropertyType::Vec2,
+        PropertyType::Vec3,
+        PropertyType::Vec4,
+        PropertyType::Quat,
+        PropertyType::String,
+        PropertyType::Bool,
+        PropertyType::Bytes
+    };
+
+    for (auto type : scalarTypes) {
+        uint16_t capnpType = toCapnpPropertyType(type);
+        PropertyType roundTrip = fromCapnpPropertyType(capnpType);
+        EXPECT_EQ(type, roundTrip) << "Round-trip failed for " << propertyTypeToString(type);
+    }
+}
+
+TEST(PropertyTypesTests, RoundTrip_ArrayTypes) {
+    // Test all array types
+    std::vector<PropertyType> arrayTypes = {
+        PropertyType::Int32Array,
+        PropertyType::Int64Array,
+        PropertyType::Float32Array,
+        PropertyType::Float64Array,
+        PropertyType::Vec2Array,
+        PropertyType::Vec3Array,
+        PropertyType::Vec4Array,
+        PropertyType::QuatArray
+    };
+
+    for (auto type : arrayTypes) {
+        uint16_t capnpType = toCapnpPropertyType(type);
+        PropertyType roundTrip = fromCapnpPropertyType(capnpType);
+        EXPECT_EQ(type, roundTrip) << "Round-trip failed for " << propertyTypeToString(type);
+    }
+}
+
+TEST(PropertyTypesTests, RoundTrip_AllTypes) {
+    // Comprehensive test of all types
+    std::vector<PropertyType> allTypes = {
+        PropertyType::Int32,
+        PropertyType::Int64,
+        PropertyType::Float32,
+        PropertyType::Float64,
+        PropertyType::Vec2,
+        PropertyType::Vec3,
+        PropertyType::Vec4,
+        PropertyType::Quat,
+        PropertyType::String,
+        PropertyType::Bool,
+        PropertyType::Bytes,
+        PropertyType::Int32Array,
+        PropertyType::Int64Array,
+        PropertyType::Float32Array,
+        PropertyType::Float64Array,
+        PropertyType::Vec2Array,
+        PropertyType::Vec3Array,
+        PropertyType::Vec4Array,
+        PropertyType::QuatArray
+    };
+
+    for (auto type : allTypes) {
+        // Convert to Cap'n Proto
+        uint16_t capnpType = toCapnpPropertyType(type);
+
+        // Convert back to C++
+        PropertyType roundTrip = fromCapnpPropertyType(capnpType);
+
+        // Verify round-trip preserves type
+        EXPECT_EQ(type, roundTrip) << "Round-trip failed for " << propertyTypeToString(type);
+
+        // Verify toString doesn't crash
+        const char* name = propertyTypeToString(type);
+        EXPECT_NE(name, nullptr);
+        EXPECT_GT(strlen(name), 0u);
+    }
+}
+
+TEST(PropertyTypesTests, CapnpMapping_UnknownValue_FailsClosed) {
+    // Test that unknown Cap'n Proto values fail to a known type (fail closed)
+    // This verifies we don't have undefined behavior for unknown enum values
+    uint16_t invalidValue = 9999;
+    PropertyType result = fromCapnpPropertyType(invalidValue);
+
+    // Should fall back to Int32 (safe default)
+    EXPECT_EQ(result, PropertyType::Int32);
+}

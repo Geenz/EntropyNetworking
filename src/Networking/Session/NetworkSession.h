@@ -12,6 +12,9 @@
 #include "../Transport/NetworkConnection.h"
 #include "../Protocol/MessageSerializer.h"
 #include "../Core/PropertyRegistry.h"
+#include "../Core/ComponentSchemaRegistry.h"
+#include "../Core/SchemaNackTracker.h"
+#include "../Core/SchemaNackPolicy.h"
 #include "../Core/ErrorCodes.h"
 #include <EntropyCore.h>
 #include <memory>
@@ -40,13 +43,26 @@ public:
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
 
+    // Schema message callbacks
+    using RegisterSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using QueryPublicSchemasResponseCallback = std::function<void(const std::vector<ComponentSchema>& schemas)>;
+    using PublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using UnpublishSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using SchemaNackCallback = std::function<void(ComponentTypeHash typeHash, const std::string& reason, uint64_t timestamp)>;
+    using SchemaAdvertisementCallback = std::function<void(ComponentTypeHash typeHash, const std::string& appId,
+                                                            const std::string& componentName, uint32_t schemaVersion)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
      * @param externalRegistry Optional external PropertyRegistry to share across sessions.
      *                        If nullptr, creates an internal registry (for single-session use).
+     * @param schemaRegistry Optional ComponentSchemaRegistry for schema operations.
+     *                      If nullptr, schema operations will not be available.
      */
-    NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry = nullptr);
+    NetworkSession(NetworkConnection* connection,
+                   PropertyRegistry* externalRegistry = nullptr,
+                   ComponentSchemaRegistry* schemaRegistry = nullptr);
     ~NetworkSession() override;
 
     // Connection management
@@ -72,6 +88,33 @@ public:
     Result<void> sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData);
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData);
 
+    // Send schema protocol messages
+    Result<void> sendRegisterSchema(const ComponentSchema& schema);
+    Result<void> sendQueryPublicSchemas();
+    Result<void> sendPublishSchema(ComponentTypeHash typeHash);
+    Result<void> sendUnpublishSchema(ComponentTypeHash typeHash);
+
+    /**
+     * @brief Send NACK for unknown schema (optional feedback)
+     *
+     * Sends a SchemaNack message to notify the peer about an unknown ComponentTypeHash.
+     * This is OPTIONAL feedback controlled by SchemaNackPolicy:
+     * - Only sent when SchemaNackPolicy::instance().isEnabled() == true
+     * - Subject to per-schema rate limiting via SchemaNackTracker (default: 1000ms interval)
+     * - Uses non-blocking reliable send path (MPSC queue)
+     *
+     * Typical usage: Called automatically by handleUnknownSchema() when processing
+     * ENTITY_CREATED messages with unknown ComponentTypeHash values.
+     *
+     * @param typeHash Unknown ComponentTypeHash that triggered the NACK
+     * @param reason Human-readable reason (e.g., "Schema not found in registry")
+     * @return Result indicating success or error (Ok if policy disabled or rate limited)
+     */
+    Result<void> sendSchemaNack(ComponentTypeHash typeHash, const std::string& reason);
+
+    Result<void> sendSchemaAdvertisement(ComponentTypeHash typeHash, const std::string& appId,
+                                          const std::string& componentName, uint32_t schemaVersion);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -79,9 +122,21 @@ public:
     void setSceneSnapshotCallback(SceneSnapshotCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
+    // Schema message callbacks
+    void setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback);
+    void setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback);
+    void setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback);
+    void setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback);
+    void setSchemaNackCallback(SchemaNackCallback callback);
+    void setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback);
+
     // Property registry access (always valid after construction)
     PropertyRegistry& getPropertyRegistry() { return *_propertyRegistry; }
     const PropertyRegistry& getPropertyRegistry() const { return *_propertyRegistry; }
+
+    // Schema registry access (may be nullptr if not configured)
+    ComponentSchemaRegistry* getSchemaRegistry() { return _schemaRegistry; }
+    const ComponentSchemaRegistry* getSchemaRegistry() const { return _schemaRegistry; }
 
     // Statistics
     ConnectionStats getStats() const;
@@ -90,6 +145,7 @@ public:
     uint64_t getDuplicatePacketCount() const { return _duplicatePacketsReceived.load(std::memory_order_relaxed); }
     uint64_t getPacketLossEventCount() const { return _packetLossEvents.load(std::memory_order_relaxed); }
     uint64_t getSequenceUpdateFailureCount() const { return _sequenceUpdateFailures.load(std::memory_order_relaxed); }
+    uint64_t getUnknownSchemaDropCount() const { return _unknownSchemaDrops.load(std::memory_order_relaxed); }
 
 private:
     static std::string generateSessionId();
@@ -97,12 +153,44 @@ private:
     void onMessageReceived(const std::vector<uint8_t>& data);
     void onConnectionStateChanged(ConnectionState state);
     void handleReceivedMessage(const std::vector<uint8_t>& data);
+    void handleUnknownSchema(ComponentTypeHash typeHash);
 
     NetworkConnection* _connection; // Not owned, managed by ConnectionManager
 
     // Registry ownership model: external (non-owning) or internal (owned)
     PropertyRegistry* _propertyRegistry{nullptr};
     std::unique_ptr<PropertyRegistry> _ownedRegistry; // used when no external provided
+
+    // Schema registry: external (non-owning), optional
+    ComponentSchemaRegistry* _schemaRegistry{nullptr};
+
+    // NACK tracking
+    SchemaNackTracker _nackTracker;
+
+    // Unknown schema logging rate limiter
+    struct LogRateLimiter {
+        std::unordered_map<ComponentTypeHash, std::chrono::steady_clock::time_point> lastLogTimes;
+        std::mutex mutex;
+
+        bool shouldLog(ComponentTypeHash typeHash, std::chrono::milliseconds interval) {
+            std::lock_guard<std::mutex> lock(mutex);
+            auto now = std::chrono::steady_clock::now();
+            auto it = lastLogTimes.find(typeHash);
+
+            if (it == lastLogTimes.end()) {
+                lastLogTimes[typeHash] = now;
+                return true;
+            }
+
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
+            if (elapsed >= interval) {
+                it->second = now;
+                return true;
+            }
+            return false;
+        }
+    };
+    LogRateLimiter _logRateLimiter;
 
     std::string _sessionId;
 
@@ -113,6 +201,14 @@ private:
     SceneSnapshotCallback _sceneSnapshotCallback;
     ErrorCallback _errorCallback;
 
+    // Schema callbacks
+    RegisterSchemaResponseCallback _registerSchemaResponseCallback;
+    QueryPublicSchemasResponseCallback _queryPublicSchemasResponseCallback;
+    PublishSchemaResponseCallback _publishSchemaResponseCallback;
+    UnpublishSchemaResponseCallback _unpublishSchemaResponseCallback;
+    SchemaNackCallback _schemaNackCallback;
+    SchemaAdvertisementCallback _schemaAdvertisementCallback;
+
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
     std::atomic<uint32_t> _nextSendSequence{0};
     std::atomic<uint32_t> _lastReceivedSequence{0};
@@ -121,6 +217,7 @@ private:
     std::atomic<uint64_t> _duplicatePacketsReceived{0};
     std::atomic<uint64_t> _packetLossEvents{0};
     std::atomic<uint64_t> _sequenceUpdateFailures{0};  // CAS retry exhaustion
+    std::atomic<uint64_t> _unknownSchemaDrops{0};  // Count of unknown schemas encountered
 
     // Handshake state
     bool _handshakeComplete{false};

@@ -46,7 +46,11 @@ set(NETWORKING_SOURCES
     src/Networking/Core/PropertyHash.cpp
     src/Networking/Core/PropertyRegistry.cpp
     src/Networking/Core/PropertyTypes.cpp
+    src/Networking/Core/ComponentSchema.cpp
+    src/Networking/Core/ComponentSchemaRegistry.cpp
+    src/Networking/Core/SchemaNackTracker.cpp
     src/Networking/Protocol/MessageSerializer.cpp
+    src/Networking/Protocol/ComponentSchemaSerializer.cpp
     src/Networking/Protocol/WebDavAdapter.cpp
     src/Networking/Transport/WebRTCConnection.cpp
     src/Networking/Transport/ConnectionManager.cpp

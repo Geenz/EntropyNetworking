@@ -24,6 +24,16 @@ enum PropertyType {
     string @8;
     bool @9;
     bytes @10;
+
+    # Array types
+    int32Array @11;
+    int64Array @12;
+    float32Array @13;
+    float64Array @14;
+    vec2Array @15;
+    vec3Array @16;
+    vec4Array @17;
+    quatArray @18;
 }
 
 struct Vec2 {
@@ -90,10 +100,10 @@ struct PropertyUpdateBatch {
 struct PropertyRegistration {
     propertyHash @0 :PropertyHash128;
     entityId @1 :UInt64;
-    componentType @2 :Text;          # e.g., "Transform", "Player"
-    propertyName @3 :Text;           # e.g., "position", "health"
+    componentType @2 :PropertyHash128;  # ComponentTypeHash from ComponentSchema
+    propertyName @3 :Text;              # e.g., "position", "health"
     type @4 :PropertyType;
-    registeredAt @5 :UInt64;         # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
+    registeredAt @5 :UInt64;            # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
 }
 
 struct EntityCreated {
@@ -133,6 +143,95 @@ struct UnregisterEntityRequest {
 
 struct UnregisterEntityResponse {
     removedHashes @0 :List(PropertyHash128);
+}
+
+# ============================================================================
+# Component Schema Messages (Reliable Channel)
+# ============================================================================
+
+struct PropertyDefinitionData {
+    name @0 :Text;                   # Property name (e.g., "position", "health")
+    type @1 :PropertyType;           # Property type
+    offset @2 :UInt64;               # Byte offset within component struct
+    size @3 :UInt64;                 # Size in bytes
+    required @4 :Bool = true;        # Whether this property must be present (default: true)
+    defaultValue @5 :PropertyValue;  # Optional default value (check hasDefaultValue)
+    hasDefaultValue @6 :Bool = false; # Whether defaultValue is set
+}
+
+struct ComponentSchemaData {
+    typeHash @0 :PropertyHash128;    # Unique component type identifier
+    appId @1 :Text;                  # Originating application ID
+    componentName @2 :Text;          # Human-readable component name
+    schemaVersion @3 :UInt32;        # Schema version for evolution
+    structuralHash @4 :PropertyHash128; # Hash of field layout
+    properties @5 :List(PropertyDefinitionData);
+    totalSize @6 :UInt64;            # Total component size in bytes
+    isPublic @7 :Bool;               # Whether schema is published for discovery
+}
+
+struct RegisterSchemaRequest {
+    schema @0 :ComponentSchemaData;
+}
+
+struct RegisterSchemaResponse {
+    success @0 :Bool;
+    typeHash @1 :PropertyHash128;    # ComponentTypeHash on success
+    errorMessage @2 :Text;           # Error message on failure
+}
+
+struct QueryPublicSchemasRequest {
+    # Empty - requests all public schemas
+}
+
+struct QueryPublicSchemasResponse {
+    schemas @0 :List(ComponentSchemaData);
+}
+
+struct PublishSchemaRequest {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash to publish
+}
+
+struct PublishSchemaResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+struct UnpublishSchemaRequest {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash to unpublish
+}
+
+struct UnpublishSchemaResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# SchemaNack - Optional negative acknowledgment for unknown schemas
+#
+# Sent when a peer receives a message referencing an unknown ComponentTypeHash.
+# This is OPTIONAL feedback controlled by SchemaNackPolicy:
+# - Only sent when policy is enabled (default: disabled)
+# - Subject to per-schema rate limiting (default: 1000ms interval)
+# - Triggered by unknown ComponentTypeHash in ENTITY_CREATED messages
+# - Receiver should respond by advertising or registering the schema
+#
+# This is NOT a required acknowledgment - peers may silently drop unknown schemas.
+# Applications control NACK behavior via SchemaNackPolicy for their use case.
+struct SchemaNack {
+    typeHash @0 :PropertyHash128;    # Unknown ComponentTypeHash that triggered the NACK
+    reason @1 :Text;                 # Human-readable reason (e.g., "Schema not found in registry")
+    timestamp @2 :UInt64;            # When the NACK occurred (microseconds since epoch)
+}
+
+# SchemaAdvertisement - Proactive schema notification
+#
+# Sent to inform peers about available schemas without requiring a request.
+# Can be used in response to SchemaNack or proactively during connection setup.
+struct SchemaAdvertisement {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash being advertised
+    appId @1 :Text;                  # Application ID
+    componentName @2 :Text;          # Component name
+    schemaVersion @3 :UInt32;        # Schema version
 }
 
 # ============================================================================
@@ -198,12 +297,22 @@ struct Handshake {
     protocolVersion @0 :UInt32;
     clientType @1 :Text;             # "portal", "paint", "canvas"
     clientId @2 :Text;
+
+    # Capability flags (added for protocol evolution)
+    supportsSchemaMetadata @3 :Bool = false;  # Supports required/defaultValue in PropertyDefinitionData
+    supportsSchemaAck @4 :Bool = false;       # Supports acknowledgment of schema registration
+    supportsSchemaAdvert @5 :Bool = false;    # Supports schema advertisement/discovery
 }
 
 struct HandshakeResponse {
     success @0 :Bool;
     serverId @1 :Text;
     errorMessage @2 :Text;
+
+    # Server capabilities
+    supportsSchemaMetadata @3 :Bool = false;
+    supportsSchemaAck @4 :Bool = false;
+    supportsSchemaAdvert @5 :Bool = false;
 }
 
 struct Heartbeat {
@@ -249,5 +358,17 @@ struct Message {
         registerPropertiesResponse @14 :RegisterPropertiesResponse;
         unregisterEntityRequest @15 :UnregisterEntityRequest;
         unregisterEntityResponse @16 :UnregisterEntityResponse;
+
+        # Component schema registry
+        registerSchemaRequest @17 :RegisterSchemaRequest;
+        registerSchemaResponse @18 :RegisterSchemaResponse;
+        queryPublicSchemasRequest @19 :QueryPublicSchemasRequest;
+        queryPublicSchemasResponse @20 :QueryPublicSchemasResponse;
+        publishSchemaRequest @21 :PublishSchemaRequest;
+        publishSchemaResponse @22 :PublishSchemaResponse;
+        unpublishSchemaRequest @23 :UnpublishSchemaRequest;
+        unpublishSchemaResponse @24 :UnpublishSchemaResponse;
+        schemaNack @25 :SchemaNack;
+        schemaAdvertisement @26 :SchemaAdvertisement;
     }
 }
