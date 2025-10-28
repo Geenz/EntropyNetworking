@@ -136,6 +136,64 @@ struct UnregisterEntityResponse {
 }
 
 # ============================================================================
+# Component Schema Messages (Reliable Channel)
+# ============================================================================
+
+struct PropertyDefinitionData {
+    name @0 :Text;                   # Property name (e.g., "position", "health")
+    type @1 :PropertyType;           # Property type
+    offset @2 :UInt64;               # Byte offset within component struct
+    size @3 :UInt64;                 # Size in bytes
+}
+
+struct ComponentSchemaData {
+    typeHash @0 :PropertyHash128;    # Unique component type identifier
+    appId @1 :Text;                  # Originating application ID
+    componentName @2 :Text;          # Human-readable component name
+    schemaVersion @3 :UInt32;        # Schema version for evolution
+    structuralHash @4 :PropertyHash128; # Hash of field layout
+    properties @5 :List(PropertyDefinitionData);
+    totalSize @6 :UInt64;            # Total component size in bytes
+    isPublic @7 :Bool;               # Whether schema is published for discovery
+}
+
+struct RegisterSchemaRequest {
+    schema @0 :ComponentSchemaData;
+}
+
+struct RegisterSchemaResponse {
+    success @0 :Bool;
+    typeHash @1 :PropertyHash128;    # ComponentTypeHash on success
+    errorMessage @2 :Text;           # Error message on failure
+}
+
+struct QueryPublicSchemasRequest {
+    # Empty - requests all public schemas
+}
+
+struct QueryPublicSchemasResponse {
+    schemas @0 :List(ComponentSchemaData);
+}
+
+struct PublishSchemaRequest {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash to publish
+}
+
+struct PublishSchemaResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+struct UnpublishSchemaRequest {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash to unpublish
+}
+
+struct UnpublishSchemaResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# ============================================================================
 # Control Messages (Reliable Channel)
 # ============================================================================
 
@@ -249,5 +307,15 @@ struct Message {
         registerPropertiesResponse @14 :RegisterPropertiesResponse;
         unregisterEntityRequest @15 :UnregisterEntityRequest;
         unregisterEntityResponse @16 :UnregisterEntityResponse;
+
+        # Component schema registry
+        registerSchemaRequest @17 :RegisterSchemaRequest;
+        registerSchemaResponse @18 :RegisterSchemaResponse;
+        queryPublicSchemasRequest @19 :QueryPublicSchemasRequest;
+        queryPublicSchemasResponse @20 :QueryPublicSchemasResponse;
+        publishSchemaRequest @21 :PublishSchemaRequest;
+        publishSchemaResponse @22 :PublishSchemaResponse;
+        unpublishSchemaRequest @23 :UnpublishSchemaRequest;
+        unpublishSchemaResponse @24 :UnpublishSchemaResponse;
     }
 }
