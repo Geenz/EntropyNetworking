@@ -693,6 +693,41 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
+            case Message::HANDSHAKE: {
+                // Server-side handshake handling: automatically respond
+                auto handshake = message.getHandshake();
+
+                try {
+                    capnp::MallocMessageBuilder builder;
+                    auto msg = builder.initRoot<Message>();
+                    auto response = msg.initHandshakeResponse();
+
+                    response.setSuccess(true);
+                    response.setServerId(_sessionId);  // Use session ID as server ID
+                    response.setErrorMessage("");
+
+                    // Echo capability support back to client
+                    response.setSupportsSchemaMetadata(handshake.getSupportsSchemaMetadata());
+                    response.setSupportsSchemaAck(handshake.getSupportsSchemaAck());
+                    response.setSupportsSchemaAdvert(handshake.getSupportsSchemaAdvert());
+
+                    auto serialized = serialize(builder);
+                    if (serialized.success()) {
+                        _connection->send(serialized.value);
+                        _handshakeComplete = true;
+                    } else {
+                        if (_errorCallback) {
+                            _errorCallback(NetworkError::SerializationFailed, serialized.errorMessage);
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    if (_errorCallback) {
+                        _errorCallback(NetworkError::SerializationFailed, e.what());
+                    }
+                }
+                break;
+            }
+
             case Message::HANDSHAKE_RESPONSE: {
                 auto resp = message.getHandshakeResponse();
                 if (resp.getSuccess()) {

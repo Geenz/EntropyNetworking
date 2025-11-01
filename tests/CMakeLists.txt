@@ -19,6 +19,7 @@ add_executable(EntropyNetworkingTests
     ConnectionManagerLifecycleTests.cpp
     ManagerMetricsTests.cpp
     NetworkSessionNackTests.cpp
+    NetworkSessionHandshakeTests.cpp
     # WebDAVConnectionTests.cpp - REMOVED: WebDAVConnection no longer exists
     WebDAVPropfindParserTests.cpp
     # WebDAVBackendTests.cpp - REMOVED: Used mock WebDAVConnection
