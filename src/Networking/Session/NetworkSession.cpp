@@ -500,6 +500,11 @@ void NetworkSession::setSceneSnapshotCallback(SceneSnapshotCallback callback) {
     _sceneSnapshotCallback = std::move(callback);
 }
 
+void NetworkSession::setHandshakeCallback(HandshakeCallback callback) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _handshakeCallback = std::move(callback);
+}
+
 void NetworkSession::setErrorCallback(ErrorCallback callback) {
     std::lock_guard<std::mutex> lock(_mutex);
     _errorCallback = std::move(callback);
@@ -696,6 +701,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
             case Message::HANDSHAKE: {
                 // Server-side handshake handling: automatically respond
                 auto handshake = message.getHandshake();
+                std::string clientType = handshake.getClientType().cStr();
+                std::string clientId = handshake.getClientId().cStr();
 
                 try {
                     capnp::MallocMessageBuilder builder;
@@ -715,6 +722,11 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     if (serialized.success()) {
                         _connection->send(serialized.value);
                         _handshakeComplete = true;
+
+                        // Notify application that handshake is complete
+                        if (_handshakeCallback) {
+                            _handshakeCallback(clientType, clientId);
+                        }
                     } else {
                         if (_errorCallback) {
                             _errorCallback(NetworkError::SerializationFailed, serialized.errorMessage);

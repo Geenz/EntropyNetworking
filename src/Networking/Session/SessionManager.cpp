@@ -209,6 +209,24 @@ Result<void> SessionManager::setSceneSnapshotCallback(const SessionHandle& handl
     return Result<void>::ok();
 }
 
+Result<void> SessionManager::setHandshakeCallback(const SessionHandle& handle, HandshakeCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setHandshakeCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
 Result<void> SessionManager::setErrorCallback(const SessionHandle& handle, ErrorCallback callback) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");

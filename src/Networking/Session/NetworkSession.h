@@ -41,6 +41,7 @@ public:
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
+    using HandshakeCallback = std::function<void(const std::string& clientType, const std::string& clientId)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
 
     // Schema message callbacks
@@ -120,6 +121,7 @@ public:
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
     void setPropertyUpdateCallback(PropertyUpdateCallback callback);
     void setSceneSnapshotCallback(SceneSnapshotCallback callback);
+    void setHandshakeCallback(HandshakeCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
     // Schema message callbacks
@@ -199,6 +201,7 @@ private:
     EntityDestroyedCallback _entityDestroyedCallback;
     PropertyUpdateCallback _propertyUpdateCallback;
     SceneSnapshotCallback _sceneSnapshotCallback;
+    HandshakeCallback _handshakeCallback;
     ErrorCallback _errorCallback;
 
     // Schema callbacks

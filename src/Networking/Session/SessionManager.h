@@ -77,6 +77,7 @@ public:
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
+    using HandshakeCallback = std::function<void(const std::string& clientType, const std::string& clientId)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
 
     /**
@@ -142,6 +143,14 @@ public:
      * @return Result indicating success or failure
      */
     Result<void> setSceneSnapshotCallback(const SessionHandle& handle, SceneSnapshotCallback callback);
+
+    /**
+     * @brief Sets callback for Handshake completion (server-side)
+     * @param handle Session handle
+     * @param callback Callback function invoked when handshake completes
+     * @return Result indicating success or failure
+     */
+    Result<void> setHandshakeCallback(const SessionHandle& handle, HandshakeCallback callback);
 
     /**
      * @brief Sets callback for error conditions

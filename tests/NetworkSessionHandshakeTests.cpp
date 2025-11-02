@@ -280,3 +280,173 @@ TEST_F(NetworkSessionHandshakeTests, IncompleteHandshakeBlocksSending) {
     EXPECT_TRUE(result.failed());
     EXPECT_EQ(result.error, NetworkError::HandshakeFailed);
 }
+
+// Test: Handshake callback is invoked on server when handshake completes
+TEST_F(NetworkSessionHandshakeTests, ServerHandshakeCallbackInvoked) {
+    ASSERT_TRUE(connectSessions());
+
+    std::atomic<bool> callbackInvoked{false};
+    std::string receivedClientType;
+    std::string receivedClientId;
+    std::mutex callbackMutex;
+
+    // Set handshake callback on server
+    serverSession->setHandshakeCallback(
+        [&](const std::string& clientType, const std::string& clientId) {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            receivedClientType = clientType;
+            receivedClientId = clientId;
+            callbackInvoked = true;
+        });
+
+    // Client initiates handshake
+    auto handshakeResult = clientSession->performHandshake("TestClient", "client-123");
+    ASSERT_TRUE(handshakeResult.success()) << handshakeResult.errorMessage;
+
+    // Wait for handshake to complete and callback to be invoked
+    for (int i = 0; i < 100 && !callbackInvoked.load(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    // Verify callback was invoked with correct parameters
+    EXPECT_TRUE(callbackInvoked.load()) << "Server handshake callback should be invoked";
+    {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        EXPECT_EQ(receivedClientType, "TestClient");
+        EXPECT_EQ(receivedClientId, "client-123");
+    }
+
+    // Both sessions should have completed handshake
+    EXPECT_TRUE(serverSession->isHandshakeComplete());
+    EXPECT_TRUE(clientSession->isHandshakeComplete());
+}
+
+// Test: Handshake callback timing - invoked before messages can be sent
+TEST_F(NetworkSessionHandshakeTests, HandshakeCallbackTimingCorrect) {
+    ASSERT_TRUE(connectSessions());
+
+    std::atomic<bool> handshakeCallbackInvoked{false};
+    std::atomic<bool> canSendMessages{false};
+    std::condition_variable cv;
+    std::mutex mtx;
+
+    // Set handshake callback that signals when handshake completes
+    serverSession->setHandshakeCallback(
+        [&](const std::string& clientType, const std::string& clientId) {
+            handshakeCallbackInvoked = true;
+            // At this point, server should be able to send messages
+            auto result = serverSession->sendEntityCreated(999, "ServerApp", "ServerEntity", 0);
+            canSendMessages = result.success();
+            cv.notify_all();
+        });
+
+    // Client initiates handshake
+    auto handshakeResult = clientSession->performHandshake("TestClient", "client-001");
+    ASSERT_TRUE(handshakeResult.success());
+
+    // Wait for callback with timeout
+    {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait_for(lock, std::chrono::seconds(1), [&]{ return handshakeCallbackInvoked.load(); });
+    }
+
+    EXPECT_TRUE(handshakeCallbackInvoked.load()) << "Handshake callback should be invoked";
+    EXPECT_TRUE(canSendMessages.load()) << "Server should be able to send messages from within handshake callback";
+}
+
+// Test: Multiple sessions each get their own handshake callbacks
+TEST_F(NetworkSessionHandshakeTests, MultipleSessionHandshakeCallbacks) {
+    // Create first connection pair
+    ASSERT_TRUE(connectSessions());
+
+    std::atomic<int> handshakeCount{0};
+    std::string firstClientId;
+    std::string secondClientId;
+    std::mutex callbackMutex;
+
+    // Set handshake callback on first server session
+    serverSession->setHandshakeCallback(
+        [&](const std::string& clientType, const std::string& clientId) {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            firstClientId = clientId;
+            handshakeCount++;
+        });
+
+    // Client initiates handshake
+    auto handshake1 = clientSession->performHandshake("TestClient", "client-001");
+    ASSERT_TRUE(handshake1.success());
+
+    // Wait for first handshake
+    for (int i = 0; i < 100 && handshakeCount.load() < 1; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(handshakeCount.load(), 1);
+    {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        EXPECT_EQ(firstClientId, "client-001");
+    }
+
+    // Create second connection pair
+    std::string endpoint2 = "/tmp/entropy_handshake_test_multi_" + std::to_string(getTestCounter()) + ".sock";
+    auto serverMgr2 = std::make_unique<ConnectionManager>(8);
+    auto clientMgr2 = std::make_unique<ConnectionManager>(8);
+    auto server2 = createLocalServer(serverMgr2.get(), endpoint2);
+    ASSERT_TRUE(server2->listen().success());
+
+    ConnectionHandle serverConnHandle2;
+    std::thread serverThread([&]() {
+        serverConnHandle2 = server2->accept();
+    });
+
+    auto clientConnHandle2 = clientMgr2->openLocalConnection(endpoint2);
+    ASSERT_TRUE(clientConnHandle2.valid());
+    ASSERT_TRUE(clientConnHandle2.connect().success());
+
+    serverThread.join();
+    ASSERT_TRUE(serverConnHandle2.valid());
+
+    // Wait for connection
+    for (int i = 0; i < 100 && !clientConnHandle2.isConnected(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    auto* serverConn2 = serverMgr2->getConnectionPointer(serverConnHandle2);
+    auto* clientConn2 = clientMgr2->getConnectionPointer(clientConnHandle2);
+    ASSERT_NE(serverConn2, nullptr);
+    ASSERT_NE(clientConn2, nullptr);
+
+    auto serverSession2 = std::make_unique<NetworkSession>(serverConn2);
+    auto clientSession2 = std::make_unique<NetworkSession>(clientConn2);
+
+    // Set handshake callback on second server session
+    serverSession2->setHandshakeCallback(
+        [&](const std::string& clientType, const std::string& clientId) {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            secondClientId = clientId;
+            handshakeCount++;
+        });
+
+    // Second client initiates handshake
+    auto handshake2 = clientSession2->performHandshake("TestClient", "client-002");
+    ASSERT_TRUE(handshake2.success());
+
+    // Wait for second handshake
+    for (int i = 0; i < 100 && handshakeCount.load() < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(handshakeCount.load(), 2) << "Both handshake callbacks should be invoked";
+    {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        EXPECT_EQ(firstClientId, "client-001");
+        EXPECT_EQ(secondClientId, "client-002");
+    }
+
+    // Cleanup second connection
+    clientSession2.reset();
+    serverSession2.reset();
+    clientConnHandle2.close();
+    serverConnHandle2.close();
+    server2->close();
+}
