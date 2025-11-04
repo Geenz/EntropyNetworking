@@ -46,7 +46,8 @@ using namespace EntropyEngine::Core::TypeSystem;
  */
 template<typename T>
 struct TypeToPropertyType {
-    static_assert(sizeof(T) == 0, "Type not mapped to PropertyType - add specialization");
+    static_assert(!std::is_same_v<std::type_identity_t<T>, T>,
+                  "Type not mapped to PropertyType - add specialization");
 };
 
 // Fundamental types

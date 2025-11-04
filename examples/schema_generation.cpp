@@ -93,26 +93,39 @@ namespace EntropyEngine::Networking {
 // ============================================================================
 
 // If your application uses third-party vector libraries (e.g., GLM),
-// you can extend the type mapping system:
+// you can extend the type mapping system.
+//
+// IMPORTANT: Runtime mapping functions must be defined in YOUR application's
+// namespace (not EntropyEngine::Networking) to avoid infinite recursion.
 //
 // #include <glm/glm.hpp>
 //
-// namespace EntropyEngine::Networking {
-//     template<> struct TypeToPropertyType<glm::vec3> {
-//         static constexpr PropertyType value = PropertyType::Vec3;
-//     };
+// namespace MyApp {
+//     using namespace EntropyEngine::Core::TypeSystem;
+//     using namespace EntropyEngine::Networking;
 //
-//     // Extend runtime mapping
+//     // Compile-time mapping (in EntropyEngine::Networking namespace)
+//     namespace EntropyEngine::Networking {
+//         template<> struct TypeToPropertyType<glm::vec3> {
+//             static constexpr PropertyType value = PropertyType::Vec3;
+//         };
+//     }
+//
+//     // Runtime mapping (in YOUR namespace, calls EntropyEngine::Networking:: fallback)
 //     inline std::optional<PropertyType> mapTypeIdToPropertyType(TypeID typeId) {
 //         if (typeId == createTypeId<glm::vec3>()) return PropertyType::Vec3;
-//         return EntropyEngine::Networking::mapTypeIdToPropertyType(typeId);
+//         // Fall back to EntropyNetworking defaults
+//         return ::EntropyEngine::Networking::mapTypeIdToPropertyType(typeId);
 //     }
 //
 //     inline size_t getFieldSize(TypeID typeId) {
 //         if (typeId == createTypeId<glm::vec3>()) return sizeof(glm::vec3);
-//         return EntropyEngine::Networking::getFieldSize(typeId);
+//         // Fall back to EntropyNetworking defaults
+//         return ::EntropyEngine::Networking::getFieldSize(typeId);
 //     }
 // }
+//
+// See CanvasEngine/src/Core/SchemaGeneration.h for a complete working example.
 
 // ============================================================================
 // Main example
