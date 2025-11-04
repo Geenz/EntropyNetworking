@@ -57,7 +57,8 @@ TEST(SchemaNackTrackerTests, RateLimitingSameSchema) {
     EXPECT_FALSE(tracker.shouldSendNack(hash1));
 
     // After interval - should send again
-    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    // Add 10ms buffer to account for sleep_for imprecision and thread scheduling
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));  // Total: 120ms > 100ms
     EXPECT_TRUE(tracker.shouldSendNack(hash1));
 }
 
