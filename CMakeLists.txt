@@ -11,11 +11,32 @@ project(EntropyNetworking
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "EntropyNetworking only supports static linking" FORCE)
 option(BUILD_TESTS "Enable/build tests for EntropyNetworking" ON)
 option(BUILD_EXAMPLES "Build EntropyNetworking example executables" ON)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" ON)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Configure sanitizers
+if(ENABLE_SANITIZERS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+        message(STATUS "Sanitizers enabled: AddressSanitizer (ASAN) and UndefinedBehaviorSanitizer (UBSAN)")
+
+        # ThreadSanitizer is mutually exclusive with AddressSanitizer
+        # To use TSAN instead: cmake -DENABLE_TSAN=ON
+        if(ENABLE_TSAN)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+            message(STATUS "ThreadSanitizer (TSAN) enabled (replaces ASAN)")
+        endif()
+    else()
+        message(WARNING "Sanitizers requested but not supported by ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+endif()
 
 # Configure vcpkg
 if(DEFINED CMAKE_TOOLCHAIN_FILE)

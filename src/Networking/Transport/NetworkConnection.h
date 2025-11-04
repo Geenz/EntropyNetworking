@@ -146,6 +146,15 @@ public:
         _stateCallback = std::move(callback);
     }
 
+    /**
+     * @brief Check if callbacks are being shut down (safe for use in static callbacks)
+     *
+     * @return true if shutdownCallbacks() has been called
+     */
+    bool isShuttingDown() const noexcept {
+        return _callbacksShutdown.load(std::memory_order_acquire);
+    }
+
 protected:
     NetworkConnection() = default;
 

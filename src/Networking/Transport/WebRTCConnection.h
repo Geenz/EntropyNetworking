@@ -141,7 +141,6 @@ namespace EntropyEngine::Networking {
         std::atomic<bool> _unreliableDataChannelOpen{false};
 
         std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
-        std::atomic<bool> _destroying{false};
 
         // Perfect negotiation: Mozilla pattern flags (RFC 8831)
         std::atomic<bool> _makingOffer{false};

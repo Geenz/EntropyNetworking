@@ -358,7 +358,7 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
     for (int attempt = 0; attempt < attempts; ++attempt) {
         CURL* curl = curl_easy_init();
         if (!curl) {
-            return HttpResponse{0, "Failed to initialize curl", {}, {}};
+            return HttpResponse{0, "Failed to initialize curl", {}, {}, {}};
         }
 
         ResponseData respData;

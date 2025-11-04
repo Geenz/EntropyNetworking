@@ -55,11 +55,15 @@ namespace EntropyEngine::Networking {
     }
 
     WebRTCConnection::~WebRTCConnection() {
-        _destroying.store(true, std::memory_order_release);
-        disconnect();
-        shutdownCallbacks();
+        // CRITICAL ORDER:
+        // 1. Close C API resources FIRST (triggers "closed" callbacks from libdatachannel threads)
+        // 2. THEN shutdown callbacks and wait (ensures those callbacks complete before destruction)
+        // This prevents use-after-free where rtcDelete* functions trigger callbacks
+        // that access the object after shutdownCallbacks() has already waited.
 
-        // C API guarantees blocking until all callbacks complete
+        disconnect();
+
+        // Delete C API objects - these trigger onClosedCallback from background threads
         if (_dataChannelId >= 0) {
             rtcDeleteDataChannel(_dataChannelId);
             _dataChannelId = -1;
@@ -75,14 +79,18 @@ namespace EntropyEngine::Networking {
             _peerConnectionId = -1;
         }
 
+        // NOW shutdown callbacks and wait for any callbacks triggered by the deletes above
+        shutdownCallbacks();
+
         setMessageCallback(nullptr);
         setStateCallback(nullptr);
     }
 
     // C API callback adapters
     void WebRTCConnection::onLocalDescriptionCallback(int, const char* sdp, const char* type, void* user) {
+        // SAFETY: Cast to base class first to safely check shutdown flag before accessing derived members
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         ENTROPY_LOG_DEBUG(std::string("onLocalDescription: type=") + (type?type:"(null)") +
                           ", polite=" + (self->_polite ? "true" : "false") +
@@ -97,8 +105,8 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onLocalCandidateCallback(int, const char* cand, const char* mid, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         ENTROPY_LOG_DEBUG(std::string("onLocalCandidate: mid=") + (mid?mid:"(null)") +
                           ", len=" + std::to_string(cand ? (int)std::strlen(cand) : 0));
@@ -108,8 +116,8 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onStateChangeCallback(int, rtcState state, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         std::optional<ConnectionState> pending;
         {
@@ -147,14 +155,14 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onSignalingStateChangeCallback(int, rtcSignalingState state, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         self->_signalingState.store(state, std::memory_order_release);
 
@@ -177,8 +185,8 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onDataChannelCallback(int, int dc, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         char label[256];
         if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
@@ -207,8 +215,8 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onOpenCallback(int id, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -258,14 +266,14 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onClosedCallback(int id, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -296,14 +304,14 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
+        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
         auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
 
         // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
         if (size <= 0) return;
@@ -324,7 +332,7 @@ namespace EntropyEngine::Networking {
                 std::chrono::system_clock::now().time_since_epoch()).count();
         }
 
-        if (!self->_destroying.load(std::memory_order_acquire)) {
+        if (!self->isShuttingDown()) {
             self->onMessageReceived(data);
         }
     }
@@ -434,7 +442,7 @@ namespace EntropyEngine::Networking {
         }
 
         // Notify observers outside the lock
-        if (pending && !_destroying.load(std::memory_order_acquire)) {
+        if (pending && !isShuttingDown()) {
             onStateChanged(*pending);
         }
 
@@ -457,7 +465,7 @@ namespace EntropyEngine::Networking {
             pending = ConnectionState::Disconnected;
         }
 
-        if (pending && !_destroying.load(std::memory_order_acquire)) {
+        if (pending && !isShuttingDown()) {
             onStateChanged(*pending);
         }
 
