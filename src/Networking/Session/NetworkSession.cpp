@@ -51,12 +51,34 @@ NetworkSession::NetworkSession(NetworkConnection* connection,
 }
 
 NetworkSession::~NetworkSession() {
+    // Set shutdown flag to prevent new callback invocations
+    _shuttingDown.store(true, std::memory_order_release);
+
+    // Wait for active callbacks to complete
+    while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
+        std::this_thread::yield();
+    }
+
     if (_connection) {
-        // Clear callbacks before releasing to prevent use-after-free
+        // Clear connection callbacks and release
         _connection->setMessageCallback(nullptr);
         _connection->setStateCallback(nullptr);
         _connection->release();
     }
+
+    // Clear all callbacks - safe now that active count is zero
+    _entityCreatedCallback = nullptr;
+    _entityDestroyedCallback = nullptr;
+    _propertyUpdateCallback = nullptr;
+    _sceneSnapshotCallback = nullptr;
+    _handshakeCallback = nullptr;
+    _errorCallback = nullptr;
+    _registerSchemaResponseCallback = nullptr;
+    _queryPublicSchemasResponseCallback = nullptr;
+    _publishSchemaResponseCallback = nullptr;
+    _unpublishSchemaResponseCallback = nullptr;
+    _schemaNackCallback = nullptr;
+    _schemaAdvertisementCallback = nullptr;
 }
 
 Result<void> NetworkSession::connect() {
@@ -484,61 +506,97 @@ Result<void> NetworkSession::sendSchemaAdvertisement(
 }
 
 void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _entityCreatedCallback = std::move(callback);
 }
 
 void NetworkSession::setEntityDestroyedCallback(EntityDestroyedCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _entityDestroyedCallback = std::move(callback);
 }
 
 void NetworkSession::setPropertyUpdateCallback(PropertyUpdateCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _propertyUpdateCallback = std::move(callback);
 }
 
 void NetworkSession::setSceneSnapshotCallback(SceneSnapshotCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _sceneSnapshotCallback = std::move(callback);
 }
 
 void NetworkSession::setHandshakeCallback(HandshakeCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _handshakeCallback = std::move(callback);
 }
 
 void NetworkSession::setErrorCallback(ErrorCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _errorCallback = std::move(callback);
 }
 
 void NetworkSession::setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _registerSchemaResponseCallback = std::move(callback);
 }
 
 void NetworkSession::setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _queryPublicSchemasResponseCallback = std::move(callback);
 }
 
 void NetworkSession::setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _publishSchemaResponseCallback = std::move(callback);
 }
 
 void NetworkSession::setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _unpublishSchemaResponseCallback = std::move(callback);
 }
 
 void NetworkSession::setSchemaNackCallback(SchemaNackCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _schemaNackCallback = std::move(callback);
 }
 
 void NetworkSession::setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return; // Don't set callbacks during shutdown
+    }
     std::lock_guard<std::mutex> lock(_mutex);
     _schemaAdvertisementCallback = std::move(callback);
 }
@@ -582,13 +640,20 @@ void NetworkSession::onConnectionStateChanged(ConnectionState state) {
 }
 
 void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
+    // Check shutdown flag with acquire ordering - if true, we see all callback clears
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
     try {
         // Deserialize the message
         auto deserialized = deserialize(data);
         if (deserialized.failed()) {
-            if (_errorCallback) {
+            _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+            if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                 _errorCallback(deserialized.error, deserialized.errorMessage);
             }
+            _activeCallbacks.fetch_sub(1, std::memory_order_release);
             return;
         }
 
@@ -628,22 +693,25 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
                 // Invoke callback regardless of schema validation
                 // Application layer decides how to handle entities with unknown schemas
-                if (_entityCreatedCallback) {
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _entityCreatedCallback) {
                     _entityCreatedCallback(
                         entityCreated.getEntityId(),
                         std::string(entityCreated.getAppId().cStr()),
                         std::string(entityCreated.getTypeName().cStr()),
-                        entityCreated.getParentId()
-                    );
+                        entityCreated.getParentId());
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::ENTITY_DESTROYED: {
-                if (_entityDestroyedCallback) {
-                    auto entityDestroyed = message.getEntityDestroyed();
+                auto entityDestroyed = message.getEntityDestroyed();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _entityDestroyedCallback) {
                     _entityDestroyedCallback(entityDestroyed.getEntityId());
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
@@ -688,16 +756,20 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     return;
                 }
 
-                if (_propertyUpdateCallback) {
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _propertyUpdateCallback) {
                     _propertyUpdateCallback(data);
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::SCENE_SNAPSHOT_CHUNK: {
-                if (_sceneSnapshotCallback) {
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _sceneSnapshotCallback) {
                     _sceneSnapshotCallback(data);
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
@@ -727,18 +799,24 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                         _handshakeComplete = true;
 
                         // Notify application that handshake is complete
-                        if (_handshakeCallback) {
+                        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                        if (!_shuttingDown.load(std::memory_order_acquire) && _handshakeCallback) {
                             _handshakeCallback(clientType, clientId);
                         }
+                        _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     } else {
-                        if (_errorCallback) {
+                        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                        if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                             _errorCallback(NetworkError::SerializationFailed, serialized.errorMessage);
                         }
+                        _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     }
                 } catch (const std::exception& e) {
-                    if (_errorCallback) {
+                    _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                    if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                         _errorCallback(NetworkError::SerializationFailed, e.what());
                     }
+                    _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 }
                 break;
             }
@@ -748,111 +826,128 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 if (resp.getSuccess()) {
                     _handshakeComplete = true;
                 } else {
-                    if (_errorCallback) {
+                    _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                    if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                         _errorCallback(NetworkError::HandshakeFailed,
                                      std::string(resp.getErrorMessage().cStr()));
                     }
+                    _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     disconnect();
                 }
                 break;
             }
 
             case Message::REGISTER_SCHEMA_RESPONSE: {
-                if (_registerSchemaResponseCallback) {
-                    auto resp = message.getRegisterSchemaResponse();
+                auto resp = message.getRegisterSchemaResponse();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _registerSchemaResponseCallback) {
                     _registerSchemaResponseCallback(
                         resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr())
-                    );
+                        std::string(resp.getErrorMessage().cStr()));
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::QUERY_PUBLIC_SCHEMAS_RESPONSE: {
-                if (_queryPublicSchemasResponseCallback) {
-                    auto resp = message.getQueryPublicSchemasResponse();
-                    auto schemasReader = resp.getSchemas();
+                auto resp = message.getQueryPublicSchemasResponse();
+                auto schemasReader = resp.getSchemas();
 
-                    std::vector<ComponentSchema> schemas;
-                    schemas.reserve(schemasReader.size());
+                std::vector<ComponentSchema> schemas;
+                schemas.reserve(schemasReader.size());
 
-                    for (auto schemaReader : schemasReader) {
-                        auto result = deserializeComponentSchema(schemaReader);
-                        if (result.success()) {
-                            schemas.push_back(std::move(result.value));
-                        } else if (_errorCallback) {
+                for (auto schemaReader : schemasReader) {
+                    auto result = deserializeComponentSchema(schemaReader);
+                    if (result.success()) {
+                        schemas.push_back(std::move(result.value));
+                    } else {
+                        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                        if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                             _errorCallback(result.error, result.errorMessage);
                         }
+                        _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     }
+                }
 
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _queryPublicSchemasResponseCallback) {
                     _queryPublicSchemasResponseCallback(schemas);
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::PUBLISH_SCHEMA_RESPONSE: {
-                if (_publishSchemaResponseCallback) {
-                    auto resp = message.getPublishSchemaResponse();
+                auto resp = message.getPublishSchemaResponse();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _publishSchemaResponseCallback) {
                     _publishSchemaResponseCallback(
                         resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr())
-                    );
+                        std::string(resp.getErrorMessage().cStr()));
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::UNPUBLISH_SCHEMA_RESPONSE: {
-                if (_unpublishSchemaResponseCallback) {
-                    auto resp = message.getUnpublishSchemaResponse();
+                auto resp = message.getUnpublishSchemaResponse();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _unpublishSchemaResponseCallback) {
                     _unpublishSchemaResponseCallback(
                         resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr())
-                    );
+                        std::string(resp.getErrorMessage().cStr()));
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::SCHEMA_NACK: {
-                if (_schemaNackCallback) {
-                    auto nack = message.getSchemaNack();
-                    auto typeHashReader = nack.getTypeHash();
-                    ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                auto nack = message.getSchemaNack();
+                auto typeHashReader = nack.getTypeHash();
+                ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _schemaNackCallback) {
                     _schemaNackCallback(
                         typeHash,
                         std::string(nack.getReason().cStr()),
-                        nack.getTimestamp()
-                    );
+                        nack.getTimestamp());
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             case Message::SCHEMA_ADVERTISEMENT: {
-                if (_schemaAdvertisementCallback) {
-                    auto advert = message.getSchemaAdvertisement();
-                    auto typeHashReader = advert.getTypeHash();
-                    ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                auto advert = message.getSchemaAdvertisement();
+                auto typeHashReader = advert.getTypeHash();
+                ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _schemaAdvertisementCallback) {
                     _schemaAdvertisementCallback(
                         typeHash,
                         std::string(advert.getAppId().cStr()),
                         std::string(advert.getComponentName().cStr()),
-                        advert.getSchemaVersion()
-                    );
+                        advert.getSchemaVersion());
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
             default:
                 // Unknown or unhandled message type
-                if (_errorCallback) {
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                     _errorCallback(NetworkError::InvalidMessage, "Unknown message type");
                 }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
         }
 
     } catch (const std::exception& e) {
-        if (_errorCallback) {
+        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+        if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
             _errorCallback(NetworkError::DeserializationFailed, e.what());
         }
+        _activeCallbacks.fetch_sub(1, std::memory_order_release);
     }
 }
 

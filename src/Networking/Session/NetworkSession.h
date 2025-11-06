@@ -227,6 +227,10 @@ private:
     std::string _clientType;
     std::string _clientId;
 
+    // Shutdown coordination
+    std::atomic<bool> _shuttingDown{false};
+    std::atomic<uint32_t> _activeCallbacks{0};
+
     mutable std::mutex _mutex;
 };
 
