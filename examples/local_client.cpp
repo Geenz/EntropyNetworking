@@ -5,12 +5,13 @@
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Session/SessionManager.h"
 #include "../src/Networking/Core/ConnectionTypes.h"
-#include <iostream>
+#include <Logging/Logger.h>
 #include <thread>
 #include <chrono>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <format>
 
 using namespace std;
 using namespace EntropyEngine::Networking;
@@ -19,8 +20,8 @@ int main() {
     const string socketPath = "/tmp/entropy_local.sock";
 
     try {
-        cout << "Starting EntropyNetworking Local Client" << endl;
-        cout << "Connecting to: " << socketPath << endl;
+        ENTROPY_LOG_INFO("Starting EntropyNetworking Local Client");
+        ENTROPY_LOG_INFO(std::format("Connecting to: {}", socketPath));
 
         // Create connection manager
         ConnectionManager connMgr(64);
@@ -29,11 +30,11 @@ int main() {
         // This will use Unix socket on Linux/macOS, Named Pipe on Windows
         auto conn = connMgr.openLocalConnection(socketPath);
         if (!conn.valid()) {
-            cerr << "Failed to create local connection" << endl;
+            ENTROPY_LOG_ERROR("Failed to create local connection");
             return 1;
         }
 
-        cout << "Connection created, state: " << static_cast<int>(conn.getState()) << endl;
+        ENTROPY_LOG_INFO(std::format("Connection created, state: {}", static_cast<int>(conn.getState())));
 
         // Set up synchronization for connection state
         mutex connMutex;
@@ -48,30 +49,30 @@ int main() {
         conn.setStateCallback([&](ConnectionState state) {
             lock_guard<mutex> lock(connMutex);
             if (state == ConnectionState::Connected) {
-                cout << "State callback: Connected!" << endl;
+                ENTROPY_LOG_INFO("State callback: Connected!");
                 isConnected = true;
                 connCV.notify_one();
             } else if (state == ConnectionState::Failed) {
-                cout << "State callback: Connection failed" << endl;
+                ENTROPY_LOG_INFO("State callback: Connection failed");
                 connectionFailed = true;
                 connCV.notify_one();
             } else if (state == ConnectionState::Disconnected) {
-                cout << "State callback: Disconnected" << endl;
+                ENTROPY_LOG_INFO("State callback: Disconnected");
             }
         });
 
         // Set message callback using convenient API
         conn.setMessageCallback([&messagesReceived](const vector<uint8_t>& data) {
             string message(data.begin(), data.end());
-            cout << "Received message: " << message << endl;
+            ENTROPY_LOG_INFO(std::format("Received message: {}", message));
             messagesReceived++;
         });
 
         // Connect to server
-        cout << "Connecting..." << endl;
+        ENTROPY_LOG_INFO("Connecting...");
         auto result = conn.connect();
         if (result.failed()) {
-            cerr << "Failed to connect: " << result.errorMessage << endl;
+            ENTROPY_LOG_ERROR(std::format("Failed to connect: {}", result.errorMessage));
             return 1;
         }
 
@@ -79,17 +80,17 @@ int main() {
         {
             unique_lock<mutex> lock(connMutex);
             if (!connCV.wait_for(lock, chrono::seconds(5), [&]{ return isConnected || connectionFailed; })) {
-                cerr << "Connection timeout" << endl;
+                ENTROPY_LOG_ERROR("Connection timeout");
                 return 1;
             }
 
             if (connectionFailed) {
-                cerr << "Connection failed" << endl;
+                ENTROPY_LOG_ERROR("Connection failed");
                 return 1;
             }
         }
 
-        cout << "Connected! State: " << static_cast<int>(conn.getState()) << endl;
+        ENTROPY_LOG_INFO(std::format("Connected! State: {}", static_cast<int>(conn.getState())));
 
         // Wait for welcome message
         this_thread::sleep_for(chrono::milliseconds(500));
@@ -103,12 +104,12 @@ int main() {
         };
 
         for (const auto& msg : messages) {
-            cout << "Sending: " << msg << endl;
+            ENTROPY_LOG_INFO(std::format("Sending: {}", msg));
             vector<uint8_t> data(msg.begin(), msg.end());
             auto sendResult = conn.send(data);
 
             if (sendResult.failed()) {
-                cerr << "Failed to send: " << sendResult.errorMessage << endl;
+                ENTROPY_LOG_ERROR(std::format("Failed to send: {}", sendResult.errorMessage));
                 break;
             }
 
@@ -121,22 +122,24 @@ int main() {
 
         // Display statistics
         auto stats = conn.getStats();
-        cout << "\nConnection Statistics:" << endl;
-        cout << "  Bytes sent: " << stats.bytesSent << endl;
-        cout << "  Bytes received: " << stats.bytesReceived << endl;
-        cout << "  Messages sent: " << stats.messagesSent << endl;
-        cout << "  Messages received: " << stats.messagesReceived << endl;
-        cout << "  Messages processed: " << messagesReceived << endl;
-        cout << "  Connection time: " << stats.connectTime << " ms since epoch" << endl;
+        ENTROPY_LOG_INFO("");
+        ENTROPY_LOG_INFO("Connection Statistics:");
+        ENTROPY_LOG_INFO(std::format("  Bytes sent: {}", stats.bytesSent));
+        ENTROPY_LOG_INFO(std::format("  Bytes received: {}", stats.bytesReceived));
+        ENTROPY_LOG_INFO(std::format("  Messages sent: {}", stats.messagesSent));
+        ENTROPY_LOG_INFO(std::format("  Messages received: {}", stats.messagesReceived));
+        ENTROPY_LOG_INFO(std::format("  Messages processed: {}", messagesReceived.load()));
+        ENTROPY_LOG_INFO(std::format("  Connection time: {} ms since epoch", stats.connectTime));
 
         // Disconnect
-        cout << "\nDisconnecting..." << endl;
+        ENTROPY_LOG_INFO("");
+        ENTROPY_LOG_INFO("Disconnecting...");
         conn.disconnect();
 
-        cout << "Client shutdown complete" << endl;
+        ENTROPY_LOG_INFO("Client shutdown complete");
 
     } catch (const exception& e) {
-        cerr << "Error: " << e.what() << endl;
+        ENTROPY_LOG_ERROR(std::format("Error: {}", e.what()));
         return 1;
     }
 

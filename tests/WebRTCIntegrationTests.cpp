@@ -44,19 +44,26 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
     // Register peers with signaling helper
     signaling.setPeers(&peer1, &peer2);
 
-    // Track connection state
-    std::atomic<bool> peer1Connected{false};
-    std::atomic<bool> peer2Connected{false};
+    // Track connection state - use shared_ptr to prevent stack-use-after-scope
+    // when callbacks fire from libdatachannel threads after test ends
+    struct State {
+        std::mutex mutex;
+        bool peer1Connected = false;
+        bool peer2Connected = false;
+    };
+    auto state = std::make_shared<State>();
 
-    peer1.setStateCallback([&peer1Connected](ConnectionState state) {
-        if (state == ConnectionState::Connected) {
-            peer1Connected = true;
+    peer1.setStateCallback([state](ConnectionState connState) {
+        if (connState == ConnectionState::Connected) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->peer1Connected = true;
         }
     });
 
-    peer2.setStateCallback([&peer2Connected](ConnectionState state) {
-        if (state == ConnectionState::Connected) {
-            peer2Connected = true;
+    peer2.setStateCallback([state](ConnectionState connState) {
+        if (connState == ConnectionState::Connected) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->peer2Connected = true;
         }
     });
 
@@ -74,11 +81,15 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
     bool connected = false;
     for (int i = 0; i < 150 && !connected; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        connected = peer1Connected.load() && peer2Connected.load();
+        std::lock_guard<std::mutex> lock(state->mutex);
+        connected = state->peer1Connected && state->peer2Connected;
     }
 
-    EXPECT_TRUE(peer1Connected.load()) << "Peer 1 failed to connect within timeout";
-    EXPECT_TRUE(peer2Connected.load()) << "Peer 2 failed to connect within timeout";
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        EXPECT_TRUE(state->peer1Connected) << "Peer 1 failed to connect within timeout";
+        EXPECT_TRUE(state->peer2Connected) << "Peer 2 failed to connect within timeout";
+    }
     EXPECT_TRUE(peer1.isConnected());
     EXPECT_TRUE(peer2.isConnected());
 
@@ -88,12 +99,18 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
 
     // If connection succeeded, test message exchange
     if (peer1.isConnected() && peer2.isConnected()) {
-        std::atomic<bool> peer2GotMessage{false};
-        std::vector<uint8_t> receivedData;
+        // Use shared_ptr to prevent stack-use-after-scope
+        struct MessageState {
+            std::mutex mutex;
+            bool gotMessage = false;
+            std::vector<uint8_t> receivedData;
+        };
+        auto msgState = std::make_shared<MessageState>();
 
-        peer2.setMessageCallback([&peer2GotMessage, &receivedData](const std::vector<uint8_t>& data) {
-            receivedData = data;
-            peer2GotMessage = true;
+        peer2.setMessageCallback([msgState](const std::vector<uint8_t>& data) {
+            std::lock_guard<std::mutex> lock(msgState->mutex);
+            msgState->receivedData = data;
+            msgState->gotMessage = true;
         });
 
         // Send message from peer1 to peer2
@@ -104,12 +121,18 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
         ASSERT_TRUE(sendResult.success()) << sendResult.errorMessage;
 
         // Wait for message (up to 5 seconds)
-        for (int i = 0; i < 50 && !peer2GotMessage.load(); ++i) {
+        bool gotMsg = false;
+        for (int i = 0; i < 50 && !gotMsg; ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::lock_guard<std::mutex> lock(msgState->mutex);
+            gotMsg = msgState->gotMessage;
         }
 
-        EXPECT_TRUE(peer2GotMessage.load()) << "Peer 2 did not receive message";
-        EXPECT_EQ(receivedData, sendData);
+        {
+            std::lock_guard<std::mutex> lock(msgState->mutex);
+            EXPECT_TRUE(msgState->gotMessage) << "Peer 2 did not receive message";
+            EXPECT_EQ(msgState->receivedData, sendData);
+        }
 
         // Verify stats
         auto stats1 = peer1.getStats();

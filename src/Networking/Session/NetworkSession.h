@@ -223,7 +223,7 @@ private:
     std::atomic<uint64_t> _unknownSchemaDrops{0};  // Count of unknown schemas encountered
 
     // Handshake state
-    bool _handshakeComplete{false};
+    std::atomic<bool> _handshakeComplete{false};
     std::string _clientType;
     std::string _clientId;
 

@@ -110,6 +110,41 @@ namespace EntropyEngine::Networking {
             Destroyed          // Peer connection destroyed, no further ops allowed
         };
 
+        // Callback context for safe callback lifetime management
+        // Passed as void* user pointer to libdatachannel C API
+        // Uses reference counting to track active callbacks
+        struct CallbackContext {
+            WebRTCConnection* connection;
+            std::atomic<bool> valid{true};
+            std::atomic<int> activeCallbacks{0};  // Count of callbacks currently executing
+        };
+
+        // RAII guard for callback execution tracking
+        // Increments activeCallbacks on entry, decrements on exit
+        struct CallbackGuard {
+            CallbackContext* ctx;
+
+            explicit CallbackGuard(CallbackContext* c) : ctx(c) {
+                if (ctx) ctx->activeCallbacks.fetch_add(1, std::memory_order_acquire);
+            }
+
+            ~CallbackGuard() {
+                if (ctx) ctx->activeCallbacks.fetch_sub(1, std::memory_order_release);
+            }
+
+            // Non-copyable, non-movable
+            CallbackGuard(const CallbackGuard&) = delete;
+            CallbackGuard& operator=(const CallbackGuard&) = delete;
+
+            bool isValid() const {
+                return ctx && ctx->valid.load(std::memory_order_acquire);
+            }
+
+            WebRTCConnection* getConnection() const {
+                return ctx ? ctx->connection : nullptr;
+            }
+        };
+
         void setupPeerConnection();
         void setupDataChannel();
         void setupUnreliableDataChannel();
@@ -124,6 +159,13 @@ namespace EntropyEngine::Networking {
         static void onOpenCallback(int id, void* user);
         static void onClosedCallback(int id, void* user);
         static void onMessageCallback(int id, const char* message, int size, void* user);
+
+        // Callback context - deleted after all active callbacks complete
+        // libdatachannel may fire callbacks from background threads even after
+        // rtcSetXXXCallback(id, nullptr) is called. We use reference counting
+        // (activeCallbacks) to track executing callbacks and wait for them to
+        // complete before deleting the context in the destructor.
+        CallbackContext* _callbackContext;
 
         WebRTCConfig _config;
         SignalingCallbacks _signalingCallbacks;

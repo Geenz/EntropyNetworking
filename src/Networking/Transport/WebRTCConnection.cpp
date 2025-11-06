@@ -46,7 +46,8 @@ namespace EntropyEngine::Networking {
         SignalingCallbacks signalingCallbacks,
         std::string dataChannelLabel
     )
-        : _config(std::move(config))
+        : _callbackContext(new CallbackContext{this, true})  // Intentionally leaked
+        , _config(std::move(config))
         , _signalingCallbacks(std::move(signalingCallbacks))
         , _dataChannelLabel(std::move(dataChannelLabel))
         , _unreliableChannelLabel(_dataChannelLabel + "-unreliable")
@@ -55,15 +56,39 @@ namespace EntropyEngine::Networking {
     }
 
     WebRTCConnection::~WebRTCConnection() {
-        // CRITICAL ORDER:
-        // 1. Close C API resources FIRST (triggers "closed" callbacks from libdatachannel threads)
-        // 2. THEN shutdown callbacks and wait (ensures those callbacks complete before destruction)
-        // This prevents use-after-free where rtcDelete* functions trigger callbacks
-        // that access the object after shutdownCallbacks() has already waited.
+        // CRITICAL ORDER (understanding libdatachannel mechanics):
+        // 1. Invalidate context (so callbacks that are ALREADY executing will early-return)
+        // 2. Set user pointers to nullptr (prevents NEW callbacks from getting our pointer)
+        // 3. Delete resources (closes connections, stops new callbacks from being queued)
+        // 4. Wait for active callbacks to complete (callbacks that got pointer before step 2)
+        // 5. Delete context (safe - no more references)
+
+        // Step 1: Invalidate callback context
+        _callbackContext->valid.store(false, std::memory_order_release);
+
+        // Clear user callbacks
+        setMessageCallback(nullptr);
+        setStateCallback(nullptr);
 
         disconnect();
 
-        // Delete C API objects - these trigger onClosedCallback from background threads
+        // Set shutdown flag (for NetworkConnection base class tracking)
+        shutdownCallbacks();
+
+        // Step 2: Clear user pointers in libdatachannel
+        // This prevents NEW callbacks from getting our _callbackContext pointer
+        // because callbacks check: if (auto ptr = getUserPointer(pc)) before using it
+        if (_peerConnectionId >= 0) {
+            rtcSetUserPointer(_peerConnectionId, nullptr);
+        }
+        if (_dataChannelId >= 0) {
+            rtcSetUserPointer(_dataChannelId, nullptr);
+        }
+        if (_unreliableDataChannelId >= 0) {
+            rtcSetUserPointer(_unreliableDataChannelId, nullptr);
+        }
+
+        // Step 3: Delete resources (closes connections, cleans up libdatachannel state)
         if (_dataChannelId >= 0) {
             rtcDeleteDataChannel(_dataChannelId);
             _dataChannelId = -1;
@@ -79,18 +104,34 @@ namespace EntropyEngine::Networking {
             _peerConnectionId = -1;
         }
 
-        // NOW shutdown callbacks and wait for any callbacks triggered by the deletes above
-        shutdownCallbacks();
+        // Brief sleep to allow in-flight callbacks to drain
+        // libdatachannel doesn't guarantee instant callback termination after rtcDelete*
+        // Callbacks can still be executing on background threads
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-        setMessageCallback(nullptr);
-        setStateCallback(nullptr);
+        // Step 4: Wait for all active callbacks to complete
+        // These are callbacks that got the pointer BEFORE we cleared it in step 2
+        // They're using CallbackGuard which tracks activeCallbacks
+        int waitCount = 0;
+        while (_callbackContext->activeCallbacks.load(std::memory_order_acquire) > 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            if (++waitCount % 10000 == 0) {  // Log every second
+                ENTROPY_LOG_WARNING("Waiting for " +
+                    std::to_string(_callbackContext->activeCallbacks.load(std::memory_order_acquire)) +
+                    " active callbacks to complete");
+            }
+        }
+
+        // Step 5: Delete context - safe now, no more references
+        delete _callbackContext;
+        _callbackContext = nullptr;
     }
 
     // C API callback adapters
     void WebRTCConnection::onLocalDescriptionCallback(int, const char* sdp, const char* type, void* user) {
-        // SAFETY: Cast to base class first to safely check shutdown flag before accessing derived members
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         ENTROPY_LOG_DEBUG(std::string("onLocalDescription: type=") + (type?type:"(null)") +
                           ", polite=" + (self->_polite ? "true" : "false") +
@@ -105,8 +146,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onLocalCandidateCallback(int, const char* cand, const char* mid, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         ENTROPY_LOG_DEBUG(std::string("onLocalCandidate: mid=") + (mid?mid:"(null)") +
                           ", len=" + std::to_string(cand ? (int)std::strlen(cand) : 0));
@@ -116,8 +158,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onStateChangeCallback(int, rtcState state, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         std::optional<ConnectionState> pending;
         {
@@ -155,14 +198,15 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onSignalingStateChangeCallback(int, rtcSignalingState state, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         self->_signalingState.store(state, std::memory_order_release);
 
@@ -185,8 +229,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onDataChannelCallback(int, int dc, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
@@ -215,8 +260,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onOpenCallback(int id, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -266,14 +312,15 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onClosedCallback(int id, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -304,14 +351,15 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !static_cast<NetworkConnection*>(user)->isShuttingDown()) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
-        if (static_cast<NetworkConnection*>(user)->isShuttingDown()) return;
-        auto* self = static_cast<WebRTCConnection*>(user);
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
         if (size <= 0) return;
@@ -763,7 +811,7 @@ namespace EntropyEngine::Networking {
             throw std::runtime_error("Failed to create peer connection");
         }
 
-        rtcSetUserPointer(_peerConnectionId, this);
+        rtcSetUserPointer(_peerConnectionId, _callbackContext);
         rtcSetLocalDescriptionCallback(_peerConnectionId, onLocalDescriptionCallback);
         rtcSetLocalCandidateCallback(_peerConnectionId, onLocalCandidateCallback);
         rtcSetStateChangeCallback(_peerConnectionId, onStateChangeCallback);
@@ -798,7 +846,7 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::setupDataChannelCallbacks(int channelId, bool isReliable) {
-        rtcSetUserPointer(channelId, this);
+        rtcSetUserPointer(channelId, _callbackContext);
         rtcSetOpenCallback(channelId, onOpenCallback);
         rtcSetClosedCallback(channelId, onClosedCallback);
         rtcSetMessageCallback(channelId, onMessageCallback);

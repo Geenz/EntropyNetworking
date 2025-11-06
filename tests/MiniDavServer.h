@@ -88,13 +88,17 @@ public:
 #ifdef _WIN32
             shutdown(_listenSock, SD_BOTH);
             closesocket(_listenSock);
-            _listenSock = -1;
 #else
             shutdown(_listenSock, SHUT_RDWR);
             close(_listenSock);
-            _listenSock = -1;
 #endif
             if (_thr.joinable()) _thr.join();
+            // Only set to -1 after thread has joined (no more concurrent access)
+#ifdef _WIN32
+            _listenSock = INVALID_SOCKET;
+#else
+            _listenSock = -1;
+#endif
 #ifdef _WIN32
             WSACleanup();
 #endif

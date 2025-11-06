@@ -5,9 +5,10 @@
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/LocalServer.h"
 #include "../src/Networking/Core/ConnectionTypes.h"
-#include <iostream>
+#include <Logging/Logger.h>
 #include <csignal>
 #include <atomic>
+#include <format>
 
 using namespace std;
 using namespace EntropyEngine::Networking;
@@ -25,8 +26,8 @@ int main() {
     const string socketPath = "/tmp/entropy_local.sock";
 
     try {
-        cout << "Starting EntropyNetworking Local Server (Platform-Agnostic)" << endl;
-        cout << "Socket path: " << socketPath << endl;
+        ENTROPY_LOG_INFO("Starting EntropyNetworking Local Server (Platform-Agnostic)");
+        ENTROPY_LOG_INFO(std::format("Socket path: {}", socketPath));
 
         // Create connection manager
         ConnectionManager connMgr(64);
@@ -37,13 +38,13 @@ int main() {
         // Start listening
         auto listenResult = server->listen();
         if (listenResult.failed()) {
-            cerr << "Failed to listen: " << listenResult.errorMessage << endl;
+            ENTROPY_LOG_ERROR(std::format("Failed to listen: {}", listenResult.errorMessage));
             return 1;
         }
 
-        cout << "Server listening on " << socketPath << endl;
-        cout << "Waiting for client connections..." << endl;
-        cout << "Press Ctrl+C to quit" << endl;
+        ENTROPY_LOG_INFO(std::format("Server listening on {}", socketPath));
+        ENTROPY_LOG_INFO("Waiting for client connections...");
+        ENTROPY_LOG_INFO("Press Ctrl+C to quit");
 
         // Accept and handle connections
         while (keepRunning) {
@@ -52,16 +53,16 @@ int main() {
 
             if (!conn.valid()) {
                 if (!keepRunning) break;
-                cerr << "Failed to accept connection" << endl;
+                ENTROPY_LOG_ERROR("Failed to accept connection");
                 continue;
             }
 
-            cout << "Client connected!" << endl;
+            ENTROPY_LOG_INFO("Client connected!");
 
             // Set up message callback using convenient API
             conn.setMessageCallback([conn](const vector<uint8_t>& data) mutable {
                 string message(data.begin(), data.end());
-                cout << "Received: " << message << endl;
+                ENTROPY_LOG_INFO(std::format("Received: {}", message));
 
                 // Echo back
                 string response = "Echo: " + message;
@@ -69,9 +70,9 @@ int main() {
                 auto result = conn.send(responseData);
 
                 if (result.failed()) {
-                    cerr << "Failed to send response: " << result.errorMessage << endl;
+                    ENTROPY_LOG_ERROR(std::format("Failed to send response: {}", result.errorMessage));
                 } else {
-                    cout << "Sent response: " << response << endl;
+                    ENTROPY_LOG_INFO(std::format("Sent response: {}", response));
                 }
             });
 
@@ -81,21 +82,21 @@ int main() {
             auto sendResult = conn.send(welcomeData);
 
             if (sendResult.failed()) {
-                cerr << "Failed to send welcome: " << sendResult.errorMessage << endl;
+                ENTROPY_LOG_ERROR(std::format("Failed to send welcome: {}", sendResult.errorMessage));
             } else {
-                cout << "Sent welcome message" << endl;
+                ENTROPY_LOG_INFO("Sent welcome message");
             }
 
             // Handle this client until disconnect
             // The message callback will process incoming messages
-            cout << "Handling client (waiting for messages)..." << endl;
+            ENTROPY_LOG_INFO("Handling client (waiting for messages)...");
 
             // Wait for client to disconnect by polling state
             while (keepRunning && conn.isConnected()) {
                 this_thread::sleep_for(chrono::milliseconds(100));
             }
 
-            cout << "Client disconnected" << endl;
+            ENTROPY_LOG_INFO("Client disconnected");
 
             // IMPORTANT: Close the connection to free the slot
             conn.close();
@@ -103,10 +104,10 @@ int main() {
 
         // Cleanup
         server->close();
-        cout << "Server shutdown complete" << endl;
+        ENTROPY_LOG_INFO("Server shutdown complete");
 
     } catch (const exception& e) {
-        cerr << "Error: " << e.what() << endl;
+        ENTROPY_LOG_ERROR(std::format("Error: {}", e.what()));
         return 1;
     }
 

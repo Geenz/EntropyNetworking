@@ -52,6 +52,9 @@ NetworkSession::NetworkSession(NetworkConnection* connection,
 
 NetworkSession::~NetworkSession() {
     if (_connection) {
+        // Clear callbacks before releasing to prevent use-after-free
+        _connection->setMessageCallback(nullptr);
+        _connection->setStateCallback(nullptr);
         _connection->release();
     }
 }
