@@ -75,6 +75,8 @@ set(NETWORKING_SOURCES
     src/Networking/Protocol/ComponentSchemaSerializer.cpp
     src/Networking/Protocol/WebDavAdapter.cpp
     src/Networking/Transport/WebRTCConnection.cpp
+    src/Networking/Transport/WebRTCServer.cpp
+    src/Networking/Transport/RemoteServer.cpp
     src/Networking/Transport/ConnectionManager.cpp
     src/Networking/Transport/ConnectionHandle.cpp
     src/Networking/Session/NetworkSession.cpp

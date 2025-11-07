@@ -16,12 +16,11 @@
  */
 
 #include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Transport/WebRTCConnection.h"
+#include "../src/Networking/Transport/RemoteServer.h"
 #include "../src/Networking/Session/SessionManager.h"
 #include "../src/Networking/Core/ComponentSchemaRegistry.h"
 #include "../src/Networking/Core/ComponentSchema.h"
 #include <EntropyCore.h>
-#include <rtc/rtc.hpp>
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -94,105 +93,59 @@ int main() {
         ENTROPY_LOG_INFO("    Schema will be automatically sent to clients on connection");
         ENTROPY_LOG_INFO("");
 
-        // Step 4: Set up WebSocket signaling server
-        rtc::WebSocketServer::Configuration wsConfig;
-        wsConfig.port = 8080;
-        wsConfig.enableTls = false;
+        // Step 4: Set up remote server (WebRTC with internal signaling)
+        auto server = createRemoteServer(&connMgr, 8080);
+        auto listenResult = server->listen();
+        if (listenResult.failed()) {
+            ENTROPY_LOG_ERROR(std::format("Failed to start server: {}", listenResult.errorMessage));
+            return 1;
+        }
 
-        rtc::WebSocketServer wsServer(wsConfig);
-        ENTROPY_LOG_INFO("[4] WebSocket signaling server listening on port 8080");
+        ENTROPY_LOG_INFO("[4] Remote server listening on port 8080");
+        ENTROPY_LOG_INFO("    WebRTC signaling handled internally");
 
         // Track connected sessions
         vector<SessionHandle> sessions;
         mutex sessionsMutex;
 
-        // Step 5: Handle incoming client connections
-        wsServer.onClient([&](shared_ptr<rtc::WebSocket> ws) {
-            ENTROPY_LOG_INFO("\n>>> Client connecting via signaling server...");
+        // Step 5: Accept connections in background thread
+        thread acceptThread([&]() {
+            while (true) {
+                auto conn = server->accept();  // Blocks until client connects
+                if (!conn.valid()) break;
 
-            // Create WebRTC connection with signaling callbacks
-            ConnectionConfig config;
-            config.type = ConnectionType::Remote;
-            config.backend = ConnectionBackend::WebRTC;
-            // Server is impolite peer in perfect negotiation (polite=false is default)
-            config.webrtcConfig.polite = false;
+                ENTROPY_LOG_INFO("\n>>> Client connected");
 
-            config.signalingCallbacks.onLocalDescription = [ws](const string& type, const string& sdp) {
-                ENTROPY_LOG_INFO(std::format("    Sending {} to client", type));
-                // Send type and SDP separated by newline
-                ws->send(type + "\n" + sdp);
-            };
+                // Create session (wraps connection with protocol layer)
+                auto session = sessMgr.createSession(conn);
+                if (!session.valid()) {
+                    ENTROPY_LOG_ERROR("Failed to create session");
+                    continue;
+                }
 
-            config.signalingCallbacks.onLocalCandidate = [ws](const string& candidate, const string& mid) {
-                ws->send(candidate + "|" + mid);
-            };
+                {
+                    lock_guard<mutex> lock(sessionsMutex);
+                    sessions.push_back(session);
+                }
 
-            auto conn = connMgr.openConnection(config);
-            if (!conn.valid()) {
-                ENTROPY_LOG_ERROR("Failed to create connection");
-                return;
-            }
-
-            // Create session (wraps connection with protocol layer)
-            auto session = sessMgr.createSession(conn);
-            if (!session.valid()) {
-                ENTROPY_LOG_ERROR("Failed to create session");
-                return;
-            }
-
-            {
-                lock_guard<mutex> lock(sessionsMutex);
-                sessions.push_back(session);
-            }
-
-            // Set up handshake callback
-            // This fires after connection is established and schemas are sent
-            sessMgr.setHandshakeCallback(session, [](const string& clientType, const string& clientId) {
-                ENTROPY_LOG_INFO(">>> Handshake complete!");
-                ENTROPY_LOG_INFO(std::format("    Client type: {}", clientType));
-                ENTROPY_LOG_INFO(std::format("    Client ID: {}", clientId));
-                ENTROPY_LOG_INFO("    Schemas have been automatically sent to client");
-            });
-
-            // Set up entity callbacks to handle messages from client
-            sessMgr.setEntityCreatedCallback(session,
-                [](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId) {
-                    ENTROPY_LOG_INFO(std::format("Client created entity: {} ({})", entityId, typeName));
+                // Set up handshake callback
+                // This fires after connection is established and schemas are sent
+                sessMgr.setHandshakeCallback(session, [](const string& clientType, const string& clientId) {
+                    ENTROPY_LOG_INFO(">>> Handshake complete!");
+                    ENTROPY_LOG_INFO(std::format("    Client type: {}", clientType));
+                    ENTROPY_LOG_INFO(std::format("    Client ID: {}", clientId));
+                    ENTROPY_LOG_INFO("    Schemas have been automatically sent to client");
                 });
 
-            // Connect the WebRTC peer
-            auto connectResult = conn.connect();
-            if (connectResult.failed()) {
-                ENTROPY_LOG_ERROR(std::format("Failed to initialize connection: {}", connectResult.errorMessage));
-                return;
+                // Set up entity callbacks to handle messages from client
+                sessMgr.setEntityCreatedCallback(session,
+                    [](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId) {
+                        ENTROPY_LOG_INFO(std::format("Client created entity: {} ({})", entityId, typeName));
+                    });
             }
-
-            // Handle signaling messages from client
-            ws->onMessage([&connMgr, conn](auto data) {
-                if (holds_alternative<string>(data)) {
-                    string msg = get<string>(data);
-                    auto* webrtcConn = dynamic_cast<WebRTCConnection*>(connMgr.getConnectionPointer(conn));
-                    if (!webrtcConn) return;
-
-                    // Check if this is a candidate (has '|' separator)
-                    size_t pipeSeparator = msg.find('|');
-                    if (pipeSeparator != string::npos) {
-                        // ICE candidate format: "candidate|mid"
-                        string candidateStr = msg.substr(0, pipeSeparator);
-                        string mid = msg.substr(pipeSeparator + 1);
-                        webrtcConn->addRemoteCandidate(candidateStr, mid);
-                    } else {
-                        // SDP format: "type\nsdp"
-                        size_t newlineSeparator = msg.find('\n');
-                        if (newlineSeparator != string::npos) {
-                            string type = msg.substr(0, newlineSeparator);
-                            string sdp = msg.substr(newlineSeparator + 1);
-                            webrtcConn->setRemoteDescription(type, sdp);
-                        }
-                    }
-                }
-            });
         });
+
+        acceptThread.detach();
 
         ENTROPY_LOG_INFO("\n[5] Server ready! Waiting for clients...");
         ENTROPY_LOG_INFO("    Connect with canvas_client");

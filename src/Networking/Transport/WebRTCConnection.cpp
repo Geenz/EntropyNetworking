@@ -44,11 +44,13 @@ namespace EntropyEngine::Networking {
     WebRTCConnection::WebRTCConnection(
         WebRTCConfig config,
         SignalingCallbacks signalingCallbacks,
+        std::string signalingUrl,
         std::string dataChannelLabel
     )
         : _callbackContext(new CallbackContext{this, true})  // Intentionally leaked
         , _config(std::move(config))
         , _signalingCallbacks(std::move(signalingCallbacks))
+        , _signalingUrl(std::move(signalingUrl))
         , _dataChannelLabel(std::move(dataChannelLabel))
         , _unreliableChannelLabel(_dataChannelLabel + "-unreliable")
     {
@@ -404,6 +406,11 @@ namespace EntropyEngine::Networking {
         _ignoreOffer.store(false, std::memory_order_release);  // Clean initial state
 
         try {
+            // Set up internal WebSocket if in client mode
+            if (!_signalingUrl.empty() && !_signalingCallbacks.onLocalDescription) {
+                setupInternalWebSocket();
+            }
+
             setupPeerConnection();
             setupDataChannel();
             setupUnreliableDataChannel();
@@ -850,6 +857,59 @@ namespace EntropyEngine::Networking {
         rtcSetOpenCallback(channelId, onOpenCallback);
         rtcSetClosedCallback(channelId, onClosedCallback);
         rtcSetMessageCallback(channelId, onMessageCallback);
+    }
+
+    void WebRTCConnection::setupInternalWebSocket() {
+        // Client mode: Create and manage WebSocket for signaling
+        _webSocket = std::make_shared<rtc::WebSocket>();
+
+        // Set up signaling callbacks to bridge between WebSocket and WebRTCConnection
+        _signalingCallbacks.onLocalDescription = [webSocket = _webSocket](const std::string& type, const std::string& sdp) {
+            if (webSocket && webSocket->isOpen()) {
+                // Format: "type\nsdp"
+                webSocket->send(type + "\n" + sdp);
+            }
+        };
+
+        _signalingCallbacks.onLocalCandidate = [webSocket = _webSocket](const std::string& candidate, const std::string& mid) {
+            if (webSocket && webSocket->isOpen()) {
+                // Format: "candidate|mid"
+                webSocket->send(candidate + "|" + mid);
+            }
+        };
+
+        // Set up WebSocket message handler for incoming signaling
+        _webSocket->onMessage([this](auto data) {
+            if (std::holds_alternative<std::string>(data)) {
+                std::string msg = std::get<std::string>(data);
+
+                // Check if this is an ICE candidate (has '|' separator)
+                size_t pipeSeparator = msg.find('|');
+                if (pipeSeparator != std::string::npos) {
+                    // ICE candidate format: "candidate|mid"
+                    std::string candidateStr = msg.substr(0, pipeSeparator);
+                    std::string mid = msg.substr(pipeSeparator + 1);
+                    addRemoteCandidate(candidateStr, mid);
+                } else {
+                    // SDP format: "type\nsdp"
+                    size_t newlineSeparator = msg.find('\n');
+                    if (newlineSeparator != std::string::npos) {
+                        std::string type = msg.substr(0, newlineSeparator);
+                        std::string sdp = msg.substr(newlineSeparator + 1);
+                        setRemoteDescription(type, sdp);
+                    }
+                }
+            }
+        });
+
+        _webSocket->onError([](std::string error) {
+            ENTROPY_LOG_ERROR(std::format("WebRTC signaling error: {}", error));
+        });
+
+        // Open WebSocket connection
+        _webSocket->open(_signalingUrl);
+
+        ENTROPY_LOG_INFO(std::format("WebRTC client connecting to signaling server: {}", _signalingUrl));
     }
 
 } // namespace EntropyEngine::Networking

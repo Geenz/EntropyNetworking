@@ -215,6 +215,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createRemoteBackend(const 
     return std::make_unique<WebRTCConnection>(
         config.webrtcConfig,
         config.signalingCallbacks,
+        config.endpoint,  // Signaling server URL for client mode
         config.dataChannelLabel
     );
 }
@@ -223,6 +224,16 @@ ConnectionHandle ConnectionManager::openLocalConnection(const std::string& endpo
     ConnectionConfig config;
     config.type = ConnectionType::Local;
     config.endpoint = endpoint;
+    return openConnection(config);
+}
+
+ConnectionHandle ConnectionManager::openRemoteConnection(const std::string& signalingUrl) {
+    ConnectionConfig config;
+    config.type = ConnectionType::Remote;
+    config.backend = ConnectionBackend::WebRTC;
+    config.endpoint = signalingUrl;  // WebSocket URL for client-side signaling
+    config.webrtcConfig.polite = true;  // Client is polite peer
+    // signalingCallbacks left empty - WebRTCConnection will create internal WebSocket
     return openConnection(config);
 }
 

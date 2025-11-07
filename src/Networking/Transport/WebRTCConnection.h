@@ -11,6 +11,7 @@
 
 #include "NetworkConnection.h"
 #include <rtc/rtc.h>
+#include <rtc/rtc.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,19 +28,23 @@ namespace EntropyEngine::Networking {
      * Implements NetworkConnection interface using libdatachannel for WebRTC data channels.
      * Supports reliable and unreliable data transfer over WebRTC.
      *
-     * Signaling must be handled externally via the SignalingCallbacks.
+     * Supports two modes:
+     * - Server mode: SignalingCallbacks provided (used by WebRTCServer)
+     * - Client mode: Signaling URL provided, WebSocket managed internally
      */
     class WebRTCConnection : public NetworkConnection {
     public:
         /**
          * @brief Construct a new WebRTC connection
          * @param config WebRTC configuration (ICE servers, etc.)
-         * @param signalingCallbacks Callbacks for sending signaling messages
+         * @param signalingCallbacks Callbacks for sending signaling messages (server mode)
+         * @param signalingUrl WebSocket URL for signaling (client mode, empty if using callbacks)
          * @param dataChannelLabel Label for the data channel (default: "entropy-data")
          */
         WebRTCConnection(
             WebRTCConfig config,
             SignalingCallbacks signalingCallbacks,
+            std::string signalingUrl = "",
             std::string dataChannelLabel = "entropy-data"
         );
 
@@ -149,6 +154,7 @@ namespace EntropyEngine::Networking {
         void setupDataChannel();
         void setupUnreliableDataChannel();
         void setupDataChannelCallbacks(int channelId, bool isReliable);
+        void setupInternalWebSocket();  // Client mode: set up internal WebSocket for signaling
 
         // C API callback adapters (static with user pointer)
         static void onLocalDescriptionCallback(int pc, const char* sdp, const char* type, void* user);
@@ -169,6 +175,8 @@ namespace EntropyEngine::Networking {
 
         WebRTCConfig _config;
         SignalingCallbacks _signalingCallbacks;
+        std::string _signalingUrl;  // Client mode: signaling server URL
+        std::shared_ptr<rtc::WebSocket> _webSocket;  // Client mode: managed WebSocket
         std::string _dataChannelLabel;
         std::string _unreliableChannelLabel;
 
