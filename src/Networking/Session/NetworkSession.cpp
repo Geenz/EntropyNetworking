@@ -798,6 +798,27 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                         _connection->send(serialized.value);
                         _handshakeComplete = true;
 
+                        // Auto-send all public schemas to newly connected client
+                        if (_schemaRegistry) {
+                            auto publicSchemas = _schemaRegistry->getPublicSchemas();
+                            for (const auto& schema : publicSchemas) {
+                                // Send schema advertisement for each public schema
+                                auto result = sendSchemaAdvertisement(
+                                    schema.typeHash,
+                                    schema.appId,
+                                    schema.componentName,
+                                    schema.schemaVersion
+                                );
+
+                                // Log errors but continue with other schemas
+                                if (result.failed()) {
+                                    ENTROPY_LOG_WARNING_CAT("NetworkSession",
+                                        std::format("Failed to auto-send schema {}.{}: {}",
+                                            schema.appId, schema.componentName, result.errorMessage));
+                                }
+                            }
+                        }
+
                         // Notify application that handshake is complete
                         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                         if (!_shuttingDown.load(std::memory_order_acquire) && _handshakeCallback) {

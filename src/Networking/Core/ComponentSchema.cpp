@@ -24,9 +24,10 @@ namespace {
      * @brief Validate that a string is a valid ASCII identifier
      *
      * Valid identifiers:
-     * - Contain only [a-zA-Z0-9_]
+     * - Contain only [a-zA-Z0-9_.]
      * - Start with letter or underscore
      * - Non-empty
+     * - Support reverse domain notation (e.g., "com.entropy.canvas")
      */
     bool isAsciiIdentifier(const std::string& str) {
         if (str.empty()) {
@@ -41,12 +42,13 @@ namespace {
             return false;
         }
 
-        // All characters must be alphanumeric or underscore
+        // All characters must be alphanumeric, underscore, or dot
         for (char c : str) {
             if (!((c >= 'a' && c <= 'z') ||
                   (c >= 'A' && c <= 'Z') ||
                   (c >= '0' && c <= '9') ||
-                  c == '_')) {
+                  c == '_' ||
+                  c == '.')) {
                 return false;
             }
         }
@@ -161,12 +163,12 @@ Result<ComponentSchema> ComponentSchema::create(
     // Validate appId is ASCII identifier
     if (!isAsciiIdentifier(appId)) {
         std::string errorMsg = std::format(
-            "Component schema validation failed: appId '{}' must be ASCII identifier [a-zA-Z0-9_]",
+            "Component schema validation failed: appId '{}' must be ASCII identifier [a-zA-Z0-9_.]",
             appId);
         ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
         return Result<ComponentSchema>::err(
             NetworkError::InvalidParameter,
-            "appId must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
+            "appId must be ASCII identifier [a-zA-Z0-9_.], starting with letter or underscore"
         );
     }
 
@@ -182,12 +184,12 @@ Result<ComponentSchema> ComponentSchema::create(
     // Validate componentName is ASCII identifier
     if (!isAsciiIdentifier(componentName)) {
         std::string errorMsg = std::format(
-            "Component schema validation failed: componentName '{}' must be ASCII identifier [a-zA-Z0-9_]",
+            "Component schema validation failed: componentName '{}' must be ASCII identifier [a-zA-Z0-9_.]",
             componentName);
         ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
         return Result<ComponentSchema>::err(
             NetworkError::InvalidParameter,
-            "componentName must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
+            "componentName must be ASCII identifier [a-zA-Z0-9_.], starting with letter or underscore"
         );
     }
 
@@ -214,12 +216,12 @@ Result<ComponentSchema> ComponentSchema::create(
         // Validate property name is ASCII identifier
         if (!isAsciiIdentifier(prop.name)) {
             std::string errorMsg = std::format(
-                "Component schema validation failed: property name '{}' must be ASCII identifier [a-zA-Z0-9_]",
+                "Component schema validation failed: property name '{}' must be ASCII identifier [a-zA-Z0-9_.]",
                 prop.name);
             ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);
             return Result<ComponentSchema>::err(
                 NetworkError::SchemaValidationFailed,
-                "Property name '" + prop.name + "' must be ASCII identifier [a-zA-Z0-9_], starting with letter or underscore"
+                "Property name '" + prop.name + "' must be ASCII identifier [a-zA-Z0-9_.], starting with letter or underscore"
             );
         }
 

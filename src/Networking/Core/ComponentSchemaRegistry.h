@@ -42,6 +42,13 @@ namespace Networking {
  */
 class ComponentSchemaRegistry {
 public:
+    /// Callback invoked when a schema is published (made public)
+    using SchemaPublishedCallback = std::function<void(ComponentTypeHash typeHash,
+                                                        const ComponentSchema& schema)>;
+
+    /// Callback invoked when a schema is unpublished (made private)
+    using SchemaUnpublishedCallback = std::function<void(ComponentTypeHash typeHash)>;
+
     ComponentSchemaRegistry() = default;
     ~ComponentSchemaRegistry() = default;
 
@@ -221,6 +228,30 @@ public:
      */
     void getStats(size_t& totalCount, size_t& publicCount, std::vector<ComponentSchema>& publicSchemas) const;
 
+    /**
+     * @brief Set callback for schema publish events
+     *
+     * Called when publishSchema() makes a private schema public.
+     * Useful for broadcasting schema availability to connected clients.
+     *
+     * @param callback Function to call on publish (invoked under lock)
+     *
+     * @threadsafety Not thread-safe - set before publishing schemas
+     */
+    void setSchemaPublishedCallback(SchemaPublishedCallback callback);
+
+    /**
+     * @brief Set callback for schema unpublish events
+     *
+     * Called when unpublishSchema() makes a public schema private.
+     * Useful for notifying clients that schema is no longer available.
+     *
+     * @param callback Function to call on unpublish (invoked under lock)
+     *
+     * @threadsafety Not thread-safe - set before unpublishing schemas
+     */
+    void setSchemaUnpublishedCallback(SchemaUnpublishedCallback callback);
+
 private:
     mutable std::shared_mutex _mutex;
 
@@ -232,6 +263,10 @@ private:
 
     /// Set of public schema hashes (for discovery)
     std::unordered_set<ComponentTypeHash> _publicSchemas;
+
+    /// Callbacks for schema lifecycle events
+    SchemaPublishedCallback _schemaPublishedCallback;
+    SchemaUnpublishedCallback _schemaUnpublishedCallback;
 };
 
 } // namespace Networking

@@ -193,63 +193,93 @@ bool ComponentSchemaRegistry::isPublic(ComponentTypeHash typeHash) const {
 }
 
 Result<void> ComponentSchemaRegistry::publishSchema(ComponentTypeHash typeHash) {
-    std::unique_lock<std::shared_mutex> lock(_mutex);
+    // Copy callback and schema for invocation outside lock
+    SchemaPublishedCallback callback;
+    std::optional<ComponentSchema> schema;
 
-    // Check if schema exists
-    auto it = _schemas.find(typeHash);
-    if (it == _schemas.end()) {
-        std::string errorMsg = std::format("Schema {} not found", toString(typeHash));
-        ENTROPY_LOG_ERROR_CAT("ComponentSchemaRegistry", errorMsg);
-        return Result<void>::err(NetworkError::SchemaNotFound, errorMsg);
+    {
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+
+        // Check if schema exists
+        auto it = _schemas.find(typeHash);
+        if (it == _schemas.end()) {
+            std::string errorMsg = std::format("Schema {} not found", toString(typeHash));
+            ENTROPY_LOG_ERROR_CAT("ComponentSchemaRegistry", errorMsg);
+            return Result<void>::err(NetworkError::SchemaNotFound, errorMsg);
+        }
+
+        // Check if already public
+        if (_publicSchemas.find(typeHash) != _publicSchemas.end()) {
+            // Already public - idempotent
+            return Result<void>::ok();
+        }
+
+        // Mark as public
+        _publicSchemas.insert(typeHash);
+
+        // Update schema's isPublic flag
+        it->second.isPublic = true;
+
+        std::string logMsg = std::format(
+            "Published schema {}.{} v{}",
+            it->second.appId, it->second.componentName, it->second.schemaVersion);
+        ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
+
+        // Copy callback and schema for invocation outside lock
+        callback = _schemaPublishedCallback;
+        schema = it->second;
     }
 
-    // Check if already public
-    if (_publicSchemas.find(typeHash) != _publicSchemas.end()) {
-        // Already public - idempotent
-        return Result<void>::ok();
+    // Invoke callback outside lock to avoid potential deadlock
+    if (callback && schema) {
+        callback(typeHash, *schema);
     }
-
-    // Mark as public
-    _publicSchemas.insert(typeHash);
-
-    // Update schema's isPublic flag
-    it->second.isPublic = true;
-
-    std::string logMsg = std::format(
-        "Published schema {}.{} v{}",
-        it->second.appId, it->second.componentName, it->second.schemaVersion);
-    ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
 
     return Result<void>::ok();
 }
 
 Result<void> ComponentSchemaRegistry::unpublishSchema(ComponentTypeHash typeHash) {
-    std::unique_lock<std::shared_mutex> lock(_mutex);
+    // Copy callback for invocation outside lock
+    SchemaUnpublishedCallback callback;
+    bool wasPublic = false;
 
-    // Check if schema exists
-    auto it = _schemas.find(typeHash);
-    if (it == _schemas.end()) {
-        std::string errorMsg = std::format("Schema {} not found", toString(typeHash));
-        ENTROPY_LOG_ERROR_CAT("ComponentSchemaRegistry", errorMsg);
-        return Result<void>::err(NetworkError::SchemaNotFound, errorMsg);
+    {
+        std::unique_lock<std::shared_mutex> lock(_mutex);
+
+        // Check if schema exists
+        auto it = _schemas.find(typeHash);
+        if (it == _schemas.end()) {
+            std::string errorMsg = std::format("Schema {} not found", toString(typeHash));
+            ENTROPY_LOG_ERROR_CAT("ComponentSchemaRegistry", errorMsg);
+            return Result<void>::err(NetworkError::SchemaNotFound, errorMsg);
+        }
+
+        // Check if already private
+        if (_publicSchemas.find(typeHash) == _publicSchemas.end()) {
+            // Already private - idempotent
+            return Result<void>::ok();
+        }
+
+        // Mark as private
+        _publicSchemas.erase(typeHash);
+        wasPublic = true;
+
+        // Update schema's isPublic flag
+        it->second.isPublic = false;
+
+        std::string logMsg = std::format(
+            "Unpublished schema {}.{} v{}",
+            it->second.appId, it->second.componentName, it->second.schemaVersion);
+        ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
+
+        // Copy callback for invocation outside lock
+        callback = _schemaUnpublishedCallback;
     }
 
-    // Check if already private
-    if (_publicSchemas.find(typeHash) == _publicSchemas.end()) {
-        // Already private - idempotent
-        return Result<void>::ok();
+    // Invoke callback outside lock to avoid potential deadlock
+    if (callback && wasPublic) {
+        callback(typeHash);
     }
-
-    // Mark as private
-    _publicSchemas.erase(typeHash);
-
-    // Update schema's isPublic flag
-    it->second.isPublic = false;
-
-    std::string logMsg = std::format(
-        "Unpublished schema {}.{} v{}",
-        it->second.appId, it->second.componentName, it->second.schemaVersion);
-    ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
 
     return Result<void>::ok();
 }
@@ -282,6 +312,14 @@ void ComponentSchemaRegistry::getStats(size_t& totalCount, size_t& publicCount,
             publicSchemas.push_back(it->second);
         }
     }
+}
+
+void ComponentSchemaRegistry::setSchemaPublishedCallback(SchemaPublishedCallback callback) {
+    _schemaPublishedCallback = std::move(callback);
+}
+
+void ComponentSchemaRegistry::setSchemaUnpublishedCallback(SchemaUnpublishedCallback callback) {
+    _schemaUnpublishedCallback = std::move(callback);
 }
 
 } // namespace Networking
