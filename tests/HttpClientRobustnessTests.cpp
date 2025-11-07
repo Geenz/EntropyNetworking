@@ -100,6 +100,12 @@ TEST_F(HttpClientRobustnessTests, HttpsRealServer) {
 
     auto resp = client.execute(req, opts);
 
+    // External service may be unavailable (503) or have other transient failures in CI
+    // Skip test instead of failing to avoid flaky CI builds
+    if (resp.statusCode == 503 || resp.statusCode == 429 || resp.statusCode == 502) {
+        GTEST_SKIP() << "External service temporarily unavailable (status: " << resp.statusCode << ")";
+    }
+
     EXPECT_TRUE(resp.isSuccess()) << "Status: " << resp.statusCode
                                    << ", Message: " << resp.statusMessage;
     EXPECT_FALSE(resp.body.empty());

@@ -264,5 +264,25 @@ size_t ComponentSchemaRegistry::publicSchemaCount() const {
     return _publicSchemas.size();
 }
 
+void ComponentSchemaRegistry::getStats(size_t& totalCount, size_t& publicCount,
+                                       std::vector<ComponentSchema>& publicSchemas) const {
+    std::shared_lock<std::shared_mutex> lock(_mutex);
+
+    // Get counts
+    totalCount = _schemas.size();
+    publicCount = _publicSchemas.size();
+
+    // Get public schemas
+    publicSchemas.clear();
+    publicSchemas.reserve(publicCount);
+
+    for (const auto& typeHash : _publicSchemas) {
+        auto it = _schemas.find(typeHash);
+        if (it != _schemas.end()) {
+            publicSchemas.push_back(it->second);
+        }
+    }
+}
+
 } // namespace Networking
 } // namespace EntropyEngine

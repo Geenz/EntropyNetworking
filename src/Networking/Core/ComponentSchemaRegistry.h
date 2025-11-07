@@ -207,6 +207,20 @@ public:
      */
     size_t publicSchemaCount() const;
 
+    /**
+     * @brief Get consistent snapshot of registry stats
+     *
+     * Returns all stats under a single lock to ensure consistency.
+     * Useful for concurrent readers that need consistent view of state.
+     *
+     * @param[out] totalCount Total number of schemas
+     * @param[out] publicCount Number of public schemas
+     * @param[out] publicSchemas Vector of public schemas
+     *
+     * @threadsafety Thread-safe (read lock)
+     */
+    void getStats(size_t& totalCount, size_t& publicCount, std::vector<ComponentSchema>& publicSchemas) const;
+
 private:
     mutable std::shared_mutex _mutex;
 
