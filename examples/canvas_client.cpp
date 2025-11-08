@@ -106,14 +106,45 @@ int main() {
         }
 
         ENTROPY_LOG_INFO("\n[4] Connected!");
-        ENTROPY_LOG_INFO("=== Listening for messages from server ===");
-        ENTROPY_LOG_INFO("The server will automatically send schema advertisements");
-        ENTROPY_LOG_INFO("after the handshake completes.");
-        ENTROPY_LOG_INFO("");
+        ENTROPY_LOG_INFO("=== Initiating handshake ===");
 
-        // Wait for handshake
-        for (int i = 0; i < 50 && !handshakeComplete; i++) {
-            this_thread::sleep_for(chrono::milliseconds(100));
+        // Step 5: Initiate handshake with retry logic
+        // WebRTC channels may drop early messages, so we retry if needed
+        const int maxRetries = 3;
+        bool handshakeSuccess = false;
+
+        for (int attempt = 0; attempt < maxRetries && !handshakeSuccess; ++attempt) {
+            if (attempt > 0) {
+                ENTROPY_LOG_INFO(std::format("Retry attempt {} of {}", attempt + 1, maxRetries));
+            }
+
+            handshakeComplete = false;  // Reset flag
+            auto handshakeResult = session.performHandshake("EntropyCanvasClient", "client-001");
+            if (handshakeResult.failed()) {
+                ENTROPY_LOG_ERROR(std::format("Failed to perform handshake: {}", handshakeResult.errorMessage));
+                return 1;
+            }
+
+            ENTROPY_LOG_INFO("[5] Handshake message sent");
+            ENTROPY_LOG_INFO("    Waiting for server response...");
+
+            // Wait for handshake completion with timeout
+            for (int i = 0; i < 30 && !handshakeComplete; i++) {
+                this_thread::sleep_for(chrono::milliseconds(100));
+            }
+
+            if (handshakeComplete) {
+                handshakeSuccess = true;
+                ENTROPY_LOG_INFO("");
+            } else if (attempt < maxRetries - 1) {
+                ENTROPY_LOG_WARNING("Handshake response not received, retrying...");
+                this_thread::sleep_for(chrono::milliseconds(200));  // Brief delay before retry
+            }
+        }
+
+        if (!handshakeSuccess) {
+            ENTROPY_LOG_ERROR("Handshake failed after all retry attempts");
+            return 1;
         }
 
         // Note: Schema advertisements are handled internally by NetworkSession

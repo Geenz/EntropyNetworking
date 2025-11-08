@@ -207,6 +207,15 @@ public:
     );
 
     /**
+     * @brief Initiates handshake (called by handle.performHandshake())
+     */
+    Result<void> performHandshake(
+        const SessionHandle& handle,
+        const std::string& clientType,
+        const std::string& clientId
+    );
+
+    /**
      * @brief Checks if connected (called by handle.isConnected())
      */
     bool isConnected(const SessionHandle& handle) const;

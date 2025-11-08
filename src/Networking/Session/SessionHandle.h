@@ -186,6 +186,27 @@ public:
      */
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData) const;
 
+    // Handshake operations
+
+    /**
+     * @brief Initiates protocol handshake with remote peer
+     *
+     * Sends handshake message to establish protocol-level communication.
+     * This method should be called AFTER setting up callbacks (setHandshakeCallback,
+     * setEntityCreatedCallback, etc.) to ensure notifications are received.
+     *
+     * Server-side: NetworkSession automatically responds to incoming handshakes,
+     * so this method is typically not needed on the server.
+     *
+     * Client-side: Call this method after the underlying connection is established
+     * and callbacks are configured.
+     *
+     * @param clientType Type identifier for this client (e.g., "EntropyClient", "CanvasViewer")
+     * @param clientId Unique identifier for this client instance
+     * @return Result indicating success or failure
+     */
+    Result<void> performHandshake(const std::string& clientType, const std::string& clientId) const;
+
     // Connection queries (pass-through to underlying connection)
 
     /**

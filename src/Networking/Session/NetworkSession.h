@@ -34,6 +34,7 @@ namespace EntropyEngine::Networking {
  * - Protocol message callbacks
  */
 class NetworkSession : public Core::EntropyObject {
+    friend class SessionManager;  // Allow SessionManager to register callbacks via fan-out
 public:
     // Message type callbacks
     using EntityCreatedCallback = std::function<void(uint64_t entityId, const std::string& appId,

@@ -167,7 +167,10 @@ protected:
      */
     void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
         // Check shutdown flag first (fast path)
-        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+        bool shutdown1 = _callbacksShutdown.load(std::memory_order_acquire);
+        ENTROPY_LOG_DEBUG(std::format("NetworkConnection::onMessageReceived: {} bytes, shutdown={}", data.size(), shutdown1));
+        if (shutdown1) {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set)");
             return;
         }
 
@@ -179,7 +182,9 @@ protected:
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
-        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+        bool shutdown2 = _callbacksShutdown.load(std::memory_order_acquire);
+        if (shutdown2) {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
             return; // Bail early if shutting down
         }
 
@@ -189,8 +194,13 @@ protected:
             cb = _messageCallback; // copy under lock
         }
 
+        ENTROPY_LOG_DEBUG(std::format("NetworkConnection::onMessageReceived: callback is {}", cb ? "set" : "NOT SET"));
         if (cb) {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Invoking callback");
             cb(data); // invoke outside lock
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Callback returned");
+        } else {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: No callback to invoke");
         }
 
         // Counter decrements here via RAII, ensuring destructor waits

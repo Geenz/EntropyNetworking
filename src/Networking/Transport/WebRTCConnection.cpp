@@ -250,6 +250,8 @@ namespace EntropyEngine::Networking {
         // Note: During reconnection, old channels will close naturally via onClosedCallback
         if (labelView == self->_dataChannelLabel) {
             if (self->_dataChannelId != dc) {
+                ENTROPY_LOG_DEBUG(std::format("Switching _dataChannelId from {} to REMOTE channel {}",
+                    self->_dataChannelId, dc));
                 self->_dataChannelId = dc;
                 self->setupDataChannelCallbacks(dc, true);
             }
@@ -358,10 +360,12 @@ namespace EntropyEngine::Networking {
         }
     }
 
-    void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
+    void WebRTCConnection::onMessageCallback(int id, const char* message, int size, void* user) {
         CallbackGuard guard(static_cast<CallbackContext*>(user));
         if (!guard.isValid()) return;
         auto* self = guard.getConnection();
+
+        ENTROPY_LOG_DEBUG(std::format("onMessageCallback: Received {} bytes on channel id={} for connection {}", size, id, (void*)self));
 
         // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
         if (size <= 0) return;
@@ -550,10 +554,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
+        ENTROPY_LOG_DEBUG(std::format("Sending {} bytes on channel id={}", data.size(), id));
         int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
+            ENTROPY_LOG_ERROR(std::format("rtcSendMessage failed with code {}", result));
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data");
         }
+        ENTROPY_LOG_DEBUG(std::format("rtcSendMessage succeeded, returned {}", result));
 
         {
             std::lock_guard<std::mutex> lock(_mutex);
@@ -833,6 +840,7 @@ namespace EntropyEngine::Networking {
             throw std::runtime_error("Failed to create data channel");
         }
 
+        ENTROPY_LOG_DEBUG(std::format("Created LOCAL reliable channel with id={}", _dataChannelId));
         setupDataChannelCallbacks(_dataChannelId, true);
     }
 

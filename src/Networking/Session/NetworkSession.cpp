@@ -36,17 +36,13 @@ NetworkSession::NetworkSession(NetworkConnection* connection,
         _propertyRegistry = _ownedRegistry.get();
     }
 
+    ENTROPY_LOG_DEBUG(std::format("NetworkSession: Constructor called with connection {}, session {}", (void*)_connection, (void*)this));
+
     if (_connection) {
         _connection->retain();
 
-        // Set up callbacks
-        _connection->setMessageCallback([this](const std::vector<uint8_t>& data) {
-            onMessageReceived(data);
-        });
-
-        _connection->setStateCallback([this](ConnectionState state) {
-            onConnectionStateChanged(state);
-        });
+        // Note: Callbacks are NOT set here. SessionManager will register our callbacks
+        // with ConnectionManager's fan-out system after construction.
     }
 }
 
@@ -60,9 +56,8 @@ NetworkSession::~NetworkSession() {
     }
 
     if (_connection) {
-        // Clear connection callbacks and release
-        _connection->setMessageCallback(nullptr);
-        _connection->setStateCallback(nullptr);
+        // Note: We do NOT clear callbacks here - ConnectionManager owns them
+        // Just release our reference to the connection
         _connection->release();
     }
 
@@ -632,6 +627,7 @@ ConnectionStats NetworkSession::getStats() const {
 }
 
 void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
+    ENTROPY_LOG_DEBUG(std::format("NetworkSession::onMessageReceived: {} bytes for session {}", data.size(), (void*)this));
     handleReceivedMessage(data);
 }
 
@@ -665,6 +661,9 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
         ::capnp::FlatArrayMessageReader reader(words);
         auto message = reader.getRoot<Message>();
+
+        // Debug: log received message type
+        ENTROPY_LOG_DEBUG(std::format("Received message type: {}", static_cast<int>(message.which())));
 
         // Dispatch based on message type
         switch (message.which()) {
@@ -794,8 +793,11 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     response.setSupportsSchemaAdvert(handshake.getSupportsSchemaAdvert());
 
                     auto serialized = serialize(builder);
+                    ENTROPY_LOG_DEBUG(std::format("Handshake serialized, success={}", serialized.success()));
                     if (serialized.success()) {
+                        ENTROPY_LOG_DEBUG("Sending HANDSHAKE_RESPONSE");
                         _connection->send(serialized.value);
+                        ENTROPY_LOG_DEBUG("HANDSHAKE_RESPONSE sent");
                         _handshakeComplete = true;
 
                         // Auto-send all public schemas to newly connected client
@@ -820,9 +822,16 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                         }
 
                         // Notify application that handshake is complete
+                        // Copy callback under mutex to avoid race with setHandshakeCallback
+                        HandshakeCallback callback;
+                        {
+                            std::lock_guard<std::mutex> lock(_mutex);
+                            callback = _handshakeCallback;
+                        }
+
                         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
-                        if (!_shuttingDown.load(std::memory_order_acquire) && _handshakeCallback) {
-                            _handshakeCallback(clientType, clientId);
+                        if (!_shuttingDown.load(std::memory_order_acquire) && callback) {
+                            callback(clientType, clientId);
                         }
                         _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     } else {
@@ -844,8 +853,32 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
             case Message::HANDSHAKE_RESPONSE: {
                 auto resp = message.getHandshakeResponse();
+                ENTROPY_LOG_DEBUG("Received HANDSHAKE_RESPONSE");
                 if (resp.getSuccess()) {
                     _handshakeComplete = true;
+                    ENTROPY_LOG_DEBUG("Handshake marked complete, checking callback...");
+
+                    // Copy callback under mutex to avoid race with setHandshakeCallback
+                    HandshakeCallback callback;
+                    {
+                        std::lock_guard<std::mutex> lock(_mutex);
+                        callback = _handshakeCallback;
+                    }
+
+                    bool hasCallback = static_cast<bool>(callback);
+                    bool shuttingDown = _shuttingDown.load(std::memory_order_acquire);
+                    ENTROPY_LOG_DEBUG(std::format("hasCallback={}, shuttingDown={}", hasCallback, shuttingDown));
+
+                    // Notify application that handshake is complete (client-side)
+                    _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                    if (!_shuttingDown.load(std::memory_order_acquire) && callback) {
+                        ENTROPY_LOG_DEBUG("About to invoke handshake callback");
+                        callback(_clientType, _clientId);
+                        ENTROPY_LOG_DEBUG("Handshake callback invoked");
+                    } else {
+                        ENTROPY_LOG_DEBUG("Skipping callback invocation");
+                    }
+                    _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 } else {
                     _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                     if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {

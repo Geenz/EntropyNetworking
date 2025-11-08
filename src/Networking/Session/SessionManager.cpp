@@ -125,13 +125,28 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
 
         // Get underlying connection pointer
         NetworkConnection* connPtr = _connectionManager->getConnectionPointer(connection);
+        ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Got connection pointer {} for handle {}/{}",
+            (void*)connPtr, connection.handleIndex(), connection.handleGeneration()));
         if (!connPtr) {
             returnSlotToFreeList(index);
             return SessionHandle();
         }
 
         // Create NetworkSession wrapping the connection, optional external registry, and schema registry
+        ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Creating NetworkSession with connection {}", (void*)connPtr));
         slot.session = std::make_unique<NetworkSession>(connPtr, externalRegistry, _schemaRegistry);
+
+        // Register NetworkSession's callbacks with ConnectionManager's fan-out system
+        // This ensures callbacks work correctly even after connect() is called
+        auto* session = slot.session.get();  // Capture raw pointer for lambda
+        _connectionManager->setMessageCallback(connection, [session](const std::vector<uint8_t>& data) {
+            ENTROPY_LOG_DEBUG(std::format("NetworkSession: Lambda called with {} bytes for session {}", data.size(), (void*)session));
+            session->onMessageReceived(data);
+        });
+
+        _connectionManager->setStateCallback(connection, [session](ConnectionState state) {
+            session->onConnectionStateChanged(state);
+        });
 
         return SessionHandle(this, index, generation);
     } catch (const std::exception& e) {
@@ -363,6 +378,27 @@ Result<void> SessionManager::sendSceneSnapshot(
     }
 
     return slot.session->sendSceneSnapshot(snapshotData);
+}
+
+Result<void> SessionManager::performHandshake(
+    const SessionHandle& handle,
+    const std::string& clientType,
+    const std::string& clientId
+) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->performHandshake(clientType, clientId);
 }
 
 bool SessionManager::isConnected(const SessionHandle& handle) const {

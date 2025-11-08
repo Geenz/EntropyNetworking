@@ -66,6 +66,14 @@ Result<void> SessionHandle::sendSceneSnapshot(const std::vector<uint8_t>& snapsh
     return mgr->sendSceneSnapshot(*this, snapshotData);
 }
 
+Result<void> SessionHandle::performHandshake(const std::string& clientType, const std::string& clientId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->performHandshake(*this, clientType, clientId);
+}
+
 bool SessionHandle::isConnected() const {
     auto* mgr = manager();
     if (!mgr) return false;
