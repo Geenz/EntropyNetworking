@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.28)
 
+# Force static linking for all dependencies on Windows
+# This must be set before project() to ensure vcpkg uses the correct triplet
+if(WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "")
+endif()
+
 project(EntropyNetworking
     VERSION 0.1.0
     DESCRIPTION "Networking library for Entropy Engine with Cap'n Proto and WebRTC support"
