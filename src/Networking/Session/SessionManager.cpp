@@ -556,4 +556,36 @@ void SessionManager::broadcastSchemaUnpublish(ComponentTypeHash typeHash) {
     }
 }
 
+void SessionManager::flushAllPropertyBatches() {
+    // Iterate all slots and flush property batches for connected sessions
+    for (size_t i = 0; i < _capacity; ++i) {
+        auto& slot = _sessionSlots[i];
+
+        // Try to lock this slot (non-blocking to avoid holding up other operations)
+        std::unique_lock<std::mutex> lock(slot.mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            continue;  // Skip if slot is busy
+        }
+
+        // Check if session exists and is connected
+        if (!slot.session) {
+            continue;
+        }
+
+        if (!slot.session->isConnected()) {
+            continue;
+        }
+
+        // Flush property update batches
+        auto result = slot.session->flushPropertyUpdates();
+
+        // Log errors but continue flushing other sessions
+        if (result.failed()) {
+            ENTROPY_LOG_WARNING_CAT("SessionManager",
+                std::format("Failed to flush property batches for session {}: {}",
+                    i, result.errorMessage));
+        }
+    }
+}
+
 } // namespace EntropyEngine::Networking

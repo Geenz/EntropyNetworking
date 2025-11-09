@@ -291,6 +291,18 @@ public:
      */
     void broadcastSchemaUnpublish(ComponentTypeHash typeHash);
 
+    /**
+     * @brief Flush property update batches for all connected sessions
+     *
+     * Iterates through all active sessions and calls flushPropertyUpdates() on each.
+     * This is useful for server applications that need to synchronize state updates
+     * to hundreds of connected clients efficiently.
+     *
+     * Non-blocking: uses try_to_lock to avoid holding up other operations.
+     * Continues flushing even if individual sessions fail.
+     */
+    void flushAllPropertyBatches();
+
     // EntropyObject interface
     const char* className() const noexcept override { return "SessionManager"; }
     uint64_t classHash() const noexcept override;
