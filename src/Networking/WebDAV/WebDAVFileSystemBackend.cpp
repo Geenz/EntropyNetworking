@@ -88,19 +88,32 @@ FileError WebDAVFileSystemBackend::mapHttpStatus(int sc) {
 FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, ReadOptions options) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, options](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    // Construct lambda fully before passing to submit() to avoid race during functor construction
+    auto operation = [client, cfg, options](FileOperationHandle::OpState& s,
                                               const std::string& p,
                                               const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            // Build URL inline since we can't call buildUrl() without 'this'
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::GET;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
 
             if (options.offset > 0 || options.length.has_value()) {
@@ -113,7 +126,7 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
                 req.headers["Range"] = range;
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!r.isSuccess()) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "GET failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -128,30 +141,43 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::string& path,
                                                       const std::string& etag) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, etag](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, etag](FileOperationHandle::OpState& s,
                                            const std::string& p,
                                            const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::GET;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["If-None-Match"] = etag;
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode == 304) {
                 // Not Modified: succeed with empty body to signal cache hit
                 s.bytes.clear();
@@ -172,7 +198,9 @@ FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::stri
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
@@ -180,30 +208,44 @@ FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
                                                        WriteOptions /*options*/) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, data](FileOperationHandle::OpState& s,
+    // Copy data to vector for safe capture
+    std::vector<std::byte> dataCopy(data.begin(), data.end());
+
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, dataCopy = std::move(dataCopy)](FileOperationHandle::OpState& s,
                                            const std::string& p,
                                            const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::PUT;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             // Optional: set a default Content-Type for binary uploads
             req.headers["Content-Type"] = "application/octet-stream";
 
             // Copy data into request body
-            req.body.resize(data.size());
-            if (!data.empty()) {
-                std::memcpy(req.body.data(), data.data(), data.size());
+            req.body.resize(dataCopy.size());
+            if (!dataCopy.empty()) {
+                std::memcpy(req.body.data(), dataCopy.data(), dataCopy.size());
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PUT failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -216,28 +258,41 @@ FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::deleteFile(const std::string& path) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg](FileOperationHandle::OpState& s,
                                      const std::string& p,
                                      const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::DELETE_;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!(r.statusCode == 200 || r.statusCode == 204)) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "DELETE failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -250,30 +305,43 @@ FileOperationHandle WebDAVFileSystemBackend::deleteFile(const std::string& path)
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::createFile(const std::string& path) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg](FileOperationHandle::OpState& s,
                                      const std::string& p,
                                      const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::PUT;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["Content-Type"] = "application/octet-stream";
             // Empty body creates/empties the file
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PUT (create) failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -286,28 +354,41 @@ FileOperationHandle WebDAVFileSystemBackend::createFile(const std::string& path)
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::createDirectory(const std::string& path) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg](FileOperationHandle::OpState& s,
                                      const std::string& p,
                                      const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::MKCOL;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode != 201) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "MKCOL failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -320,17 +401,30 @@ FileOperationHandle WebDAVFileSystemBackend::createDirectory(const std::string& 
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg](FileOperationHandle::OpState& s,
                                      const std::string& p,
                                      const ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
             const std::string bodyXml =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                 "<D:propfind xmlns:D=\"DAV:\">"
@@ -344,17 +438,17 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::PROPFIND;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["Depth"] = "0";
             req.headers["Content-Type"] = "application/xml; charset=utf-8";
             req.body.assign(bodyXml.begin(), bodyXml.end());
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 if (fe == FileError::FileNotFound) {
@@ -408,7 +502,9 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 bool WebDAVFileSystemBackend::exists(const std::string& path) {
@@ -434,7 +530,7 @@ bool WebDAVFileSystemBackend::exists(const std::string& path) {
         req.headers["Content-Type"] = "application/xml; charset=utf-8";
         req.body.assign(bodyXml.begin(), bodyXml.end());
 
-        auto r = _client.execute(req);
+        auto r = _client->execute(req);
         if (r.statusCode != 200 && r.statusCode != 207) return false;
         auto infos = parsePropfindXml(r.body);
         if (infos.empty()) return false;
@@ -454,14 +550,25 @@ bool WebDAVFileSystemBackend::exists(const std::string& path) {
 FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& path, ListDirectoryOptions options) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, options](FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, options](FileOperationHandle::OpState& s,
                                               const std::string& p,
                                               const ExecContext& /*ctx*/){
         try {
             // Ensure trailing slash for directory
             std::string pathForUrl = p;
             if (pathForUrl.empty() || pathForUrl.back() != '/') pathForUrl.push_back('/');
-            const std::string url = buildUrl(pathForUrl);
+            if (pathForUrl.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (pathForUrl.empty() || pathForUrl[0] == '/' ? pathForUrl : "/" + pathForUrl);
 
             const std::string bodyXml =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
@@ -476,17 +583,17 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::PROPFIND;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["Depth"] = "1";
             req.headers["Content-Type"] = "application/xml; charset=utf-8";
             req.body.assign(bodyXml.begin(), bodyXml.end());
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PROPFIND d1 failed: " + std::to_string(r.statusCode), p);
@@ -504,7 +611,7 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
                 std::string norm = Utils::normalizeHrefForCompare(ri.href, /*ensureTrailingSlashIfCollection=*/ri.isCollection);
                 if (norm == selfNorm) continue; // skip self
 
-                auto vfsPathOpt = hrefToVfsPath(ri.href, _cfg.baseUrl);
+                auto vfsPathOpt = hrefToVfsPath(ri.href, cfg.baseUrl);
                 if (!vfsPathOpt) continue; // out-of-scope
                 std::string vfsPath = *vfsPathOpt;
 
@@ -535,7 +642,9 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
             s.setError(FileError::NetworkError, e.what(), p);
             s.complete(FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 std::unique_ptr<FileStream> WebDAVFileSystemBackend::openStream(const std::string& path, StreamOptions options) {
@@ -565,7 +674,7 @@ std::unique_ptr<FileStream> WebDAVFileSystemBackend::openStream(const std::strin
         streamOpts.totalDeadline = std::chrono::milliseconds(0);  // No total deadline for streaming
 
         // Execute streaming request
-        auto handle = _client.executeStream(req, streamOpts);
+        auto handle = _client->executeStream(req, streamOpts);
 
         // Create WebDAVReadStream wrapper
         return std::make_unique<WebDAVReadStream>(std::move(handle), url);
@@ -605,20 +714,34 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
     std::optional<std::string> ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
-    return _vfs->submit(srcPath, [this, srcPath, dstPath, overwrite, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, srcPath, dstPath, overwrite, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
                                                                                   const std::string& /*p*/,
                                                                                   const Core::IO::ExecContext& /*ctx*/) {
         try {
-            const std::string srcUrl = buildUrl(srcPath);
-            const std::string dstUrl = buildUrl(dstPath);
+            if (srcPath.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected in source");
+            }
+            if (dstPath.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected in destination");
+            }
+            const std::string srcUrl = cfg.baseUrl + (srcPath.empty() || srcPath[0] == '/' ? srcPath : "/" + srcPath);
+            const std::string dstUrl = cfg.baseUrl + (dstPath.empty() || dstPath[0] == '/' ? dstPath : "/" + dstPath);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::MOVE;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = srcUrl;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["Destination"] = dstUrl; // absolute-path OK for MiniDavServer
             req.headers["Overwrite"] = overwrite ? "T" : "F";
@@ -626,7 +749,7 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
                 req.headers["If-Match"] = *ifMatchETag;
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode == 201 || r.statusCode == 204) {
                 s.complete(Core::IO::FileOpStatus::Complete);
                 return;
@@ -638,7 +761,9 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
             s.setError(Core::IO::FileError::NetworkError, e.what(), srcPath);
             s.complete(Core::IO::FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(srcPath, std::move(operation));
 }
 
 Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
@@ -648,26 +773,40 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
     bool depth0) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
-    return _vfs->submit(srcPath, [this, srcPath, dstPath, overwrite, depth0](Core::IO::FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, srcPath, dstPath, overwrite, depth0](Core::IO::FileOperationHandle::OpState& s,
                                                                              const std::string& /*p*/,
                                                                              const Core::IO::ExecContext& /*ctx*/) {
         try {
-            const std::string srcUrl = buildUrl(srcPath);
-            const std::string dstUrl = buildUrl(dstPath);
+            if (srcPath.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected in source");
+            }
+            if (dstPath.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected in destination");
+            }
+            const std::string srcUrl = cfg.baseUrl + (srcPath.empty() || srcPath[0] == '/' ? srcPath : "/" + srcPath);
+            const std::string dstUrl = cfg.baseUrl + (dstPath.empty() || dstPath[0] == '/' ? dstPath : "/" + dstPath);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::COPY;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = srcUrl;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             req.headers["Destination"] = dstUrl;
             req.headers["Overwrite"] = overwrite ? "T" : "F";
             if (depth0) req.headers["Depth"] = "0";
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (r.statusCode == 201 || r.statusCode == 204) {
                 s.complete(Core::IO::FileOpStatus::Complete);
                 return;
@@ -679,7 +818,9 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
             s.setError(Core::IO::FileError::NetworkError, e.what(), srcPath);
             s.complete(Core::IO::FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(srcPath, std::move(operation));
 }
 
 
@@ -689,31 +830,45 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
     const std::string& ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, data, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+    // Copy data to vector for safe capture
+    std::vector<std::byte> dataCopy(data.begin(), data.end());
+
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, dataCopy = std::move(dataCopy), ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
                                                         const std::string& p,
                                                         const Core::IO::ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::PUT;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             if (!ifMatchETag.empty()) {
                 req.headers["If-Match"] = ifMatchETag;
             }
             req.headers["Content-Type"] = "application/octet-stream";
 
-            req.body.resize(data.size());
-            if (!data.empty()) {
-                std::memcpy(req.body.data(), data.data(), data.size());
+            req.body.resize(dataCopy.size());
+            if (!dataCopy.empty()) {
+                std::memcpy(req.body.data(), dataCopy.data(), dataCopy.size());
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!(r.statusCode == 200 || r.statusCode == 201 || r.statusCode == 204)) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "PUT failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -725,7 +880,9 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
             s.setError(Core::IO::FileError::NetworkError, e.what(), p);
             s.complete(Core::IO::FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
@@ -733,25 +890,36 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
     const std::string& ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
-    return _vfs->submit(path, [this, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
+    std::shared_ptr<HTTP::HttpClient> client;
+    Config cfg;
+    {
+        std::lock_guard<std::mutex> lock(_clientMutex);
+        client = _client;
+        cfg = _cfg;
+    }
+
+    auto operation = [client, cfg, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
                                                   const std::string& p,
                                                   const Core::IO::ExecContext& /*ctx*/){
         try {
-            const std::string url = buildUrl(p);
+            if (p.find("..") != std::string::npos) {
+                throw std::invalid_argument("Path traversal detected");
+            }
+            const std::string url = cfg.baseUrl + (p.empty() || p[0] == '/' ? p : "/" + p);
 
             HTTP::HttpRequest req;
             req.method = HTTP::HttpMethod::DELETE_;
-            req.scheme = _cfg.scheme;
-            req.host = _cfg.host;
+            req.scheme = cfg.scheme;
+            req.host = cfg.host;
             req.path = url;
-            if (!_cfg.authHeader.empty()) {
-                req.headers["Authorization"] = _cfg.authHeader;
+            if (!cfg.authHeader.empty()) {
+                req.headers["Authorization"] = cfg.authHeader;
             }
             if (!ifMatchETag.empty()) {
                 req.headers["If-Match"] = ifMatchETag;
             }
 
-            auto r = _client.execute(req);
+            auto r = client->execute(req);
             if (!(r.statusCode == 200 || r.statusCode == 204)) {
                 auto fe = mapHttpStatus(r.statusCode);
                 s.setError(fe, "DELETE failed: " + std::to_string(r.statusCode) + " " + r.statusMessage, p);
@@ -763,7 +931,9 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
             s.setError(Core::IO::FileError::NetworkError, e.what(), p);
             s.complete(Core::IO::FileOpStatus::Failed);
         }
-    });
+    };
+
+    return _vfs->submit(path, std::move(operation));
 }
 
 } // namespace EntropyEngine::Networking::WebDAV

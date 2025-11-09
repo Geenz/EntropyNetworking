@@ -92,6 +92,22 @@ Result<void> NetworkSession::disconnect() {
     return _connection->disconnect();
 }
 
+void NetworkSession::setupCallbacks() {
+    if (!_connection) {
+        return;
+    }
+
+    // Register message and state callbacks with the connection
+    // This is what SessionManager does automatically, but direct users must call manually
+    _connection->setMessageCallback([this](const std::vector<uint8_t>& data) {
+        this->onMessageReceived(data);
+    });
+
+    _connection->setStateCallback([this](ConnectionState state) {
+        this->onConnectionStateChanged(state);
+    });
+}
+
 bool NetworkSession::isConnected() const {
     return _connection && _connection->isConnected();
 }
@@ -232,6 +248,33 @@ Result<void> NetworkSession::sendPropertyUpdate(
         return validateResult;
     }
 
+    // Check if batching is enabled
+    if (_batchingEnabled.load(std::memory_order_relaxed)) {
+        // Accumulate for batching
+        std::lock_guard<std::mutex> lock(_pendingUpdatesMutex);
+
+        // Check if this property already has a pending update (deduplication)
+        auto it = _pendingPropertyUpdates.find(hash);
+        if (it != _pendingPropertyUpdates.end()) {
+            // Update exists, replace value
+            it->second.value = value;
+            it->second.timestamp = std::chrono::steady_clock::now();
+
+            std::lock_guard<std::mutex> statsLock(_batchStatsMutex);
+            _batchStats.updatesDeduped++;
+        } else {
+            // New update
+            _pendingPropertyUpdates[hash] = PendingPropertyUpdate{
+                type,
+                value,
+                std::chrono::steady_clock::now()
+            };
+        }
+
+        return Result<void>::ok();
+    }
+
+    // Batching disabled - send immediately (original behavior)
     try {
         capnp::MallocMessageBuilder builder;
         auto message = builder.initRoot<Message>();
@@ -1003,6 +1046,108 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         }
         _activeCallbacks.fetch_sub(1, std::memory_order_release);
     }
+}
+
+// Property update batching methods
+
+void NetworkSession::setBatchingEnabled(bool enabled) {
+    _batchingEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+Result<void> NetworkSession::flushPropertyUpdates() {
+    // Move pending updates out of accumulator
+    std::unordered_map<PropertyHash, PendingPropertyUpdate> updates;
+    {
+        std::lock_guard<std::mutex> lock(_pendingUpdatesMutex);
+        if (_pendingPropertyUpdates.empty()) {
+            return Result<void>::ok(); // Nothing to flush
+        }
+        updates = std::move(_pendingPropertyUpdates);
+        _pendingPropertyUpdates.clear();
+    }
+
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        // Build Cap'n Proto PropertyUpdateBatch
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto batch = message.initPropertyUpdateBatch();
+
+        // Set timestamp and sequence
+        batch.setTimestamp(getCurrentTimestampMicros());
+        batch.setSequence(_batchSequenceNumber.fetch_add(1, std::memory_order_relaxed));
+
+        // Add all updates
+        auto updatesList = batch.initUpdates(updates.size());
+        size_t index = 0;
+        for (const auto& [hash, pending] : updates) {
+            auto update = updatesList[index++];
+
+            // Set property hash
+            auto ph = update.initPropertyHash();
+            ph.setHigh(hash.high);
+            ph.setLow(hash.low);
+
+            // Set type
+            update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(pending.type)));
+
+            // Set value based on type
+            auto valueBuilder = update.initValue();
+            std::visit([&valueBuilder](const auto& v) {
+                using T = std::decay_t<decltype(v)>;
+                if constexpr (std::is_same_v<T, int32_t>) valueBuilder.setInt32(v);
+                else if constexpr (std::is_same_v<T, int64_t>) valueBuilder.setInt64(v);
+                else if constexpr (std::is_same_v<T, float>) valueBuilder.setFloat32(v);
+                else if constexpr (std::is_same_v<T, double>) valueBuilder.setFloat64(v);
+                else if constexpr (std::is_same_v<T, Vec2>) { auto b = valueBuilder.initVec2(); b.setX(v.x); b.setY(v.y); }
+                else if constexpr (std::is_same_v<T, Vec3>) { auto b = valueBuilder.initVec3(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); }
+                else if constexpr (std::is_same_v<T, Vec4>) { auto b = valueBuilder.initVec4(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
+                else if constexpr (std::is_same_v<T, Quat>) { auto b = valueBuilder.initQuat(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
+                else if constexpr (std::is_same_v<T, std::string>) valueBuilder.setString(v);
+                else if constexpr (std::is_same_v<T, bool>) valueBuilder.setBool(v);
+                else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+            }, pending.value);
+        }
+
+        // Serialize
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Send on unreliable channel
+        auto result = _connection->sendUnreliable(serialized.value);
+
+        // Update statistics
+        std::lock_guard<std::mutex> lock(_batchStatsMutex);
+        if (result.success()) {
+            _batchStats.totalBatchesSent++;
+            _batchStats.totalUpdatesSent += updates.size();
+            _batchStats.averageBatchSize = _batchStats.totalUpdatesSent / std::max(_batchStats.totalBatchesSent, static_cast<uint64_t>(1));
+        }
+
+        return result;
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+NetworkSession::PropertyBatchStats NetworkSession::getPropertyBatchStats() const {
+    std::lock_guard<std::mutex> lock(_batchStatsMutex);
+    return _batchStats;
+}
+
+size_t NetworkSession::getPendingPropertyUpdateCount() const {
+    std::lock_guard<std::mutex> lock(_pendingUpdatesMutex);
+    return _pendingPropertyUpdates.size();
 }
 
 } // namespace EntropyEngine::Networking

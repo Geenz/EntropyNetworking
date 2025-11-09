@@ -22,6 +22,7 @@
 #include <span>
 #include <vector>
 #include <optional>
+#include <mutex>
 
 #include <VirtualFileSystem/IFileSystemBackend.h>
 
@@ -84,7 +85,7 @@ public:
      * @param cfg Backend configuration (scheme, host, base URL)
      */
     explicit WebDAVFileSystemBackend(Config cfg)
-        : _client(), _cfg(std::move(cfg)) {}
+        : _client(std::make_shared<HTTP::HttpClient>()), _cfg(std::move(cfg)) {}
 
     /**
      * @brief Reads file via HTTP GET (supports Range header)
@@ -210,8 +211,9 @@ public:
     std::string normalizeKey(const std::string& path) const override { return path; }
 
 private:
-    HTTP::HttpClient _client;  ///< HTTP client for WebDAV operations
-    Config _cfg;               ///< Backend configuration
+    const std::shared_ptr<HTTP::HttpClient> _client;  ///< HTTP client for WebDAV operations
+    const Config _cfg;               ///< Backend configuration
+    mutable std::mutex _clientMutex;  ///< Protects _client shared_ptr copy (ref count)
 
     /**
      * @brief Builds full URL from VFS path

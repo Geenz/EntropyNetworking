@@ -30,6 +30,120 @@ namespace EntropyEngine::Networking {
         return "RTC_?";
     }
 
+    // Binary envelope framing for signaling messages
+    // Format: [Type:1B][Length:4B big-endian][Payload]
+    // Type: 0x01=SDP, 0x02=ICE
+    // Payload: For SDP: type\0sdp, For ICE: candidate\0mid
+
+    enum class SignalingMessageType : uint8_t {
+        SDP = 0x01,
+        ICE = 0x02
+    };
+
+    // Encode uint32_t to big-endian bytes
+    static void encodeU32BigEndian(uint32_t value, uint8_t* dest) {
+        dest[0] = (value >> 24) & 0xFF;
+        dest[1] = (value >> 16) & 0xFF;
+        dest[2] = (value >> 8) & 0xFF;
+        dest[3] = value & 0xFF;
+    }
+
+    // Decode big-endian bytes to uint32_t
+    static uint32_t decodeU32BigEndian(const uint8_t* src) {
+        return (static_cast<uint32_t>(src[0]) << 24) |
+               (static_cast<uint32_t>(src[1]) << 16) |
+               (static_cast<uint32_t>(src[2]) << 8) |
+               static_cast<uint32_t>(src[3]);
+    }
+
+    // Encode SDP description into binary envelope
+    static std::vector<uint8_t> encodeSDPMessage(const std::string& type, const std::string& sdp) {
+        // Payload: type\0sdp
+        std::vector<uint8_t> payload;
+        payload.insert(payload.end(), type.begin(), type.end());
+        payload.push_back(0);  // null terminator
+        payload.insert(payload.end(), sdp.begin(), sdp.end());
+
+        // Envelope: [Type:1B][Length:4B][Payload]
+        std::vector<uint8_t> message;
+        message.reserve(5 + payload.size());
+        message.push_back(static_cast<uint8_t>(SignalingMessageType::SDP));
+
+        uint8_t lengthBytes[4];
+        encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+        message.insert(message.end(), lengthBytes, lengthBytes + 4);
+        message.insert(message.end(), payload.begin(), payload.end());
+
+        return message;
+    }
+
+    // Encode ICE candidate into binary envelope
+    static std::vector<uint8_t> encodeICEMessage(const std::string& candidate, const std::string& mid) {
+        // Payload: candidate\0mid
+        std::vector<uint8_t> payload;
+        payload.insert(payload.end(), candidate.begin(), candidate.end());
+        payload.push_back(0);  // null terminator
+        payload.insert(payload.end(), mid.begin(), mid.end());
+
+        // Envelope: [Type:1B][Length:4B][Payload]
+        std::vector<uint8_t> message;
+        message.reserve(5 + payload.size());
+        message.push_back(static_cast<uint8_t>(SignalingMessageType::ICE));
+
+        uint8_t lengthBytes[4];
+        encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+        message.insert(message.end(), lengthBytes, lengthBytes + 4);
+        message.insert(message.end(), payload.begin(), payload.end());
+
+        return message;
+    }
+
+    // Decode binary envelope message
+    // Returns: {type, str1, str2} where for SDP: str1=type, str2=sdp; for ICE: str1=candidate, str2=mid
+    static std::optional<std::tuple<SignalingMessageType, std::string, std::string>>
+    decodeSignalingMessage(const std::vector<uint8_t>& data) {
+        // Minimum size: Type(1) + Length(4) = 5 bytes
+        if (data.size() < 5) {
+            ENTROPY_LOG_ERROR("Signaling message too short");
+            return std::nullopt;
+        }
+
+        SignalingMessageType msgType = static_cast<SignalingMessageType>(data[0]);
+        uint32_t payloadLength = decodeU32BigEndian(&data[1]);
+
+        // Verify payload length
+        if (data.size() != 5 + payloadLength) {
+            ENTROPY_LOG_ERROR(std::format("Signaling message length mismatch: expected {}, got {}",
+                5 + payloadLength, data.size()));
+            return std::nullopt;
+        }
+
+        // Extract payload
+        const uint8_t* payload = &data[5];
+
+        // Find null terminator
+        const uint8_t* nullPos = static_cast<const uint8_t*>(
+            std::memchr(payload, 0, payloadLength));
+        if (!nullPos) {
+            ENTROPY_LOG_ERROR("Signaling message payload missing null terminator");
+            return std::nullopt;
+        }
+
+        size_t firstStringLen = nullPos - payload;
+        size_t secondStringStart = firstStringLen + 1;
+
+        if (secondStringStart > payloadLength) {
+            ENTROPY_LOG_ERROR("Signaling message payload truncated");
+            return std::nullopt;
+        }
+
+        std::string str1(reinterpret_cast<const char*>(payload), firstStringLen);
+        std::string str2(reinterpret_cast<const char*>(payload + secondStringStart),
+                        payloadLength - secondStringStart);
+
+        return std::make_tuple(msgType, str1, str2);
+    }
+
     static const char* connStateToString(ConnectionState s) {
         switch (s) {
             case ConnectionState::Disconnected: return "Disconnected";
@@ -309,9 +423,10 @@ namespace EntropyEngine::Networking {
                 }
 
                 auto now = std::chrono::system_clock::now();
-                self->_stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now.time_since_epoch()).count();
-                self->_stats.lastActivityTime = self->_stats.connectTime;
+                self->_stats.connectTime.store(timestamp, std::memory_order_relaxed);
+                self->_stats.lastActivityTime.store(timestamp, std::memory_order_relaxed);
                 pending = ConnectionState::Connected;
             }
         }
@@ -365,8 +480,7 @@ namespace EntropyEngine::Networking {
         if (!guard.isValid()) return;
         auto* self = guard.getConnection();
 
-        ENTROPY_LOG_DEBUG(std::format("onMessageCallback: Received {} bytes on channel id={} for connection {}", size, id, (void*)self));
-
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
         // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
         if (size <= 0) return;
 
@@ -378,13 +492,13 @@ namespace EntropyEngine::Networking {
         std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
                                    reinterpret_cast<const uint8_t*>(message) + size);
 
-        {
-            std::lock_guard<std::mutex> lock(self->_mutex);
-            self->_stats.bytesReceived += size;
-            self->_stats.messagesReceived++;
-            self->_stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        self->_stats.bytesReceived.fetch_add(size, std::memory_order_relaxed);
+        self->_stats.messagesReceived.fetch_add(1, std::memory_order_relaxed);
+        self->_stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         if (!self->isShuttingDown()) {
             self->onMessageReceived(data);
@@ -542,33 +656,33 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        // Prefer cached open state and snapshot ID under lock to avoid races
-        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _dataChannelId;
+            open = _dataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
-        ENTROPY_LOG_DEBUG(std::format("Sending {} bytes on channel id={}", data.size(), id));
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
         int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
             ENTROPY_LOG_ERROR(std::format("rtcSendMessage failed with code {}", result));
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data");
         }
-        ENTROPY_LOG_DEBUG(std::format("rtcSendMessage succeeded, returned {}", result));
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -578,11 +692,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _dataChannelId;
+            open = _dataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
@@ -599,13 +715,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to trySend data");
         }
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -615,11 +731,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        bool open = _unreliableDataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _unreliableDataChannelId;
+            open = _unreliableDataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
@@ -632,13 +750,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send unreliable data");
         }
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -648,7 +766,7 @@ namespace EntropyEngine::Networking {
     }
 
     ConnectionStats WebRTCConnection::getStats() const {
-        std::lock_guard<std::mutex> lock(_mutex);
+        // No lock needed - ConnectionStats copy constructor handles atomic loads
         return _stats;
     }
 
@@ -872,40 +990,46 @@ namespace EntropyEngine::Networking {
         _webSocket = std::make_shared<rtc::WebSocket>();
 
         // Set up signaling callbacks to bridge between WebSocket and WebRTCConnection
+        // Uses binary envelope framing for robustness
         _signalingCallbacks.onLocalDescription = [webSocket = _webSocket](const std::string& type, const std::string& sdp) {
             if (webSocket && webSocket->isOpen()) {
-                // Format: "type\nsdp"
-                webSocket->send(type + "\n" + sdp);
+                auto encoded = encodeSDPMessage(type, sdp);
+                webSocket->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
             }
         };
 
         _signalingCallbacks.onLocalCandidate = [webSocket = _webSocket](const std::string& candidate, const std::string& mid) {
             if (webSocket && webSocket->isOpen()) {
-                // Format: "candidate|mid"
-                webSocket->send(candidate + "|" + mid);
+                auto encoded = encodeICEMessage(candidate, mid);
+                webSocket->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
             }
         };
 
         // Set up WebSocket message handler for incoming signaling
+        // Expects binary envelope format
         _webSocket->onMessage([this](auto data) {
-            if (std::holds_alternative<std::string>(data)) {
-                std::string msg = std::get<std::string>(data);
+            if (std::holds_alternative<rtc::binary>(data)) {
+                const auto& binaryData = std::get<rtc::binary>(data);
+                // Convert std::byte to uint8_t
+                std::vector<uint8_t> msg;
+                msg.reserve(binaryData.size());
+                for (const auto& byte : binaryData) {
+                    msg.push_back(static_cast<uint8_t>(byte));
+                }
 
-                // Check if this is an ICE candidate (has '|' separator)
-                size_t pipeSeparator = msg.find('|');
-                if (pipeSeparator != std::string::npos) {
-                    // ICE candidate format: "candidate|mid"
-                    std::string candidateStr = msg.substr(0, pipeSeparator);
-                    std::string mid = msg.substr(pipeSeparator + 1);
-                    addRemoteCandidate(candidateStr, mid);
-                } else {
-                    // SDP format: "type\nsdp"
-                    size_t newlineSeparator = msg.find('\n');
-                    if (newlineSeparator != std::string::npos) {
-                        std::string type = msg.substr(0, newlineSeparator);
-                        std::string sdp = msg.substr(newlineSeparator + 1);
-                        setRemoteDescription(type, sdp);
-                    }
+                auto decoded = decodeSignalingMessage(msg);
+                if (!decoded) {
+                    ENTROPY_LOG_ERROR("Failed to decode signaling message");
+                    return;
+                }
+
+                auto [msgType, str1, str2] = *decoded;
+                if (msgType == SignalingMessageType::SDP) {
+                    // str1=type, str2=sdp
+                    setRemoteDescription(str1, str2);
+                } else if (msgType == SignalingMessageType::ICE) {
+                    // str1=candidate, str2=mid
+                    addRemoteCandidate(str1, str2);
                 }
             }
         });

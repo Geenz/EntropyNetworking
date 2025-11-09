@@ -11,9 +11,124 @@
 #include "WebRTCConnection.h"
 #include <Logging/Logger.h>
 #include <format>
+#include <cstring>
 
 namespace EntropyEngine {
 namespace Networking {
+
+// Binary envelope framing for signaling messages (same as in WebRTCConnection.cpp)
+// Format: [Type:1B][Length:4B big-endian][Payload]
+// Type: 0x01=SDP, 0x02=ICE
+// Payload: For SDP: type\0sdp, For ICE: candidate\0mid
+
+enum class SignalingMessageType : uint8_t {
+    SDP = 0x01,
+    ICE = 0x02
+};
+
+// Encode uint32_t to big-endian bytes
+static void encodeU32BigEndian(uint32_t value, uint8_t* dest) {
+    dest[0] = (value >> 24) & 0xFF;
+    dest[1] = (value >> 16) & 0xFF;
+    dest[2] = (value >> 8) & 0xFF;
+    dest[3] = value & 0xFF;
+}
+
+// Decode big-endian bytes to uint32_t
+static uint32_t decodeU32BigEndian(const uint8_t* src) {
+    return (static_cast<uint32_t>(src[0]) << 24) |
+           (static_cast<uint32_t>(src[1]) << 16) |
+           (static_cast<uint32_t>(src[2]) << 8) |
+           static_cast<uint32_t>(src[3]);
+}
+
+// Encode SDP description into binary envelope
+static std::vector<uint8_t> encodeSDPMessage(const std::string& type, const std::string& sdp) {
+    // Payload: type\0sdp
+    std::vector<uint8_t> payload;
+    payload.insert(payload.end(), type.begin(), type.end());
+    payload.push_back(0);  // null terminator
+    payload.insert(payload.end(), sdp.begin(), sdp.end());
+
+    // Envelope: [Type:1B][Length:4B][Payload]
+    std::vector<uint8_t> message;
+    message.reserve(5 + payload.size());
+    message.push_back(static_cast<uint8_t>(SignalingMessageType::SDP));
+
+    uint8_t lengthBytes[4];
+    encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+    message.insert(message.end(), lengthBytes, lengthBytes + 4);
+    message.insert(message.end(), payload.begin(), payload.end());
+
+    return message;
+}
+
+// Encode ICE candidate into binary envelope
+static std::vector<uint8_t> encodeICEMessage(const std::string& candidate, const std::string& mid) {
+    // Payload: candidate\0mid
+    std::vector<uint8_t> payload;
+    payload.insert(payload.end(), candidate.begin(), candidate.end());
+    payload.push_back(0);  // null terminator
+    payload.insert(payload.end(), mid.begin(), mid.end());
+
+    // Envelope: [Type:1B][Length:4B][Payload]
+    std::vector<uint8_t> message;
+    message.reserve(5 + payload.size());
+    message.push_back(static_cast<uint8_t>(SignalingMessageType::ICE));
+
+    uint8_t lengthBytes[4];
+    encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+    message.insert(message.end(), lengthBytes, lengthBytes + 4);
+    message.insert(message.end(), payload.begin(), payload.end());
+
+    return message;
+}
+
+// Decode binary envelope message
+// Returns: {type, str1, str2} where for SDP: str1=type, str2=sdp; for ICE: str1=candidate, str2=mid
+static std::optional<std::tuple<SignalingMessageType, std::string, std::string>>
+decodeSignalingMessage(const std::vector<uint8_t>& data) {
+    // Minimum size: Type(1) + Length(4) = 5 bytes
+    if (data.size() < 5) {
+        ENTROPY_LOG_ERROR("Signaling message too short");
+        return std::nullopt;
+    }
+
+    SignalingMessageType msgType = static_cast<SignalingMessageType>(data[0]);
+    uint32_t payloadLength = decodeU32BigEndian(&data[1]);
+
+    // Verify payload length
+    if (data.size() != 5 + payloadLength) {
+        ENTROPY_LOG_ERROR(std::format("Signaling message length mismatch: expected {}, got {}",
+            5 + payloadLength, data.size()));
+        return std::nullopt;
+    }
+
+    // Extract payload
+    const uint8_t* payload = &data[5];
+
+    // Find null terminator
+    const uint8_t* nullPos = static_cast<const uint8_t*>(
+        std::memchr(payload, 0, payloadLength));
+    if (!nullPos) {
+        ENTROPY_LOG_ERROR("Signaling message payload missing null terminator");
+        return std::nullopt;
+    }
+
+    size_t firstStringLen = nullPos - payload;
+    size_t secondStringStart = firstStringLen + 1;
+
+    if (secondStringStart > payloadLength) {
+        ENTROPY_LOG_ERROR("Signaling message payload truncated");
+        return std::nullopt;
+    }
+
+    std::string str1(reinterpret_cast<const char*>(payload), firstStringLen);
+    std::string str2(reinterpret_cast<const char*>(payload + secondStringStart),
+                    payloadLength - secondStringStart);
+
+    return std::make_tuple(msgType, str1, str2);
+}
 
 WebRTCServer::WebRTCServer(ConnectionManager* connMgr, const RemoteServerConfig& config)
     : _connMgr(connMgr)
@@ -137,15 +252,16 @@ void WebRTCServer::handleWebSocketClient(std::shared_ptr<rtc::WebSocket> ws) {
     config.webrtcConfig.iceServers = _config.webrtcConfig.iceServers;
 
     // Set up signaling callbacks to send through WebSocket
+    // Uses binary envelope framing for robustness
     config.signalingCallbacks.onLocalDescription = [ws](const std::string& type, const std::string& sdp) {
         ENTROPY_LOG_INFO(std::format("WebRTCServer: Sending {} to client", type));
-        // Format: "type\nsdp"
-        ws->send(type + "\n" + sdp);
+        auto encoded = encodeSDPMessage(type, sdp);
+        ws->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
     };
 
     config.signalingCallbacks.onLocalCandidate = [ws](const std::string& candidate, const std::string& mid) {
-        // Format: "candidate|mid"
-        ws->send(candidate + "|" + mid);
+        auto encoded = encodeICEMessage(candidate, mid);
+        ws->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
     };
 
     // Open WebRTC connection
@@ -172,27 +288,33 @@ void WebRTCServer::handleWebSocketClient(std::shared_ptr<rtc::WebSocket> ws) {
     });
 
     // Set up signaling message handler
+    // Expects binary envelope format
     ws->onMessage([conn, connMgr = _connMgr](auto data) {
-        if (std::holds_alternative<std::string>(data)) {
-            std::string msg = std::get<std::string>(data);
+        if (std::holds_alternative<rtc::binary>(data)) {
+            const auto& binaryData = std::get<rtc::binary>(data);
+            // Convert std::byte to uint8_t
+            std::vector<uint8_t> msg;
+            msg.reserve(binaryData.size());
+            for (const auto& byte : binaryData) {
+                msg.push_back(static_cast<uint8_t>(byte));
+            }
+
             auto* webrtcConn = dynamic_cast<WebRTCConnection*>(connMgr->getConnectionPointer(conn));
             if (!webrtcConn) return;
 
-            // Check if this is an ICE candidate (has '|' separator)
-            size_t pipeSeparator = msg.find('|');
-            if (pipeSeparator != std::string::npos) {
-                // ICE candidate format: "candidate|mid"
-                std::string candidateStr = msg.substr(0, pipeSeparator);
-                std::string mid = msg.substr(pipeSeparator + 1);
-                webrtcConn->addRemoteCandidate(candidateStr, mid);
-            } else {
-                // SDP format: "type\nsdp"
-                size_t newlineSeparator = msg.find('\n');
-                if (newlineSeparator != std::string::npos) {
-                    std::string type = msg.substr(0, newlineSeparator);
-                    std::string sdp = msg.substr(newlineSeparator + 1);
-                    webrtcConn->setRemoteDescription(type, sdp);
-                }
+            auto decoded = decodeSignalingMessage(msg);
+            if (!decoded) {
+                ENTROPY_LOG_ERROR("Failed to decode signaling message");
+                return;
+            }
+
+            auto [msgType, str1, str2] = *decoded;
+            if (msgType == SignalingMessageType::SDP) {
+                // str1=type, str2=sdp
+                webrtcConn->setRemoteDescription(str1, str2);
+            } else if (msgType == SignalingMessageType::ICE) {
+                // str1=candidate, str2=mid
+                webrtcConn->addRemoteCandidate(str1, str2);
             }
         }
     });

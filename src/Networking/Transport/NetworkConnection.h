@@ -167,8 +167,8 @@ protected:
      */
     void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
         // Check shutdown flag first (fast path)
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
         bool shutdown1 = _callbacksShutdown.load(std::memory_order_acquire);
-        ENTROPY_LOG_DEBUG(std::format("NetworkConnection::onMessageReceived: {} bytes, shutdown={}", data.size(), shutdown1));
         if (shutdown1) {
             ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set)");
             return;
@@ -194,13 +194,8 @@ protected:
             cb = _messageCallback; // copy under lock
         }
 
-        ENTROPY_LOG_DEBUG(std::format("NetworkConnection::onMessageReceived: callback is {}", cb ? "set" : "NOT SET"));
         if (cb) {
-            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Invoking callback");
             cb(data); // invoke outside lock
-            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Callback returned");
-        } else {
-            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: No callback to invoke");
         }
 
         // Counter decrements here via RAII, ensuring destructor waits

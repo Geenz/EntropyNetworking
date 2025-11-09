@@ -208,7 +208,7 @@ namespace EntropyEngine::Networking {
         std::vector<std::pair<std::string, std::string>> _pendingRemoteCandidates; // {candidate, mid} (requires mutex)
 
         mutable std::mutex _mutex;
-        ConnectionStats _stats;
+        ConnectionStats _stats;  // Atomic counters (no mutex needed for updates)
     };
 
 } // namespace EntropyEngine::Networking

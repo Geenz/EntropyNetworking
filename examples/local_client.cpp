@@ -124,12 +124,12 @@ int main() {
         auto stats = conn.getStats();
         ENTROPY_LOG_INFO("");
         ENTROPY_LOG_INFO("Connection Statistics:");
-        ENTROPY_LOG_INFO(std::format("  Bytes sent: {}", stats.bytesSent));
-        ENTROPY_LOG_INFO(std::format("  Bytes received: {}", stats.bytesReceived));
-        ENTROPY_LOG_INFO(std::format("  Messages sent: {}", stats.messagesSent));
-        ENTROPY_LOG_INFO(std::format("  Messages received: {}", stats.messagesReceived));
+        ENTROPY_LOG_INFO(std::format("  Bytes sent: {}", stats.bytesSent.load()));
+        ENTROPY_LOG_INFO(std::format("  Bytes received: {}", stats.bytesReceived.load()));
+        ENTROPY_LOG_INFO(std::format("  Messages sent: {}", stats.messagesSent.load()));
+        ENTROPY_LOG_INFO(std::format("  Messages received: {}", stats.messagesReceived.load()));
         ENTROPY_LOG_INFO(std::format("  Messages processed: {}", messagesReceived.load()));
-        ENTROPY_LOG_INFO(std::format("  Connection time: {} ms since epoch", stats.connectTime));
+        ENTROPY_LOG_INFO(std::format("  Connection time: {} ms since epoch", stats.connectTime.load()));
 
         // Disconnect
         ENTROPY_LOG_INFO("");

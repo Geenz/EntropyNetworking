@@ -73,6 +73,17 @@ public:
     bool isConnected() const;
     ConnectionState getState() const;
 
+    /**
+     * @brief Set up connection callbacks to route messages to this session
+     *
+     * This method registers this session's message and state callbacks with the
+     * underlying connection. SessionManager calls this automatically, but direct
+     * users (like tests) must call it manually after construction.
+     *
+     * @note Must be called before any messages will be received
+     */
+    void setupCallbacks();
+
     // Handshake
     Result<void> performHandshake(const std::string& clientType, const std::string& clientId);
     bool isHandshakeComplete() const { return _handshakeComplete; }
@@ -149,6 +160,20 @@ public:
     uint64_t getPacketLossEventCount() const { return _packetLossEvents.load(std::memory_order_relaxed); }
     uint64_t getSequenceUpdateFailureCount() const { return _sequenceUpdateFailures.load(std::memory_order_relaxed); }
     uint64_t getUnknownSchemaDropCount() const { return _unknownSchemaDrops.load(std::memory_order_relaxed); }
+
+    // Property update batching
+    void setBatchingEnabled(bool enabled);
+    bool isBatchingEnabled() const { return _batchingEnabled.load(std::memory_order_relaxed); }
+    Result<void> flushPropertyUpdates();
+
+    struct PropertyBatchStats {
+        uint64_t totalBatchesSent{0};
+        uint64_t totalUpdatesSent{0};
+        uint64_t updatesDeduped{0};
+        uint64_t averageBatchSize{0};
+    };
+    PropertyBatchStats getPropertyBatchStats() const;
+    size_t getPendingPropertyUpdateCount() const;
 
 private:
     static std::string generateSessionId();
@@ -231,6 +256,23 @@ private:
     // Shutdown coordination
     std::atomic<bool> _shuttingDown{false};
     std::atomic<uint32_t> _activeCallbacks{0};
+
+    // Property update batching
+    std::atomic<bool> _batchingEnabled{false};
+
+    struct PendingPropertyUpdate {
+        PropertyType type;
+        PropertyValue value;
+        std::chrono::steady_clock::time_point timestamp;
+    };
+    std::unordered_map<PropertyHash, PendingPropertyUpdate> _pendingPropertyUpdates;
+    mutable std::mutex _pendingUpdatesMutex;
+
+    std::atomic<uint32_t> _batchSequenceNumber{0};
+
+    // Batch statistics
+    mutable std::mutex _batchStatsMutex;
+    PropertyBatchStats _batchStats;
 
     mutable std::mutex _mutex;
 };

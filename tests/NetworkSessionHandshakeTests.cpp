@@ -110,6 +110,10 @@ protected:
         serverSession = std::make_unique<NetworkSession>(serverConn);
         clientSession = std::make_unique<NetworkSession>(clientConn);
 
+        // Set up callbacks manually (SessionManager does this automatically in production)
+        serverSession->setupCallbacks();
+        clientSession->setupCallbacks();
+
         return true;
     }
 
@@ -418,6 +422,10 @@ TEST_F(NetworkSessionHandshakeTests, MultipleSessionHandshakeCallbacks) {
 
     auto serverSession2 = std::make_unique<NetworkSession>(serverConn2);
     auto clientSession2 = std::make_unique<NetworkSession>(clientConn2);
+
+    // Set up callbacks manually (SessionManager does this automatically in production)
+    serverSession2->setupCallbacks();
+    clientSession2->setupCallbacks();
 
     // Set handshake callback on second server session
     serverSession2->setHandshakeCallback(

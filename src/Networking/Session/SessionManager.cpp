@@ -140,7 +140,7 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
         // This ensures callbacks work correctly even after connect() is called
         auto* session = slot.session.get();  // Capture raw pointer for lambda
         _connectionManager->setMessageCallback(connection, [session](const std::vector<uint8_t>& data) {
-            ENTROPY_LOG_DEBUG(std::format("NetworkSession: Lambda called with {} bytes for session {}", data.size(), (void*)session));
+            // Hot path: removed per-message DEBUG logging
             session->onMessageReceived(data);
         });
 
