@@ -21,7 +21,7 @@ WebDAVReadStream::~WebDAVReadStream() {
     close();
 }
 
-Core::IO::IoResult WebDAVReadStream::read(std::span<std::byte> dst) {
+Core::IO::IoResult WebDAVReadStream::read(std::span<uint8_t> dst) {
     Core::IO::IoResult r{};
 
     if (_closed) {
@@ -48,7 +48,7 @@ Core::IO::IoResult WebDAVReadStream::read(std::span<std::byte> dst) {
     }
 
     // Read from HttpClient StreamHandle
-    size_t bytesRead = _handle.read(reinterpret_cast<uint8_t*>(dst.data()), dst.size());
+    size_t bytesRead = _handle.read(dst.data(), dst.size());
 
     r.bytesTransferred = bytesRead;
     r.complete = _handle.isDone() && bytesRead == 0;
@@ -56,7 +56,7 @@ Core::IO::IoResult WebDAVReadStream::read(std::span<std::byte> dst) {
     return r;
 }
 
-Core::IO::IoResult WebDAVReadStream::write(std::span<const std::byte>) {
+Core::IO::IoResult WebDAVReadStream::write(std::span<const uint8_t>) {
     return {0, false, Core::IO::FileError::InvalidPath};
 }
 

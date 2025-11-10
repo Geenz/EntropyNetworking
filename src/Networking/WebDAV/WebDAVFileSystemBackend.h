@@ -105,12 +105,12 @@ public:
      * @return Immediate failure handle
      */
     Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const std::byte> data,
+                                            std::span<const uint8_t> data,
                                             Core::IO::WriteOptions options = {}) override;
 
     // Backend-specific helper overload: write with If-Match precondition (no EntropyCore API changes)
     Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const std::byte> data,
+                                            std::span<const uint8_t> data,
                                             const std::string& ifMatchETag);
 
     /**
@@ -134,7 +134,7 @@ public:
      * @param path VFS path to directory to create (e.g., "/newdir/")
      * @return FileOperationHandle that completes with success on 201 and maps 405/409 appropriately
      */
-    Core::IO::FileOperationHandle createDirectory(const std::string& path);
+    Core::IO::FileOperationHandle createDirectory(const std::string& path) override;
 
     // WebDAV MOVE/COPY operations (backend-specific helpers)
     Core::IO::FileOperationHandle move(const std::string& srcPath,

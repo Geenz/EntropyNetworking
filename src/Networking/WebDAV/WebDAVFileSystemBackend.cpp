@@ -134,8 +134,8 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
                 return;
             }
 
-            s.bytes.assign(reinterpret_cast<const std::byte*>(r.body.data()),
-                           reinterpret_cast<const std::byte*>(r.body.data()) + r.body.size());
+            s.bytes.assign(reinterpret_cast<const uint8_t*>(r.body.data()),
+                           reinterpret_cast<const uint8_t*>(r.body.data()) + r.body.size());
             s.complete(FileOpStatus::Complete);
         } catch (const std::exception& e) {
             s.setError(FileError::NetworkError, e.what(), p);
@@ -191,8 +191,8 @@ FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::stri
                 return;
             }
 
-            s.bytes.assign(reinterpret_cast<const std::byte*>(r.body.data()),
-                           reinterpret_cast<const std::byte*>(r.body.data()) + r.body.size());
+            s.bytes.assign(reinterpret_cast<const uint8_t*>(r.body.data()),
+                           reinterpret_cast<const uint8_t*>(r.body.data()) + r.body.size());
             s.complete(FileOpStatus::Complete);
         } catch (const std::exception& e) {
             s.setError(FileError::NetworkError, e.what(), p);
@@ -204,12 +204,12 @@ FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::stri
 }
 
 FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
-                                                       std::span<const std::byte> data,
+                                                       std::span<const uint8_t> data,
                                                        WriteOptions /*options*/) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
     // Copy data to vector for safe capture
-    std::vector<std::byte> dataCopy(data.begin(), data.end());
+    std::vector<uint8_t> dataCopy(data.begin(), data.end());
 
     std::shared_ptr<HTTP::HttpClient> client;
     Config cfg;
@@ -826,12 +826,12 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
 
 Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
     const std::string& path,
-    std::span<const std::byte> data,
+    std::span<const uint8_t> data,
     const std::string& ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
     // Copy data to vector for safe capture
-    std::vector<std::byte> dataCopy(data.begin(), data.end());
+    std::vector<uint8_t> dataCopy(data.begin(), data.end());
 
     std::shared_ptr<HTTP::HttpClient> client;
     Config cfg;

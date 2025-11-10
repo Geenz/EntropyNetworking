@@ -75,13 +75,13 @@ public:
      * @param buffer Destination buffer
      * @return IoResult with bytesTransferred, complete flag, or error
      */
-    Core::IO::IoResult read(std::span<std::byte> buffer) override;
+    Core::IO::IoResult read(std::span<uint8_t> buffer) override;
 
     /**
      * @brief Write not supported (read-only stream)
      * @return IoResult with InvalidPath error
      */
-    Core::IO::IoResult write(std::span<const std::byte> data) override;
+    Core::IO::IoResult write(std::span<const uint8_t> data) override;
 
     /**
      * @brief Seek not supported (forward-only stream)
