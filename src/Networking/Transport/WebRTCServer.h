@@ -12,6 +12,7 @@
 #include "RemoteServer.h"
 #include "ConnectionManager.h"
 #include <rtc/rtc.hpp>
+#include <rtc/track.hpp>
 #include <memory>
 #include <atomic>
 #include <mutex>

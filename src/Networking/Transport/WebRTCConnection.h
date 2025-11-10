@@ -12,6 +12,7 @@
 #include "NetworkConnection.h"
 #include <rtc/rtc.h>
 #include <rtc/rtc.hpp>
+#include <rtc/track.hpp>
 #include <memory>
 #include <string>
 #include <vector>
