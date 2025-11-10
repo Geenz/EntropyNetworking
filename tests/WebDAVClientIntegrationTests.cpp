@@ -159,7 +159,7 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_ListDirectory) {
 TEST_F(WebDAVClientIntegrationFixture, Backend_WriteFile_StatusOnly) {
     // Existing file: server returns 204 No Content
     const char* payload = "new content";
-    std::span<const std::byte> data(reinterpret_cast<const std::byte*>(payload), strlen(payload));
+    std::span<const uint8_t> data(reinterpret_cast<const uint8_t*>(payload), strlen(payload));
     auto h1 = backend->writeFile("/hello.txt", data);
     h1.wait();
     EXPECT_EQ(h1.status(), FileOpStatus::Complete);
@@ -234,7 +234,7 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_SmallChunks) {
 
     std::string accum;
     accum.reserve(16);
-    std::array<std::byte, 5> chunk{};
+    std::array<uint8_t, 5> chunk{};
     for (;;) {
         auto r = stream->read(chunk);
         if (r.bytesTransferred > 0) {
@@ -280,7 +280,7 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_HeaderHelpers) {
     ASSERT_NE(davStream, nullptr);
 
     // Wait until headers are ready by attempting a tiny read
-    std::array<std::byte, 1> tmp{}; (void)streamBase->read(tmp);
+    std::array<uint8_t, 1> tmp{}; (void)streamBase->read(tmp);
 
     auto cl = davStream->contentLength();
     auto et = davStream->etag();
@@ -299,7 +299,7 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_HeaderHelpers) {
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_WriteFile_IfMatch_Precondition) {
     const char* payload = "abc";
-    std::span<const std::byte> data(reinterpret_cast<const std::byte*>(payload), 3);
+    std::span<const uint8_t> data(reinterpret_cast<const uint8_t*>(payload), 3);
 
     // Wrong ETag should fail with 412 mapping → Failed status
     auto hBad = backend->writeFile("/hello.txt", data, "\"999\"");
