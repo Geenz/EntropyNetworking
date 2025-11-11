@@ -670,7 +670,7 @@ ConnectionStats NetworkSession::getStats() const {
 }
 
 void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
-    // Check shutdown flag FIRST - before accessing any member data
+    // Check shutdown flag to prevent further processing during destruction
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
@@ -679,7 +679,7 @@ void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
 }
 
 void NetworkSession::onConnectionStateChanged(ConnectionState state) {
-    // Check shutdown flag FIRST - before accessing any member data
+    // Check shutdown flag to prevent further processing during destruction
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
