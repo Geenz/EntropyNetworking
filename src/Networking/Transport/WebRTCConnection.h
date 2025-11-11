@@ -11,6 +11,8 @@
 
 #include "NetworkConnection.h"
 #include <rtc/rtc.h>
+#include <rtc/rtc.hpp>
+#include <rtc/track.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,19 +29,23 @@ namespace EntropyEngine::Networking {
      * Implements NetworkConnection interface using libdatachannel for WebRTC data channels.
      * Supports reliable and unreliable data transfer over WebRTC.
      *
-     * Signaling must be handled externally via the SignalingCallbacks.
+     * Supports two modes:
+     * - Server mode: SignalingCallbacks provided (used by WebRTCServer)
+     * - Client mode: Signaling URL provided, WebSocket managed internally
      */
     class WebRTCConnection : public NetworkConnection {
     public:
         /**
          * @brief Construct a new WebRTC connection
          * @param config WebRTC configuration (ICE servers, etc.)
-         * @param signalingCallbacks Callbacks for sending signaling messages
+         * @param signalingCallbacks Callbacks for sending signaling messages (server mode)
+         * @param signalingUrl WebSocket URL for signaling (client mode, empty if using callbacks)
          * @param dataChannelLabel Label for the data channel (default: "entropy-data")
          */
         WebRTCConnection(
             WebRTCConfig config,
             SignalingCallbacks signalingCallbacks,
+            std::string signalingUrl = "",
             std::string dataChannelLabel = "entropy-data"
         );
 
@@ -110,10 +116,46 @@ namespace EntropyEngine::Networking {
             Destroyed          // Peer connection destroyed, no further ops allowed
         };
 
+        // Callback context for safe callback lifetime management
+        // Passed as void* user pointer to libdatachannel C API
+        // Uses reference counting to track active callbacks
+        struct CallbackContext {
+            WebRTCConnection* connection;
+            std::atomic<bool> valid{true};
+            std::atomic<int> activeCallbacks{0};  // Count of callbacks currently executing
+        };
+
+        // RAII guard for callback execution tracking
+        // Increments activeCallbacks on entry, decrements on exit
+        struct CallbackGuard {
+            CallbackContext* ctx;
+
+            explicit CallbackGuard(CallbackContext* c) : ctx(c) {
+                if (ctx) ctx->activeCallbacks.fetch_add(1, std::memory_order_acquire);
+            }
+
+            ~CallbackGuard() {
+                if (ctx) ctx->activeCallbacks.fetch_sub(1, std::memory_order_release);
+            }
+
+            // Non-copyable, non-movable
+            CallbackGuard(const CallbackGuard&) = delete;
+            CallbackGuard& operator=(const CallbackGuard&) = delete;
+
+            bool isValid() const {
+                return ctx && ctx->valid.load(std::memory_order_acquire);
+            }
+
+            WebRTCConnection* getConnection() const {
+                return ctx ? ctx->connection : nullptr;
+            }
+        };
+
         void setupPeerConnection();
         void setupDataChannel();
         void setupUnreliableDataChannel();
         void setupDataChannelCallbacks(int channelId, bool isReliable);
+        void setupInternalWebSocket();  // Client mode: set up internal WebSocket for signaling
 
         // C API callback adapters (static with user pointer)
         static void onLocalDescriptionCallback(int pc, const char* sdp, const char* type, void* user);
@@ -125,8 +167,17 @@ namespace EntropyEngine::Networking {
         static void onClosedCallback(int id, void* user);
         static void onMessageCallback(int id, const char* message, int size, void* user);
 
+        // Callback context - deleted after all active callbacks complete
+        // libdatachannel may fire callbacks from background threads even after
+        // rtcSetXXXCallback(id, nullptr) is called. We use reference counting
+        // (activeCallbacks) to track executing callbacks and wait for them to
+        // complete before deleting the context in the destructor.
+        CallbackContext* _callbackContext;
+
         WebRTCConfig _config;
         SignalingCallbacks _signalingCallbacks;
+        std::string _signalingUrl;  // Client mode: signaling server URL
+        std::shared_ptr<rtc::WebSocket> _webSocket;  // Client mode: managed WebSocket
         std::string _dataChannelLabel;
         std::string _unreliableChannelLabel;
 
@@ -141,7 +192,6 @@ namespace EntropyEngine::Networking {
         std::atomic<bool> _unreliableDataChannelOpen{false};
 
         std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
-        std::atomic<bool> _destroying{false};
 
         // Perfect negotiation: Mozilla pattern flags (RFC 8831)
         std::atomic<bool> _makingOffer{false};
@@ -159,7 +209,7 @@ namespace EntropyEngine::Networking {
         std::vector<std::pair<std::string, std::string>> _pendingRemoteCandidates; // {candidate, mid} (requires mutex)
 
         mutable std::mutex _mutex;
-        ConnectionStats _stats;
+        ConnectionStats _stats;  // Atomic counters (no mutex needed for updates)
     };
 
 } // namespace EntropyEngine::Networking

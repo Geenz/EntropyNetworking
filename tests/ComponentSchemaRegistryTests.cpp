@@ -373,12 +373,12 @@ TEST(ComponentSchemaRegistryTests, ThreadSafety_ConcurrentReadWrite) {
     // Reader threads
     auto readerFunc = [&]() {
         for (int i = 0; i < 100 && !stopFlag; ++i) {
-            // Read operations
-            auto count = registry.schemaCount();
-            auto publicCount = registry.publicSchemaCount();
-            auto publicSchemas = registry.getPublicSchemas();
+            // Read operations atomically to get consistent snapshot
+            size_t count, publicCount;
+            std::vector<ComponentSchema> publicSchemas;
+            registry.getStats(count, publicCount, publicSchemas);
 
-            // Simple sanity checks
+            // Simple sanity checks on consistent snapshot
             if (count < 10) errorCount++;
             if (publicCount > count) errorCount++;
             if (publicSchemas.size() != publicCount) errorCount++;

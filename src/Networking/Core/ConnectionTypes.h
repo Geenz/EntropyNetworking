@@ -68,14 +68,40 @@ enum class ConnectionState {
 
 /**
  * @brief Connection statistics
+ *
+ * Uses atomic counters to allow lock-free updates in hot paths while still
+ * being copyable for snapshot reads via getStats().
  */
 struct ConnectionStats {
-    uint64_t bytesSent = 0;
-    uint64_t bytesReceived = 0;
-    uint64_t messagesSent = 0;
-    uint64_t messagesReceived = 0;
-    uint64_t connectTime = 0;      ///< Timestamp of connection establishment (ms since epoch)
-    uint64_t lastActivityTime = 0; ///< Timestamp of last send/receive activity (ms since epoch)
+    std::atomic<uint64_t> bytesSent{0};
+    std::atomic<uint64_t> bytesReceived{0};
+    std::atomic<uint64_t> messagesSent{0};
+    std::atomic<uint64_t> messagesReceived{0};
+    std::atomic<uint64_t> connectTime{0};      ///< Timestamp of connection establishment (ms since epoch)
+    std::atomic<uint64_t> lastActivityTime{0}; ///< Timestamp of last send/receive activity (ms since epoch)
+
+    // Copy constructor for snapshot reads
+    ConnectionStats(const ConnectionStats& other)
+        : bytesSent(other.bytesSent.load(std::memory_order_relaxed))
+        , bytesReceived(other.bytesReceived.load(std::memory_order_relaxed))
+        , messagesSent(other.messagesSent.load(std::memory_order_relaxed))
+        , messagesReceived(other.messagesReceived.load(std::memory_order_relaxed))
+        , connectTime(other.connectTime.load(std::memory_order_relaxed))
+        , lastActivityTime(other.lastActivityTime.load(std::memory_order_relaxed))
+    {}
+
+    ConnectionStats& operator=(const ConnectionStats& other) {
+        bytesSent.store(other.bytesSent.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        bytesReceived.store(other.bytesReceived.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        messagesSent.store(other.messagesSent.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        messagesReceived.store(other.messagesReceived.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        connectTime.store(other.connectTime.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        lastActivityTime.store(other.lastActivityTime.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        return *this;
+    }
+
+    // Default constructor
+    ConnectionStats() = default;
 };
 
 /**

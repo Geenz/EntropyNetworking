@@ -71,8 +71,8 @@ TEST(LocalIpcTests, LocalServerClientEcho) {
     auto client = clientMgr.openLocalConnection(endpoint);
     ASSERT_TRUE(client.valid());
 
-    bool gotWelcome = false;
-    bool gotEcho = false;
+    std::atomic<bool> gotWelcome{false};
+    std::atomic<bool> gotEcho{false};
 
     client.setMessageCallback([&](const std::vector<uint8_t>& data){
         std::string msg(data.begin(), data.end());
@@ -108,12 +108,12 @@ TEST(LocalIpcTests, LocalServerClientEcho) {
     }
 
     // Wait up to 1s for both messages
-    for (int i=0; i<100 && !(gotWelcome && gotEcho); ++i) {
+    for (int i=0; i<100 && !(gotWelcome.load() && gotEcho.load()); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    EXPECT_TRUE(gotWelcome);
-    EXPECT_TRUE(gotEcho);
+    EXPECT_TRUE(gotWelcome.load());
+    EXPECT_TRUE(gotEcho.load());
 
     // Stats sanity
     auto stats = client.getStats();

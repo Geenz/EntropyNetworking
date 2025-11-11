@@ -182,11 +182,11 @@ public:
      */
     ~HttpClient();
 
-    // Non-copyable, movable
+    // Non-copyable, non-movable (due to std::mutex member)
     HttpClient(const HttpClient&) = delete;
     HttpClient& operator=(const HttpClient&) = delete;
-    HttpClient(HttpClient&&) = default;
-    HttpClient& operator=(HttpClient&&) = default;
+    HttpClient(HttpClient&&) = delete;
+    HttpClient& operator=(HttpClient&&) = delete;
 
     /** Programmatic opt-out for system proxy fallback (default: enabled) */
     void setUseSystemProxy(bool enabled);

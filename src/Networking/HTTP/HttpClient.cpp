@@ -42,8 +42,11 @@ HttpClient::HttpClient()
     : _connectionShare(nullptr) {
     initGlobalCurl();
 
-    // Default proxy resolver (env + system)
-    _proxyResolver = std::make_unique<DefaultProxyResolver>();
+    // Default proxy resolver (env + system) - initialized under mutex for thread safety
+    {
+        std::lock_guard<std::mutex> lock(_shareMutex);
+        _proxyResolver = std::make_unique<DefaultProxyResolver>();
+    }
 
     // Create shared connection cache for HTTP/2 multiplexing
     _connectionShare = curl_share_init();
@@ -66,7 +69,8 @@ HttpClient::~HttpClient() {
 }
 
 void HttpClient::setUseSystemProxy(bool enabled) {
-    // Best-effort: only DefaultProxyResolver supports this policy toggle
+    // Best-effort: only DefaultProxyResolver supports this policy toggle (thread-safe access)
+    std::lock_guard<std::mutex> lock(_shareMutex);
     if (auto* def = dynamic_cast<DefaultProxyResolver*>(_proxyResolver.get())) {
         def->setUseSystemProxy(enabled);
     }
@@ -179,8 +183,13 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
     std::string url = req.scheme + "://" + req.host + path;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
-    // Proxy auto-detection and configuration
-    applyProxyIfAny(curl, _proxyResolver.get(), req, opts);
+    // Proxy auto-detection and configuration (thread-safe access)
+    ProxyResolver* resolver = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(_shareMutex);
+        resolver = _proxyResolver.get();
+    }
+    applyProxyIfAny(curl, resolver, req, opts);
 
     // HTTP method
     switch (req.method) {
@@ -358,7 +367,7 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
     for (int attempt = 0; attempt < attempts; ++attempt) {
         CURL* curl = curl_easy_init();
         if (!curl) {
-            return HttpResponse{0, "Failed to initialize curl", {}, {}};
+            return HttpResponse{0, "Failed to initialize curl", {}, {}, {}};
         }
 
         ResponseData respData;
@@ -664,9 +673,14 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
     std::string url = req.scheme + "://" + req.host + path;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
-    // Proxy auto-detection for streaming requests as well (defaults to Auto)
+    // Proxy auto-detection for streaming requests as well (defaults to Auto, thread-safe access)
+    ProxyResolver* resolver = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(_shareMutex);
+        resolver = _proxyResolver.get();
+    }
     RequestOptions proxyOpts; // default (Auto), no explicit proxy
-    applyProxyIfAny(curl, _proxyResolver.get(), req, proxyOpts);
+    applyProxyIfAny(curl, resolver, req, proxyOpts);
 
     // HTTP method (streaming typically GET)
     curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);

@@ -146,6 +146,15 @@ public:
         _stateCallback = std::move(callback);
     }
 
+    /**
+     * @brief Check if callbacks are being shut down (safe for use in static callbacks)
+     *
+     * @return true if shutdownCallbacks() has been called
+     */
+    bool isShuttingDown() const noexcept {
+        return _callbacksShutdown.load(std::memory_order_acquire);
+    }
+
 protected:
     NetworkConnection() = default;
 
@@ -158,7 +167,10 @@ protected:
      */
     void onMessageReceived(const std::vector<uint8_t>& data) noexcept {
         // Check shutdown flag first (fast path)
-        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
+        bool shutdown1 = _callbacksShutdown.load(std::memory_order_acquire);
+        if (shutdown1) {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set)");
             return;
         }
 
@@ -170,7 +182,9 @@ protected:
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
-        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+        bool shutdown2 = _callbacksShutdown.load(std::memory_order_acquire);
+        if (shutdown2) {
+            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
             return; // Bail early if shutting down
         }
 

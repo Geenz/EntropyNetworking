@@ -8,12 +8,15 @@
  */
 
 #include "SessionManager.h"
+#include <Logging/Logger.h>
 #include <format>
 
 namespace EntropyEngine::Networking {
 
-SessionManager::SessionManager(ConnectionManager* connectionManager, size_t capacity)
+SessionManager::SessionManager(ConnectionManager* connectionManager, size_t capacity,
+                               ComponentSchemaRegistry* schemaRegistry)
     : _connectionManager(connectionManager)
+    , _schemaRegistry(schemaRegistry)
     , _capacity(capacity)
     , _sessionSlots(capacity)
 {
@@ -23,6 +26,21 @@ SessionManager::SessionManager(ConnectionManager* connectionManager, size_t capa
     }
     _sessionSlots[_capacity - 1].nextFree.store(INVALID_INDEX, std::memory_order_relaxed);
     _freeListHead.store(0, std::memory_order_relaxed);
+
+    // Hook into schema registry changes if provided
+    if (_schemaRegistry) {
+        _schemaRegistry->setSchemaPublishedCallback(
+            [this](ComponentTypeHash typeHash, const ComponentSchema& schema) {
+                broadcastSchemaAdvertisement(typeHash, schema);
+            }
+        );
+
+        _schemaRegistry->setSchemaUnpublishedCallback(
+            [this](ComponentTypeHash typeHash) {
+                broadcastSchemaUnpublish(typeHash);
+            }
+        );
+    }
 }
 
 SessionManager::~SessionManager() {
@@ -107,13 +125,28 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
 
         // Get underlying connection pointer
         NetworkConnection* connPtr = _connectionManager->getConnectionPointer(connection);
+        ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Got connection pointer {} for handle {}/{}",
+            (void*)connPtr, connection.handleIndex(), connection.handleGeneration()));
         if (!connPtr) {
             returnSlotToFreeList(index);
             return SessionHandle();
         }
 
-        // Create NetworkSession wrapping the connection and optional external registry
-        slot.session = std::make_unique<NetworkSession>(connPtr, externalRegistry);
+        // Create NetworkSession wrapping the connection, optional external registry, and schema registry
+        ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Creating NetworkSession with connection {}", (void*)connPtr));
+        slot.session = std::make_unique<NetworkSession>(connPtr, externalRegistry, _schemaRegistry);
+
+        // Register NetworkSession's callbacks with ConnectionManager's fan-out system
+        // This ensures callbacks work correctly even after connect() is called
+        auto* session = slot.session.get();  // Capture raw pointer for lambda
+        _connectionManager->setMessageCallback(connection, [session](const std::vector<uint8_t>& data) {
+            // Hot path: removed per-message DEBUG logging
+            session->onMessageReceived(data);
+        });
+
+        _connectionManager->setStateCallback(connection, [session](ConnectionState state) {
+            session->onConnectionStateChanged(state);
+        });
 
         return SessionHandle(this, index, generation);
     } catch (const std::exception& e) {
@@ -347,6 +380,27 @@ Result<void> SessionManager::sendSceneSnapshot(
     return slot.session->sendSceneSnapshot(snapshotData);
 }
 
+Result<void> SessionManager::performHandshake(
+    const SessionHandle& handle,
+    const std::string& clientType,
+    const std::string& clientId
+) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->performHandshake(clientType, clientId);
+}
+
 bool SessionManager::isConnected(const SessionHandle& handle) const {
     if (!validateHandle(handle)) return false;
 
@@ -431,6 +485,107 @@ std::string SessionManager::toString() const {
                        static_cast<const void*>(this),
                        _capacity,
                        _activeCount.load(std::memory_order_relaxed));
+}
+
+void SessionManager::broadcastSchemaAdvertisement(ComponentTypeHash typeHash, const ComponentSchema& schema) {
+    // Iterate all slots and send to connected sessions with completed handshake
+    for (size_t i = 0; i < _capacity; ++i) {
+        auto& slot = _sessionSlots[i];
+
+        // Try to lock this slot (non-blocking to avoid holding up other broadcasts)
+        std::unique_lock<std::mutex> lock(slot.mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            continue;  // Skip if slot is busy
+        }
+
+        // Check if session exists and is connected
+        if (!slot.session) {
+            continue;
+        }
+
+        if (!slot.session->isConnected()) {
+            continue;
+        }
+
+        // Send schema advertisement
+        auto result = slot.session->sendSchemaAdvertisement(
+            typeHash,
+            schema.appId,
+            schema.componentName,
+            schema.schemaVersion
+        );
+
+        // Log errors but continue broadcasting to other sessions
+        if (result.failed()) {
+            ENTROPY_LOG_WARNING_CAT("SessionManager",
+                std::format("Failed to broadcast schema advertisement to session {}: {}",
+                    i, result.errorMessage));
+        }
+    }
+}
+
+void SessionManager::broadcastSchemaUnpublish(ComponentTypeHash typeHash) {
+    // Iterate all slots and send to connected sessions with completed handshake
+    for (size_t i = 0; i < _capacity; ++i) {
+        auto& slot = _sessionSlots[i];
+
+        // Try to lock this slot (non-blocking to avoid holding up other broadcasts)
+        std::unique_lock<std::mutex> lock(slot.mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            continue;  // Skip if slot is busy
+        }
+
+        // Check if session exists and is connected
+        if (!slot.session) {
+            continue;
+        }
+
+        if (!slot.session->isConnected()) {
+            continue;
+        }
+
+        // Send unpublish notification
+        auto result = slot.session->sendUnpublishSchema(typeHash);
+
+        // Log errors but continue broadcasting to other sessions
+        if (result.failed()) {
+            ENTROPY_LOG_WARNING_CAT("SessionManager",
+                std::format("Failed to broadcast schema unpublish to session {}: {}",
+                    i, result.errorMessage));
+        }
+    }
+}
+
+void SessionManager::flushAllPropertyBatches() {
+    // Iterate all slots and flush property batches for connected sessions
+    for (size_t i = 0; i < _capacity; ++i) {
+        auto& slot = _sessionSlots[i];
+
+        // Try to lock this slot (non-blocking to avoid holding up other operations)
+        std::unique_lock<std::mutex> lock(slot.mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            continue;  // Skip if slot is busy
+        }
+
+        // Check if session exists and is connected
+        if (!slot.session) {
+            continue;
+        }
+
+        if (!slot.session->isConnected()) {
+            continue;
+        }
+
+        // Flush property update batches
+        auto result = slot.session->flushPropertyUpdates();
+
+        // Log errors but continue flushing other sessions
+        if (result.failed()) {
+            ENTROPY_LOG_WARNING_CAT("SessionManager",
+                std::format("Failed to flush property batches for session {}: {}",
+                    i, result.errorMessage));
+        }
+    }
 }
 
 } // namespace EntropyEngine::Networking

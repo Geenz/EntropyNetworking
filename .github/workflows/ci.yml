@@ -11,9 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test-windows:
-    name: Build and test (Windows, MSVC)
+  build-windows:
+    name: Build (Windows, MSVC, ${{ matrix.config }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        config: [Release, Debug]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,32 +26,27 @@ jobs:
         with:
           vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
-      - name: Configure CMake (VS 2022, x64, Release)
+      - name: Configure CMake (VS 2022, x64)
         run: >
           cmake -S . -B build
           -G "Visual Studio 17 2022" -A x64
-          -DBUILD_TESTS=ON
+          -DBUILD_TESTS=${{ matrix.config == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_EXAMPLES=OFF
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-      - name: Build tests (Release)
-        run: cmake --build build --config Release --target EntropyNetworkingTests
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }}
 
-      - name: Run tests (ctest, verbose)
+      - name: Run tests (Release only)
+        if: matrix.config == 'Release'
         working-directory: build
         run: ctest -C Release -VV --output-on-failure
 
-      - name: Install package (Release)
-        run: cmake --install build --config Release --prefix "${{ github.workspace }}\\EntropyNetworking-Windows-x64"
-
-      - name: Build (Debug)
-        run: cmake --build build --config Debug
-
-      - name: Install package (Debug)
-        run: cmake --install build --config Debug --prefix "${{ github.workspace }}\\EntropyNetworking-Windows-x64"
+      - name: Install package
+        run: cmake --install build --config ${{ matrix.config }} --prefix "${{ github.workspace }}\\install"
 
       - name: Upload CTest logs
-        if: always()
+        if: always() && matrix.config == 'Release'
         uses: actions/upload-artifact@v4
         with:
           name: ctest-logs-windows
@@ -57,15 +55,18 @@ jobs:
             build/Testing/**/Test.xml
             build/Testing/Temporary/LastTestsFailed.log
 
-      - name: Upload Windows package artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EntropyNetworking-Windows-x64
-          path: EntropyNetworking-Windows-x64/**
+          name: EntropyNetworking-Windows-x64-${{ matrix.config }}
+          path: install/**
 
-  build-and-test-linux:
-    name: Build and test (Linux, GCC)
+  build-linux:
+    name: Build (Linux, GCC, ${{ matrix.config }})
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        config: [Release, Debug]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,54 +81,120 @@ jobs:
         with:
           vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
 
-      - name: Configure CMake (Ninja, Release)
+      - name: Configure CMake (Ninja)
         run: >
-          cmake -S . -B build-release -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTS=ON
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+          -DBUILD_TESTS=${{ matrix.config == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_EXAMPLES=OFF
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
-      - name: Build tests (Release)
-        run: cmake --build build-release --target EntropyNetworkingTests
+      - name: Build
+        run: cmake --build build
 
-      - name: Run tests (ctest, verbose)
-        working-directory: build-release
+      - name: Run tests (Release only)
+        if: matrix.config == 'Release'
+        working-directory: build
         run: ctest -VV --output-on-failure
 
-      - name: Install package (Release)
-        run: cmake --install build-release --prefix "${{ github.workspace }}/EntropyNetworking-Linux-gcc-14"
-
-      - name: Configure CMake (Ninja, Debug)
-        run: >
-          cmake -S . -B build-debug -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DBUILD_TESTS=OFF
-          -DBUILD_EXAMPLES=OFF
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
-      - name: Build (Debug)
-        run: cmake --build build-debug
-
-      - name: Install package (Debug)
-        run: cmake --install build-debug --prefix "${{ github.workspace }}/EntropyNetworking-Linux-gcc-14/debug"
-
-      - name: Restructure debug files for vcpkg
-        run: |
-          cd "${{ github.workspace }}/EntropyNetworking-Linux-gcc-14/debug"
-          rm -rf include share
+      - name: Install package
+        run: cmake --install build --prefix "${{ github.workspace }}/install"
 
       - name: Upload CTest logs
-        if: always()
+        if: always() && matrix.config == 'Release'
         uses: actions/upload-artifact@v4
         with:
           name: ctest-logs-linux
           path: |
-            build-release/Testing/Temporary/LastTest.log
-            build-release/Testing/**/Test.xml
-            build-release/Testing/Temporary/LastTestsFailed.log
+            build/Testing/Temporary/LastTest.log
+            build/Testing/**/Test.xml
+            build/Testing/Temporary/LastTestsFailed.log
 
-      - name: Upload Linux GCC package artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-Linux-gcc-14-${{ matrix.config }}
+          path: install/**
+
+  package-windows:
+    name: Package Windows binaries
+    runs-on: windows-latest
+    needs: build-windows
+    steps:
+      - name: Download Release build
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-Windows-x64-Release
+          path: install-release
+
+      - name: Download Debug build
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-Windows-x64-Debug
+          path: install-debug
+
+      - name: Combine Release and Debug
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path EntropyNetworking-Windows-x64 -Force
+
+          # Copy Release files (headers, libs, cmake)
+          Copy-Item -Recurse -Force install-release\* EntropyNetworking-Windows-x64\
+
+          # Create debug directory and copy debug libs
+          New-Item -ItemType Directory -Path EntropyNetworking-Windows-x64\debug -Force
+          if (Test-Path install-debug\lib) {
+            Copy-Item -Recurse -Force install-debug\lib EntropyNetworking-Windows-x64\debug\
+          }
+
+          # Remove duplicate headers/cmake from debug if they exist
+          if (Test-Path install-debug\include) {
+            Remove-Item -Recurse -Force install-debug\include -ErrorAction SilentlyContinue
+          }
+          if (Test-Path install-debug\share) {
+            Remove-Item -Recurse -Force install-debug\share -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload combined Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EntropyNetworking-Windows-x64
+          path: EntropyNetworking-Windows-x64/**
+
+  package-linux:
+    name: Package Linux binaries
+    runs-on: ubuntu-24.04
+    needs: build-linux
+    steps:
+      - name: Download Release build
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-Linux-gcc-14-Release
+          path: install-release
+
+      - name: Download Debug build
+        uses: actions/download-artifact@v4
+        with:
+          name: EntropyNetworking-Linux-gcc-14-Debug
+          path: install-debug
+
+      - name: Combine Release and Debug
+        run: |
+          mkdir -p EntropyNetworking-Linux-gcc-14
+
+          # Copy Release files (headers, libs, cmake)
+          cp -r install-release/* EntropyNetworking-Linux-gcc-14/
+
+          # Create debug directory and copy debug libs
+          mkdir -p EntropyNetworking-Linux-gcc-14/debug
+          if [ -d install-debug/lib ]; then
+            cp -r install-debug/lib EntropyNetworking-Linux-gcc-14/debug/
+          fi
+
+          # Remove duplicate headers/cmake from debug if they exist
+          rm -rf install-debug/include install-debug/share
+
+      - name: Upload combined Linux package
         uses: actions/upload-artifact@v4
         with:
           name: EntropyNetworking-Linux-gcc-14
@@ -263,3 +330,143 @@ jobs:
         with:
           name: EntropyNetworking-macOS-universal
           path: EntropyNetworking-macOS-universal/**
+
+  sanitizer-asan-ubsan:
+    name: Sanitizer Tests (ASAN + UBSAN, GCC 14)
+    runs-on: ubuntu-24.04
+    continue-on-error: true  # Don't fail CI, but report issues
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-14 g++-14 cmake
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-14 100
+          gcc --version
+          g++ --version
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
+
+      - name: Configure CMake with ASAN/UBSAN
+        run: >
+          cmake -S . -B build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTS=ON
+          -DBUILD_EXAMPLES=OFF
+          -DENABLE_SANITIZERS=ON
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build tests with ASAN/UBSAN
+        run: cmake --build build-asan --target EntropyNetworkingTests
+
+      - name: Run tests with ASAN/UBSAN
+        working-directory: build-asan
+        run: ctest -VV --output-on-failure 2>&1 | tee asan-ubsan-output.log
+        continue-on-error: true  # Capture failures but don't stop
+        env:
+          ASAN_OPTIONS: detect_leaks=1:check_initialization_order=1:detect_stack_use_after_return=1:strict_string_checks=1:detect_invalid_pointer_pairs=2:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+
+      - name: Check for ASAN/UBSAN issues
+        if: always()
+        working-directory: build-asan
+        run: |
+          echo "## ASAN/UBSAN Results" >> $GITHUB_STEP_SUMMARY
+          if grep -q "SUMMARY.*Sanitizer" asan-ubsan-output.log 2>/dev/null; then
+            echo "⚠️ **Issues detected!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            grep -A 5 "SUMMARY.*Sanitizer" asan-ubsan-output.log | head -20 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📋 See full logs in artifacts: \`sanitizer-asan-ubsan-results\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No issues detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload ASAN/UBSAN results
+        if: always()  # Always upload, even on success
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-asan-ubsan-results
+          path: |
+            build-asan/asan-ubsan-output.log
+            build-asan/**/*.log
+
+  sanitizer-tsan:
+    name: Sanitizer Tests (TSAN, GCC 14)
+    runs-on: ubuntu-24.04
+    continue-on-error: true  # Don't fail CI, but report issues
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-14 g++-14 cmake
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-14 100
+          gcc --version
+          g++ --version
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '271a5b8850aa50f9a40269cbf3cf414b36e333d6'
+
+      - name: Configure CMake with TSAN
+        run: >
+          cmake -S . -B build-tsan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTS=ON
+          -DBUILD_EXAMPLES=OFF
+          -DENABLE_SANITIZERS=ON
+          -DENABLE_TSAN=ON
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build tests with TSAN
+        run: cmake --build build-tsan --target EntropyNetworkingTests
+
+      - name: Run tests with TSAN
+        working-directory: build-tsan
+        run: ctest -VV --output-on-failure 2>&1 | tee tsan-output.log
+        continue-on-error: true  # Capture failures but don't stop
+        env:
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tsan_suppressions.txt:detect_deadlocks=1:second_deadlock_stack=1:history_size=7:io_sync=1:halt_on_error=1:abort_on_error=1
+
+      - name: Check for TSAN issues
+        if: always()
+        working-directory: build-tsan
+        run: |
+          echo "## TSAN Results" >> $GITHUB_STEP_SUMMARY
+          if grep -q "WARNING.*ThreadSanitizer" tsan-output.log 2>/dev/null; then
+            echo "⚠️ **Issues detected!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            grep -E "(WARNING.*ThreadSanitizer|SUMMARY.*ThreadSanitizer)" tsan-output.log | head -20 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📋 See full logs in artifacts: \`sanitizer-tsan-results\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No issues detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload TSAN results
+        if: always()  # Always upload, even on success
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-tsan-results
+          path: |
+            build-tsan/tsan-output.log
+            build-tsan/**/*.log

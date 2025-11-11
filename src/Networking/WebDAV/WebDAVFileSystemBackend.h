@@ -22,6 +22,7 @@
 #include <span>
 #include <vector>
 #include <optional>
+#include <mutex>
 
 #include <VirtualFileSystem/IFileSystemBackend.h>
 
@@ -84,7 +85,7 @@ public:
      * @param cfg Backend configuration (scheme, host, base URL)
      */
     explicit WebDAVFileSystemBackend(Config cfg)
-        : _client(), _cfg(std::move(cfg)) {}
+        : _client(std::make_shared<HTTP::HttpClient>()), _cfg(std::move(cfg)) {}
 
     /**
      * @brief Reads file via HTTP GET (supports Range header)
@@ -104,12 +105,12 @@ public:
      * @return Immediate failure handle
      */
     Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const std::byte> data,
+                                            std::span<const uint8_t> data,
                                             Core::IO::WriteOptions options = {}) override;
 
     // Backend-specific helper overload: write with If-Match precondition (no EntropyCore API changes)
     Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const std::byte> data,
+                                            std::span<const uint8_t> data,
                                             const std::string& ifMatchETag);
 
     /**
@@ -133,7 +134,7 @@ public:
      * @param path VFS path to directory to create (e.g., "/newdir/")
      * @return FileOperationHandle that completes with success on 201 and maps 405/409 appropriately
      */
-    Core::IO::FileOperationHandle createDirectory(const std::string& path);
+    Core::IO::FileOperationHandle createDirectory(const std::string& path) override;
 
     // WebDAV MOVE/COPY operations (backend-specific helpers)
     Core::IO::FileOperationHandle move(const std::string& srcPath,
@@ -210,8 +211,9 @@ public:
     std::string normalizeKey(const std::string& path) const override { return path; }
 
 private:
-    HTTP::HttpClient _client;  ///< HTTP client for WebDAV operations
-    Config _cfg;               ///< Backend configuration
+    const std::shared_ptr<HTTP::HttpClient> _client;  ///< HTTP client for WebDAV operations
+    const Config _cfg;               ///< Backend configuration
+    mutable std::mutex _clientMutex;  ///< Protects _client shared_ptr copy (ref count)
 
     /**
      * @brief Builds full URL from VFS path

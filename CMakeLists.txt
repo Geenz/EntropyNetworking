@@ -11,11 +11,33 @@ project(EntropyNetworking
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "EntropyNetworking only supports static linking" FORCE)
 option(BUILD_TESTS "Enable/build tests for EntropyNetworking" ON)
 option(BUILD_EXAMPLES "Build EntropyNetworking example executables" ON)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" ON)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Configure sanitizers
+if(ENABLE_SANITIZERS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        # ThreadSanitizer is mutually exclusive with AddressSanitizer
+        # To use TSAN instead: cmake -DENABLE_TSAN=ON
+        if(ENABLE_TSAN)
+            set(SANITIZER_FLAGS "-fsanitize=thread -fno-omit-frame-pointer -g")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+            message(STATUS "ThreadSanitizer (TSAN) enabled")
+        else()
+            set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+            message(STATUS "Sanitizers enabled: AddressSanitizer (ASAN) and UndefinedBehaviorSanitizer (UBSAN)")
+        endif()
+    else()
+        message(WARNING "Sanitizers requested but not supported by ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+endif()
 
 # Configure vcpkg
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -53,6 +75,8 @@ set(NETWORKING_SOURCES
     src/Networking/Protocol/ComponentSchemaSerializer.cpp
     src/Networking/Protocol/WebDavAdapter.cpp
     src/Networking/Transport/WebRTCConnection.cpp
+    src/Networking/Transport/WebRTCServer.cpp
+    src/Networking/Transport/RemoteServer.cpp
     src/Networking/Transport/ConnectionManager.cpp
     src/Networking/Transport/ConnectionHandle.cpp
     src/Networking/Session/NetworkSession.cpp

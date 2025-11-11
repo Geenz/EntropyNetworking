@@ -85,8 +85,10 @@ public:
      *
      * @param connectionManager Reference to connection manager (must outlive SessionManager)
      * @param capacity Maximum number of sessions (typically 512-2048)
+     * @param schemaRegistry Optional ComponentSchemaRegistry for schema operations (must outlive SessionManager)
      */
-    explicit SessionManager(ConnectionManager* connectionManager, size_t capacity);
+    explicit SessionManager(ConnectionManager* connectionManager, size_t capacity,
+                           ComponentSchemaRegistry* schemaRegistry = nullptr);
     ~SessionManager();
 
     // Delete copy operations
@@ -205,6 +207,15 @@ public:
     );
 
     /**
+     * @brief Initiates handshake (called by handle.performHandshake())
+     */
+    Result<void> performHandshake(
+        const SessionHandle& handle,
+        const std::string& clientType,
+        const std::string& clientId
+    );
+
+    /**
      * @brief Checks if connected (called by handle.isConnected())
      */
     bool isConnected(const SessionHandle& handle) const;
@@ -253,6 +264,45 @@ public:
      */
     size_t capacity() const noexcept { return _capacity; }
 
+    /**
+     * @brief Get schema registry (if configured)
+     * @return ComponentSchemaRegistry pointer or nullptr
+     */
+    ComponentSchemaRegistry* getSchemaRegistry() const noexcept { return _schemaRegistry; }
+
+    /**
+     * @brief Broadcast schema advertisement to all connected sessions
+     *
+     * Called automatically when a schema is published via registry callback.
+     * Sends SchemaAdvertisement message to all sessions with completed handshake.
+     *
+     * @param typeHash Component type hash
+     * @param schema Component schema that was published
+     */
+    void broadcastSchemaAdvertisement(ComponentTypeHash typeHash, const ComponentSchema& schema);
+
+    /**
+     * @brief Broadcast schema unpublish notification to all connected sessions
+     *
+     * Called automatically when a schema is unpublished via registry callback.
+     * Sends UnpublishSchema message to all sessions with completed handshake.
+     *
+     * @param typeHash Component type hash
+     */
+    void broadcastSchemaUnpublish(ComponentTypeHash typeHash);
+
+    /**
+     * @brief Flush property update batches for all connected sessions
+     *
+     * Iterates through all active sessions and calls flushPropertyUpdates() on each.
+     * This is useful for server applications that need to synchronize state updates
+     * to hundreds of connected clients efficiently.
+     *
+     * Non-blocking: uses try_to_lock to avoid holding up other operations.
+     * Continues flushing even if individual sessions fail.
+     */
+    void flushAllPropertyBatches();
+
     // EntropyObject interface
     const char* className() const noexcept override { return "SessionManager"; }
     uint64_t classHash() const noexcept override;
@@ -274,6 +324,7 @@ private:
     };
 
     ConnectionManager* _connectionManager;  // Not owned
+    ComponentSchemaRegistry* _schemaRegistry;  // Not owned, optional
     const size_t _capacity;
     std::vector<SessionSlot> _sessionSlots;
     std::atomic<uint64_t> _freeListHead{0};  // Packed: tag(32) | index(32)

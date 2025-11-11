@@ -94,9 +94,18 @@ public:
     ConnectionHandle openLocalConnection(const std::string& endpoint);
 
     /**
-     * @brief Opens a remote connection using WebRTC
+     * @brief Opens a remote connection using WebRTC with internal signaling
      *
-     * Cross-platform WebRTC data channel connection.
+     * Simplified client-side API - WebSocket signaling handled internally.
+     * @param signalingUrl WebSocket URL for signaling (e.g., "ws://localhost:8080")
+     * @return ConnectionHandle for operations, or invalid if full
+     */
+    ConnectionHandle openRemoteConnection(const std::string& signalingUrl);
+
+    /**
+     * @brief Opens a remote connection using WebRTC with explicit callbacks
+     *
+     * Advanced API for server-side or custom signaling.
      * @param signalingServer WebSocket URL for signaling
      * @param config WebRTC configuration (ICE servers, etc.)
      * @param callbacks Signaling callbacks for SDP/ICE exchange

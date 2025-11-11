@@ -30,6 +30,120 @@ namespace EntropyEngine::Networking {
         return "RTC_?";
     }
 
+    // Binary envelope framing for signaling messages
+    // Format: [Type:1B][Length:4B big-endian][Payload]
+    // Type: 0x01=SDP, 0x02=ICE
+    // Payload: For SDP: type\0sdp, For ICE: candidate\0mid
+
+    enum class SignalingMessageType : uint8_t {
+        SDP = 0x01,
+        ICE = 0x02
+    };
+
+    // Encode uint32_t to big-endian bytes
+    static void encodeU32BigEndian(uint32_t value, uint8_t* dest) {
+        dest[0] = (value >> 24) & 0xFF;
+        dest[1] = (value >> 16) & 0xFF;
+        dest[2] = (value >> 8) & 0xFF;
+        dest[3] = value & 0xFF;
+    }
+
+    // Decode big-endian bytes to uint32_t
+    static uint32_t decodeU32BigEndian(const uint8_t* src) {
+        return (static_cast<uint32_t>(src[0]) << 24) |
+               (static_cast<uint32_t>(src[1]) << 16) |
+               (static_cast<uint32_t>(src[2]) << 8) |
+               static_cast<uint32_t>(src[3]);
+    }
+
+    // Encode SDP description into binary envelope
+    static std::vector<uint8_t> encodeSDPMessage(const std::string& type, const std::string& sdp) {
+        // Payload: type\0sdp
+        std::vector<uint8_t> payload;
+        payload.insert(payload.end(), type.begin(), type.end());
+        payload.push_back(0);  // null terminator
+        payload.insert(payload.end(), sdp.begin(), sdp.end());
+
+        // Envelope: [Type:1B][Length:4B][Payload]
+        std::vector<uint8_t> message;
+        message.reserve(5 + payload.size());
+        message.push_back(static_cast<uint8_t>(SignalingMessageType::SDP));
+
+        uint8_t lengthBytes[4];
+        encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+        message.insert(message.end(), lengthBytes, lengthBytes + 4);
+        message.insert(message.end(), payload.begin(), payload.end());
+
+        return message;
+    }
+
+    // Encode ICE candidate into binary envelope
+    static std::vector<uint8_t> encodeICEMessage(const std::string& candidate, const std::string& mid) {
+        // Payload: candidate\0mid
+        std::vector<uint8_t> payload;
+        payload.insert(payload.end(), candidate.begin(), candidate.end());
+        payload.push_back(0);  // null terminator
+        payload.insert(payload.end(), mid.begin(), mid.end());
+
+        // Envelope: [Type:1B][Length:4B][Payload]
+        std::vector<uint8_t> message;
+        message.reserve(5 + payload.size());
+        message.push_back(static_cast<uint8_t>(SignalingMessageType::ICE));
+
+        uint8_t lengthBytes[4];
+        encodeU32BigEndian(static_cast<uint32_t>(payload.size()), lengthBytes);
+        message.insert(message.end(), lengthBytes, lengthBytes + 4);
+        message.insert(message.end(), payload.begin(), payload.end());
+
+        return message;
+    }
+
+    // Decode binary envelope message
+    // Returns: {type, str1, str2} where for SDP: str1=type, str2=sdp; for ICE: str1=candidate, str2=mid
+    static std::optional<std::tuple<SignalingMessageType, std::string, std::string>>
+    decodeSignalingMessage(const std::vector<uint8_t>& data) {
+        // Minimum size: Type(1) + Length(4) = 5 bytes
+        if (data.size() < 5) {
+            ENTROPY_LOG_ERROR("Signaling message too short");
+            return std::nullopt;
+        }
+
+        SignalingMessageType msgType = static_cast<SignalingMessageType>(data[0]);
+        uint32_t payloadLength = decodeU32BigEndian(&data[1]);
+
+        // Verify payload length
+        if (data.size() != 5 + payloadLength) {
+            ENTROPY_LOG_ERROR(std::format("Signaling message length mismatch: expected {}, got {}",
+                5 + payloadLength, data.size()));
+            return std::nullopt;
+        }
+
+        // Extract payload
+        const uint8_t* payload = &data[5];
+
+        // Find null terminator
+        const uint8_t* nullPos = static_cast<const uint8_t*>(
+            std::memchr(payload, 0, payloadLength));
+        if (!nullPos) {
+            ENTROPY_LOG_ERROR("Signaling message payload missing null terminator");
+            return std::nullopt;
+        }
+
+        size_t firstStringLen = nullPos - payload;
+        size_t secondStringStart = firstStringLen + 1;
+
+        if (secondStringStart > payloadLength) {
+            ENTROPY_LOG_ERROR("Signaling message payload truncated");
+            return std::nullopt;
+        }
+
+        std::string str1(reinterpret_cast<const char*>(payload), firstStringLen);
+        std::string str2(reinterpret_cast<const char*>(payload + secondStringStart),
+                        payloadLength - secondStringStart);
+
+        return std::make_tuple(msgType, str1, str2);
+    }
+
     static const char* connStateToString(ConnectionState s) {
         switch (s) {
             case ConnectionState::Disconnected: return "Disconnected";
@@ -44,10 +158,13 @@ namespace EntropyEngine::Networking {
     WebRTCConnection::WebRTCConnection(
         WebRTCConfig config,
         SignalingCallbacks signalingCallbacks,
+        std::string signalingUrl,
         std::string dataChannelLabel
     )
-        : _config(std::move(config))
+        : _callbackContext(new CallbackContext{this, true})  // Intentionally leaked
+        , _config(std::move(config))
         , _signalingCallbacks(std::move(signalingCallbacks))
+        , _signalingUrl(std::move(signalingUrl))
         , _dataChannelLabel(std::move(dataChannelLabel))
         , _unreliableChannelLabel(_dataChannelLabel + "-unreliable")
     {
@@ -55,11 +172,39 @@ namespace EntropyEngine::Networking {
     }
 
     WebRTCConnection::~WebRTCConnection() {
-        _destroying.store(true, std::memory_order_release);
+        // CRITICAL ORDER (understanding libdatachannel mechanics):
+        // 1. Invalidate context (so callbacks that are ALREADY executing will early-return)
+        // 2. Set user pointers to nullptr (prevents NEW callbacks from getting our pointer)
+        // 3. Delete resources (closes connections, stops new callbacks from being queued)
+        // 4. Wait for active callbacks to complete (callbacks that got pointer before step 2)
+        // 5. Delete context (safe - no more references)
+
+        // Step 1: Invalidate callback context
+        _callbackContext->valid.store(false, std::memory_order_release);
+
+        // Clear user callbacks
+        setMessageCallback(nullptr);
+        setStateCallback(nullptr);
+
         disconnect();
+
+        // Set shutdown flag (for NetworkConnection base class tracking)
         shutdownCallbacks();
 
-        // C API guarantees blocking until all callbacks complete
+        // Step 2: Clear user pointers in libdatachannel
+        // This prevents NEW callbacks from getting our _callbackContext pointer
+        // because callbacks check: if (auto ptr = getUserPointer(pc)) before using it
+        if (_peerConnectionId >= 0) {
+            rtcSetUserPointer(_peerConnectionId, nullptr);
+        }
+        if (_dataChannelId >= 0) {
+            rtcSetUserPointer(_dataChannelId, nullptr);
+        }
+        if (_unreliableDataChannelId >= 0) {
+            rtcSetUserPointer(_unreliableDataChannelId, nullptr);
+        }
+
+        // Step 3: Delete resources (closes connections, cleans up libdatachannel state)
         if (_dataChannelId >= 0) {
             rtcDeleteDataChannel(_dataChannelId);
             _dataChannelId = -1;
@@ -75,14 +220,34 @@ namespace EntropyEngine::Networking {
             _peerConnectionId = -1;
         }
 
-        setMessageCallback(nullptr);
-        setStateCallback(nullptr);
+        // Brief sleep to allow in-flight callbacks to drain
+        // libdatachannel doesn't guarantee instant callback termination after rtcDelete*
+        // Callbacks can still be executing on background threads
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Step 4: Wait for all active callbacks to complete
+        // These are callbacks that got the pointer BEFORE we cleared it in step 2
+        // They're using CallbackGuard which tracks activeCallbacks
+        int waitCount = 0;
+        while (_callbackContext->activeCallbacks.load(std::memory_order_acquire) > 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            if (++waitCount % 10000 == 0) {  // Log every second
+                ENTROPY_LOG_WARNING("Waiting for " +
+                    std::to_string(_callbackContext->activeCallbacks.load(std::memory_order_acquire)) +
+                    " active callbacks to complete");
+            }
+        }
+
+        // Step 5: Delete context - safe now, no more references
+        delete _callbackContext;
+        _callbackContext = nullptr;
     }
 
     // C API callback adapters
     void WebRTCConnection::onLocalDescriptionCallback(int, const char* sdp, const char* type, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         ENTROPY_LOG_DEBUG(std::string("onLocalDescription: type=") + (type?type:"(null)") +
                           ", polite=" + (self->_polite ? "true" : "false") +
@@ -97,8 +262,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onLocalCandidateCallback(int, const char* cand, const char* mid, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         ENTROPY_LOG_DEBUG(std::string("onLocalCandidate: mid=") + (mid?mid:"(null)") +
                           ", len=" + std::to_string(cand ? (int)std::strlen(cand) : 0));
@@ -108,8 +274,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onStateChangeCallback(int, rtcState state, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         std::optional<ConnectionState> pending;
         {
@@ -147,14 +314,15 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onSignalingStateChangeCallback(int, rtcSignalingState state, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         self->_signalingState.store(state, std::memory_order_release);
 
@@ -177,8 +345,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onDataChannelCallback(int, int dc, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
@@ -195,6 +364,8 @@ namespace EntropyEngine::Networking {
         // Note: During reconnection, old channels will close naturally via onClosedCallback
         if (labelView == self->_dataChannelLabel) {
             if (self->_dataChannelId != dc) {
+                ENTROPY_LOG_DEBUG(std::format("Switching _dataChannelId from {} to REMOTE channel {}",
+                    self->_dataChannelId, dc));
                 self->_dataChannelId = dc;
                 self->setupDataChannelCallbacks(dc, true);
             }
@@ -207,8 +378,9 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::onOpenCallback(int id, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -251,21 +423,23 @@ namespace EntropyEngine::Networking {
                 }
 
                 auto now = std::chrono::system_clock::now();
-                self->_stats.connectTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now.time_since_epoch()).count();
-                self->_stats.lastActivityTime = self->_stats.connectTime;
+                self->_stats.connectTime.store(timestamp, std::memory_order_relaxed);
+                self->_stats.lastActivityTime.store(timestamp, std::memory_order_relaxed);
                 pending = ConnectionState::Connected;
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
     void WebRTCConnection::onClosedCallback(int id, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
         char label[256];
         if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
@@ -296,15 +470,17 @@ namespace EntropyEngine::Networking {
             }
         }
 
-        if (pending && !self->_destroying.load(std::memory_order_acquire)) {
+        if (pending && guard.isValid()) {
             self->onStateChanged(*pending);
         }
     }
 
-    void WebRTCConnection::onMessageCallback(int, const char* message, int size, void* user) {
-        auto* self = static_cast<WebRTCConnection*>(user);
-        if (self->_destroying.load(std::memory_order_acquire)) return;
+    void WebRTCConnection::onMessageCallback(int id, const char* message, int size, void* user) {
+        CallbackGuard guard(static_cast<CallbackContext*>(user));
+        if (!guard.isValid()) return;
+        auto* self = guard.getConnection();
 
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
         // Defensive: drop empty/erroneous frames to avoid huge allocations on negative sizes
         if (size <= 0) return;
 
@@ -316,15 +492,15 @@ namespace EntropyEngine::Networking {
         std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
                                    reinterpret_cast<const uint8_t*>(message) + size);
 
-        {
-            std::lock_guard<std::mutex> lock(self->_mutex);
-            self->_stats.bytesReceived += size;
-            self->_stats.messagesReceived++;
-            self->_stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        self->_stats.bytesReceived.fetch_add(size, std::memory_order_relaxed);
+        self->_stats.messagesReceived.fetch_add(1, std::memory_order_relaxed);
+        self->_stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
-        if (!self->_destroying.load(std::memory_order_acquire)) {
+        if (!self->isShuttingDown()) {
             self->onMessageReceived(data);
         }
     }
@@ -348,6 +524,11 @@ namespace EntropyEngine::Networking {
         _ignoreOffer.store(false, std::memory_order_release);  // Clean initial state
 
         try {
+            // Set up internal WebSocket if in client mode
+            if (!_signalingUrl.empty() && !_signalingCallbacks.onLocalDescription) {
+                setupInternalWebSocket();
+            }
+
             setupPeerConnection();
             setupDataChannel();
             setupUnreliableDataChannel();
@@ -434,7 +615,7 @@ namespace EntropyEngine::Networking {
         }
 
         // Notify observers outside the lock
-        if (pending && !_destroying.load(std::memory_order_acquire)) {
+        if (pending && !isShuttingDown()) {
             onStateChanged(*pending);
         }
 
@@ -457,7 +638,7 @@ namespace EntropyEngine::Networking {
             pending = ConnectionState::Disconnected;
         }
 
-        if (pending && !_destroying.load(std::memory_order_acquire)) {
+        if (pending && !isShuttingDown()) {
             onStateChanged(*pending);
         }
 
@@ -475,30 +656,33 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        // Prefer cached open state and snapshot ID under lock to avoid races
-        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _dataChannelId;
+            open = _dataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
             return Result<void>::err(NetworkError::ConnectionClosed, "Data channel not open");
         }
 
+        // Hot path: removed per-message DEBUG logging (was killing throughput at scale)
         int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
         if (result < 0) {
+            ENTROPY_LOG_ERROR(std::format("rtcSendMessage failed with code {}", result));
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data");
         }
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -508,11 +692,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        bool open = _dataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _dataChannelId;
+            open = _dataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
@@ -529,13 +715,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to trySend data");
         }
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -545,11 +731,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
         }
 
-        bool open = _unreliableDataChannelOpen.load(std::memory_order_acquire);
+        // Snapshot both id and open state atomically under same lock to avoid races during channel swaps
         int id;
+        bool open;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             id = _unreliableDataChannelId;
+            open = _unreliableDataChannelOpen.load(std::memory_order_relaxed); // relaxed OK under mutex
         }
 
         if (!open || id < 0) {
@@ -562,13 +750,13 @@ namespace EntropyEngine::Networking {
             return Result<void>::err(NetworkError::InvalidMessage, "Failed to send unreliable data");
         }
 
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            _stats.bytesSent += data.size();
-            _stats.messagesSent++;
-            _stats.lastActivityTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
+        // Update stats atomically without lock
+        _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+        _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+        _stats.lastActivityTime.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
 
         return Result<void>::ok();
     }
@@ -578,7 +766,7 @@ namespace EntropyEngine::Networking {
     }
 
     ConnectionStats WebRTCConnection::getStats() const {
-        std::lock_guard<std::mutex> lock(_mutex);
+        // No lock needed - ConnectionStats copy constructor handles atomic loads
         return _stats;
     }
 
@@ -755,7 +943,7 @@ namespace EntropyEngine::Networking {
             throw std::runtime_error("Failed to create peer connection");
         }
 
-        rtcSetUserPointer(_peerConnectionId, this);
+        rtcSetUserPointer(_peerConnectionId, _callbackContext);
         rtcSetLocalDescriptionCallback(_peerConnectionId, onLocalDescriptionCallback);
         rtcSetLocalCandidateCallback(_peerConnectionId, onLocalCandidateCallback);
         rtcSetStateChangeCallback(_peerConnectionId, onStateChangeCallback);
@@ -770,6 +958,7 @@ namespace EntropyEngine::Networking {
             throw std::runtime_error("Failed to create data channel");
         }
 
+        ENTROPY_LOG_DEBUG(std::format("Created LOCAL reliable channel with id={}", _dataChannelId));
         setupDataChannelCallbacks(_dataChannelId, true);
     }
 
@@ -790,10 +979,69 @@ namespace EntropyEngine::Networking {
     }
 
     void WebRTCConnection::setupDataChannelCallbacks(int channelId, bool isReliable) {
-        rtcSetUserPointer(channelId, this);
+        rtcSetUserPointer(channelId, _callbackContext);
         rtcSetOpenCallback(channelId, onOpenCallback);
         rtcSetClosedCallback(channelId, onClosedCallback);
         rtcSetMessageCallback(channelId, onMessageCallback);
+    }
+
+    void WebRTCConnection::setupInternalWebSocket() {
+        // Client mode: Create and manage WebSocket for signaling
+        _webSocket = std::make_shared<rtc::WebSocket>();
+
+        // Set up signaling callbacks to bridge between WebSocket and WebRTCConnection
+        // Uses binary envelope framing for robustness
+        _signalingCallbacks.onLocalDescription = [webSocket = _webSocket](const std::string& type, const std::string& sdp) {
+            if (webSocket && webSocket->isOpen()) {
+                auto encoded = encodeSDPMessage(type, sdp);
+                webSocket->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
+            }
+        };
+
+        _signalingCallbacks.onLocalCandidate = [webSocket = _webSocket](const std::string& candidate, const std::string& mid) {
+            if (webSocket && webSocket->isOpen()) {
+                auto encoded = encodeICEMessage(candidate, mid);
+                webSocket->send(reinterpret_cast<const std::byte*>(encoded.data()), encoded.size());
+            }
+        };
+
+        // Set up WebSocket message handler for incoming signaling
+        // Expects binary envelope format
+        _webSocket->onMessage([this](auto data) {
+            if (std::holds_alternative<rtc::binary>(data)) {
+                const auto& binaryData = std::get<rtc::binary>(data);
+                // Convert std::byte to uint8_t
+                std::vector<uint8_t> msg;
+                msg.reserve(binaryData.size());
+                for (const auto& byte : binaryData) {
+                    msg.push_back(static_cast<uint8_t>(byte));
+                }
+
+                auto decoded = decodeSignalingMessage(msg);
+                if (!decoded) {
+                    ENTROPY_LOG_ERROR("Failed to decode signaling message");
+                    return;
+                }
+
+                auto [msgType, str1, str2] = *decoded;
+                if (msgType == SignalingMessageType::SDP) {
+                    // str1=type, str2=sdp
+                    setRemoteDescription(str1, str2);
+                } else if (msgType == SignalingMessageType::ICE) {
+                    // str1=candidate, str2=mid
+                    addRemoteCandidate(str1, str2);
+                }
+            }
+        });
+
+        _webSocket->onError([](std::string error) {
+            ENTROPY_LOG_ERROR(std::format("WebRTC signaling error: {}", error));
+        });
+
+        // Open WebSocket connection
+        _webSocket->open(_signalingUrl);
+
+        ENTROPY_LOG_INFO(std::format("WebRTC client connecting to signaling server: {}", _signalingUrl));
     }
 
 } // namespace EntropyEngine::Networking

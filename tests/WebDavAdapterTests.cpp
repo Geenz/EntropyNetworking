@@ -5,9 +5,11 @@
 
 #include "Networking/Protocol/WebDavAdapter.h"
 #include <VirtualFileSystem/VirtualFileSystem.h>
+#include <Concurrency/WorkService.h>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Core::IO;
+using namespace EntropyEngine::Core::Concurrency;
 
 namespace {
 
@@ -27,12 +29,39 @@ static bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+class WebDavAdapterFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Create work service and start it
+        workService = std::make_unique<WorkService>(WorkService::Config{});
+        workService->start();
+
+        // Create work contract group and register with work service
+        vfsGroup = std::make_unique<WorkContractGroup>(2000, "VfsGroup");
+        workService->addWorkContractGroup(vfsGroup.get());
+
+        // Create VFS with the work contract group
+        vfs = std::make_shared<VirtualFileSystem>(vfsGroup.get());
+    }
+
+    void TearDown() override {
+        vfs.reset();
+        vfsGroup.reset();
+
+        if (workService) {
+            workService->stop();
+        }
+        workService.reset();
+    }
+
+    std::unique_ptr<WorkService> workService;
+    std::unique_ptr<WorkContractGroup> vfsGroup;
+    std::shared_ptr<VirtualFileSystem> vfs;
+};
+
 }
 
-TEST(WebDavAdapter, Propfind_Depth0_File) {
-    using EntropyEngine::Core::Concurrency::WorkContractGroup;
-    WorkContractGroup group(2000);
-    auto vfs = std::make_shared<VirtualFileSystem>(&group);
+TEST_F(WebDavAdapterFixture, Propfind_Depth0_File) {
     WebDavAdapter adapter(vfs, "/dav/");
 
     std::filesystem::path root = std::filesystem::current_path() / "webdav_adapter_tests";
@@ -60,10 +89,7 @@ TEST(WebDavAdapter, Propfind_Depth0_File) {
     EXPECT_TRUE(contains(res.body, "<D:getcontentlength>"));
 }
 
-TEST(WebDavAdapter, Propfind_Depth1_Directory) {
-    using EntropyEngine::Core::Concurrency::WorkContractGroup;
-    WorkContractGroup group(2000);
-    auto vfs = std::make_shared<VirtualFileSystem>(&group);
+TEST_F(WebDavAdapterFixture, Propfind_Depth1_Directory) {
     WebDavAdapter adapter(vfs, "/dav/");
 
     std::filesystem::path root = std::filesystem::current_path() / "webdav_adapter_tests2";

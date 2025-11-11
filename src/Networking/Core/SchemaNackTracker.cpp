@@ -40,9 +40,16 @@ void SchemaNackTracker::recordNackSent(const ComponentTypeHash& typeHash) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     auto now = std::chrono::steady_clock::now();
-    auto& record = _nackRecords[typeHash];
-    record.lastNackTime = now;
-    record.count++;
+    auto it = _nackRecords.find(typeHash);
+    if (it != _nackRecords.end()) {
+        it->second.lastNackTime = now;
+        it->second.count++;
+    } else {
+        NackRecord record;
+        record.lastNackTime = now;
+        record.count = 1;
+        _nackRecords.emplace(typeHash, record);
+    }
 
     _totalNacksSent++;
 

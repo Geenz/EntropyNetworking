@@ -77,7 +77,7 @@ public:
 
 private:
     struct NackRecord {
-        std::chrono::steady_clock::time_point lastNackTime;
+        std::chrono::steady_clock::time_point lastNackTime{};
         size_t count{0};
     };
 

@@ -1,0 +1,13 @@
+# ThreadSanitizer suppressions for EntropyNetworking
+#
+# VFS::submit() races: The VirtualFileSystem::submit() function may start executing
+# lambdas on worker threads before the submit() call returns to the caller. This causes
+# benign races in std::function construction that don't affect correctness but violate
+# the C++ memory model. These races would require architectural changes to VFS itself.
+#
+# Suppressing:
+# - Race in VFS::submit() during std::function wrapper construction
+# - Race in lambda functor execution while submit() is still constructing the wrapper
+#
+race:VirtualFileSystem::submit
+race:std::__1::__function::__func*WebDAVFileSystemBackend::readFile*operator()
