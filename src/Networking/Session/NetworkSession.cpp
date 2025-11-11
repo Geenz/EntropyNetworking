@@ -670,11 +670,19 @@ ConnectionStats NetworkSession::getStats() const {
 }
 
 void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
+    // Check shutdown flag FIRST - before accessing any member data
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
     ENTROPY_LOG_DEBUG(std::format("NetworkSession::onMessageReceived: {} bytes for session {}", data.size(), (void*)this));
     handleReceivedMessage(data);
 }
 
 void NetworkSession::onConnectionStateChanged(ConnectionState state) {
+    // Check shutdown flag FIRST - before accessing any member data
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
     _state = state;
 }
 

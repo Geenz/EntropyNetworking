@@ -38,17 +38,25 @@ protected:
     }
 
     void TearDown() override {
-        // Clean up sessions
-        clientSession.reset();
-        serverSession.reset();
+        // CRITICAL: Disconnect sessions and close connections BEFORE destroying sessions
+        // to prevent use-after-free when background threads invoke callbacks on freed sessions
+        if (clientSession) {
+            clientSession->disconnect();
+        }
+        if (serverSession) {
+            serverSession->disconnect();
+        }
 
-        // Clean up connections
         if (clientConnHandle.valid()) {
             clientConnHandle.close();
         }
         if (serverConnHandle.valid()) {
             serverConnHandle.close();
         }
+
+        // Now safe to destroy sessions
+        clientSession.reset();
+        serverSession.reset();
 
         // Clean up server
         if (server) {
