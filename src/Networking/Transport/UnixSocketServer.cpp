@@ -188,9 +188,11 @@ Result<void> UnixSocketServer::close() {
 
     _listening.store(false, std::memory_order_release);
 
+    // Close the socket descriptor but don't modify _serverSocket
+    // The descriptor itself being closed will cause poll() to return,
+    // allowing accept() to exit cleanly when it checks _listening again
     if (_serverSocket >= 0) {
         ::close(_serverSocket);
-        _serverSocket = -1;
     }
 
     ::unlink(_socketPath.c_str());
