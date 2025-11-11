@@ -50,15 +50,19 @@ NetworkSession::~NetworkSession() {
     // Set shutdown flag to prevent new callback invocations
     _shuttingDown.store(true, std::memory_order_release);
 
-    // Wait for active callbacks to complete
-    while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
-        std::this_thread::yield();
-    }
-
+    // Clear connection callbacks FIRST to prevent new invocations
     if (_connection) {
-        // Note: We do NOT clear callbacks here - ConnectionManager owns them
-        // Just release our reference to the connection
+        _connection->setMessageCallback(nullptr);
+        _connection->setStateCallback(nullptr);
+
+        // Wait for active callbacks to complete
+        while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
+            std::this_thread::yield();
+        }
+
+        // Release our reference to the connection
         _connection->release();
+        _connection = nullptr;
     }
 
     // Clear all callbacks - safe now that active count is zero

@@ -38,8 +38,8 @@ protected:
     }
 
     void TearDown() override {
-        // CRITICAL: Disconnect sessions and close connections BEFORE destroying sessions
-        // to prevent use-after-free when background threads invoke callbacks on freed sessions
+        // CRITICAL: Disconnect and destroy sessions BEFORE closing connection handles
+        // Sessions hold raw pointers to connections, so they must be destroyed first
         if (clientSession) {
             clientSession->disconnect();
         }
@@ -47,16 +47,17 @@ protected:
             serverSession->disconnect();
         }
 
+        // Destroy sessions BEFORE closing connections (sessions hold raw pointers to connections)
+        clientSession.reset();
+        serverSession.reset();
+
+        // Now safe to close connection handles (which may destroy the underlying connections)
         if (clientConnHandle.valid()) {
             clientConnHandle.close();
         }
         if (serverConnHandle.valid()) {
             serverConnHandle.close();
         }
-
-        // Now safe to destroy sessions
-        clientSession.reset();
-        serverSession.reset();
 
         // Clean up server
         if (server) {
