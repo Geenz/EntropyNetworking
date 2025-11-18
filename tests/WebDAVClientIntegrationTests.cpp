@@ -56,13 +56,15 @@ protected:
     }
 
     void TearDown() override {
-        backend.reset();
-        vfs.reset();
-        vfsGroup.reset();
-
+        // Stop work service FIRST before destroying the work group
         if (workService) {
             workService->stop();
         }
+
+        // Now safe to destroy VFS components
+        backend.reset();
+        vfs.reset();
+        vfsGroup.reset();
         workService.reset();
 
         if (server) server->stop();

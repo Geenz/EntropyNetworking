@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <string>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace EntropyEngine {
 namespace Networking {
@@ -52,69 +54,24 @@ using TypeName = std::string;
 using RequestId = uint32_t;
 
 /**
- * @brief 2D vector type
+ * @brief 2D vector type (GLM)
  */
-struct Vec2 {
-    float x{0.0f};
-    float y{0.0f};
-
-    Vec2() = default;
-    Vec2(float x_, float y_) : x(x_), y(y_) {}
-
-    bool operator==(const Vec2& other) const {
-        return x == other.x && y == other.y;
-    }
-};
+using Vec2 = glm::vec2;
 
 /**
- * @brief 3D vector type
+ * @brief 3D vector type (GLM)
  */
-struct Vec3 {
-    float x{0.0f};
-    float y{0.0f};
-    float z{0.0f};
-
-    Vec3() = default;
-    Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
-
-    bool operator==(const Vec3& other) const {
-        return x == other.x && y == other.y && z == other.z;
-    }
-};
+using Vec3 = glm::vec3;
 
 /**
- * @brief 4D vector type
+ * @brief 4D vector type (GLM)
  */
-struct Vec4 {
-    float x{0.0f};
-    float y{0.0f};
-    float z{0.0f};
-    float w{0.0f};
-
-    Vec4() = default;
-    Vec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
-
-    bool operator==(const Vec4& other) const {
-        return x == other.x && y == other.y && z == other.z && w == other.w;
-    }
-};
+using Vec4 = glm::vec4;
 
 /**
- * @brief Quaternion type for rotations
+ * @brief Quaternion type for rotations (GLM)
  */
-struct Quat {
-    float x{0.0f};
-    float y{0.0f};
-    float z{0.0f};
-    float w{1.0f};  // Identity quaternion
-
-    Quat() = default;
-    Quat(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
-
-    bool operator==(const Quat& other) const {
-        return x == other.x && y == other.y && z == other.z && w == other.w;
-    }
-};
+using Quat = glm::quat;
 
 } // namespace Networking
 } // namespace EntropyEngine

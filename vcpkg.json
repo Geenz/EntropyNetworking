@@ -12,6 +12,7 @@
     "tinyxml2",
     "llhttp",
     "cpp-httplib",
+    "glm",
     {
       "name": "curl",
       "features": ["http2", "ssl"]
