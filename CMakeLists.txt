@@ -53,6 +53,7 @@ find_package(zstd CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
 find_package(CURL CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 # Only require GoogleTest when building tests
 if(BUILD_TESTS)
@@ -144,6 +145,7 @@ target_link_libraries(EntropyNetworking
     PUBLIC
         EntropyCore::Core
         CapnProto::capnp
+        glm::glm
     PRIVATE
         OpenSSL::SSL
         OpenSSL::Crypto
