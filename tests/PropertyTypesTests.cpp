@@ -73,7 +73,7 @@ TEST(PropertyTypesTests, VectorTypes) {
     Vec2 v2{1.0f, 2.0f};
     Vec3 v3{1.0f, 2.0f, 3.0f};
     Vec4 v4{1.0f, 2.0f, 3.0f, 4.0f};
-    Quat q{0.0f, 0.0f, 0.0f, 1.0f};
+    Quat q{1.0f, 0.0f, 0.0f, 0.0f};  // GLM constructor is (w, x, y, z)
 
     PropertyValue val2 = v2;
     PropertyValue val3 = v3;
@@ -96,7 +96,7 @@ TEST(PropertyTypesTests, VectorEquality) {
 }
 
 TEST(PropertyTypesTests, QuaternionIdentity) {
-    Quat identity;  // Default constructor creates identity quaternion
+    Quat identity{1.0f, 0.0f, 0.0f, 0.0f};  // Identity quaternion - GLM constructor is (w, x, y, z)
     EXPECT_EQ(identity.x, 0.0f);
     EXPECT_EQ(identity.y, 0.0f);
     EXPECT_EQ(identity.z, 0.0f);
