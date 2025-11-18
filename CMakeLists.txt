@@ -145,7 +145,6 @@ target_link_libraries(EntropyNetworking
     PUBLIC
         EntropyCore::Core
         CapnProto::capnp
-        glm::glm
     PRIVATE
         OpenSSL::SSL
         OpenSSL::Crypto
