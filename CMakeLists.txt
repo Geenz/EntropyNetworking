@@ -11,7 +11,7 @@ project(EntropyNetworking
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "EntropyNetworking only supports static linking" FORCE)
 option(BUILD_TESTS "Enable/build tests for EntropyNetworking" ON)
 option(BUILD_EXAMPLES "Build EntropyNetworking example executables" ON)
-option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" ON)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
