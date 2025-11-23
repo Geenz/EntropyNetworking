@@ -45,7 +45,10 @@ if(DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 # Find dependencies
-find_package(EntropyCore CONFIG REQUIRED)
+# EntropyCore: check for existing target (subdirectory or parent), otherwise use vcpkg
+if(NOT TARGET EntropyCore AND NOT TARGET EntropyCore::Core)
+    find_package(EntropyCore CONFIG REQUIRED)
+endif()
 find_package(CapnProto CONFIG REQUIRED)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
