@@ -8,15 +8,18 @@
  */
 
 #include <gtest/gtest.h>
-#include "Networking/HTTP/HttpClient.h"
-#include "MiniDavServer.h"
-#include "DavTree.h"
-#include <thread>
+
 #include <chrono>
+#include <thread>
+
+#include "DavTree.h"
+#include "MiniDavServer.h"
+#include "Networking/HTTP/HttpClient.h"
 
 using namespace EntropyEngine::Networking::HTTP;
 
-class HttpClientRobustnessTests : public ::testing::Test {
+class HttpClientRobustnessTests : public ::testing::Test
+{
 protected:
     HttpClient client;
 };
@@ -44,7 +47,7 @@ TEST_F(HttpClientRobustnessTests, ConnectionRefused) {
     HttpRequest req;
     req.method = HttpMethod::GET;
     req.scheme = "http";
-    req.host = "127.0.0.1:1"; // Port 1 should be refused
+    req.host = "127.0.0.1:1";  // Port 1 should be refused
     req.path = "/";
 
     RequestOptions opts;
@@ -60,7 +63,8 @@ TEST_F(HttpClientRobustnessTests, ConnectionRefused) {
 // Test timeout on slow server (local harness)
 TEST_F(HttpClientRobustnessTests, TimeoutHandling) {
     // Local server with delay endpoint to avoid external dependency
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -69,15 +73,14 @@ TEST_F(HttpClientRobustnessTests, TimeoutHandling) {
     req.method = HttpMethod::GET;
     req.scheme = "http";
     req.host = host;
-    req.path = "/delay/10"; // 10 second delay
+    req.path = "/delay/10";  // 10 second delay
 
     RequestOptions opts;
-    opts.totalDeadline = std::chrono::milliseconds(2000); // 2 second timeout
+    opts.totalDeadline = std::chrono::milliseconds(2000);  // 2 second timeout
 
     auto start = std::chrono::steady_clock::now();
     auto resp = client.execute(req, opts);
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
 
     // Should timeout (statusCode==0) in ~2 seconds
     EXPECT_EQ(resp.statusCode, 0);
@@ -91,7 +94,7 @@ TEST_F(HttpClientRobustnessTests, TimeoutHandling) {
 TEST_F(HttpClientRobustnessTests, HttpsRealServer) {
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.scheme = "https"; // Explicit HTTPS
+    req.scheme = "https";  // Explicit HTTPS
     req.host = "httpbin.org";
     req.path = "/get";
 
@@ -106,14 +109,14 @@ TEST_F(HttpClientRobustnessTests, HttpsRealServer) {
         GTEST_SKIP() << "External service temporarily unavailable (status: " << resp.statusCode << ")";
     }
 
-    EXPECT_TRUE(resp.isSuccess()) << "Status: " << resp.statusCode
-                                   << ", Message: " << resp.statusMessage;
+    EXPECT_TRUE(resp.isSuccess()) << "Status: " << resp.statusCode << ", Message: " << resp.statusMessage;
     EXPECT_FALSE(resp.body.empty());
 }
 
 // Test POST with body (local harness)
 TEST_F(HttpClientRobustnessTests, PostWithJsonBody) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -144,7 +147,8 @@ TEST_F(HttpClientRobustnessTests, PostWithJsonBody) {
 
 // Test custom headers (local harness)
 TEST_F(HttpClientRobustnessTests, CustomHeaders) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -173,7 +177,8 @@ TEST_F(HttpClientRobustnessTests, CustomHeaders) {
 
 // Test connection reuse (same host multiple requests) - local harness
 TEST_F(HttpClientRobustnessTests, ConnectionReuse) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -197,13 +202,16 @@ TEST_F(HttpClientRobustnessTests, ConnectionReuse) {
 // Test different HTTP methods
 TEST_F(HttpClientRobustnessTests, HttpMethods) {
     // Use local MiniDavServer so this test always runs and is deterministic
-    DavTree tree; tree.addDir("/"); tree.addFile("/hello.txt", "hello", "text/plain");
+    DavTree tree;
+    tree.addDir("/");
+    tree.addFile("/hello.txt", "hello", "text/plain");
     MiniDavServer server(tree, "/dav/");
     server.start();
 
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
 
-    struct TestCase {
+    struct TestCase
+    {
         HttpMethod method;
         std::string path;
         int expectedStatus;
@@ -213,10 +221,10 @@ TEST_F(HttpClientRobustnessTests, HttpMethods) {
     std::vector<TestCase> cases = {
         {HttpMethod::GET, "/dav/hello.txt", 200, {}},
         {HttpMethod::HEAD, "/dav/hello.txt", 200, {}},
-        {HttpMethod::PUT, "/dav/newfile.bin", 201, {'t','e','s','t'}},
+        {HttpMethod::PUT, "/dav/newfile.bin", 201, {'t', 'e', 's', 't'}},
         {HttpMethod::DELETE_, "/dav/hello.txt", 204, {}},
         {HttpMethod::OPTIONS, "/dav/", 200, {}},
-        {HttpMethod::PROPFIND, "/dav/", 207, {}} // Depth may default; server returns 207
+        {HttpMethod::PROPFIND, "/dav/", 207, {}}  // Depth may default; server returns 207
     };
 
     for (const auto& tc : cases) {
@@ -246,8 +254,7 @@ TEST_F(HttpClientRobustnessTests, HttpMethods) {
         auto resp = client.execute(req, opts);
         // For PUT on an existing resource or server semantics, allow 201 or 204
         if (tc.method == HttpMethod::PUT) {
-            EXPECT_TRUE(resp.statusCode == 201 || resp.statusCode == 204)
-                << "PUT returned: " << resp.statusCode;
+            EXPECT_TRUE(resp.statusCode == 201 || resp.statusCode == 204) << "PUT returned: " << resp.statusCode;
         } else {
             EXPECT_EQ(resp.statusCode, tc.expectedStatus)
                 << "Method failed: " << tc.path << ", got " << resp.statusCode;
@@ -257,7 +264,8 @@ TEST_F(HttpClientRobustnessTests, HttpMethods) {
 
 // Test response size limit (local harness)
 TEST_F(HttpClientRobustnessTests, ResponseSizeLimit) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -266,10 +274,10 @@ TEST_F(HttpClientRobustnessTests, ResponseSizeLimit) {
     req.method = HttpMethod::GET;
     req.scheme = "http";
     req.host = host;
-    req.path = "/bytes/2048"; // Request 2KB
+    req.path = "/bytes/2048";  // Request 2KB
 
     RequestOptions opts;
-    opts.maxResponseBytes = 1024; // Limit to 1KB
+    opts.maxResponseBytes = 1024;  // Limit to 1KB
     opts.totalDeadline = std::chrono::milliseconds(30000);
 
     auto resp = client.execute(req, opts);
@@ -281,7 +289,8 @@ TEST_F(HttpClientRobustnessTests, ResponseSizeLimit) {
 
 // Test empty response (local harness)
 TEST_F(HttpClientRobustnessTests, EmptyResponse) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
@@ -290,7 +299,7 @@ TEST_F(HttpClientRobustnessTests, EmptyResponse) {
     req.method = HttpMethod::GET;
     req.scheme = "http";
     req.host = host;
-    req.path = "/bytes/0"; // Request 0 bytes
+    req.path = "/bytes/0";  // Request 0 bytes
 
     RequestOptions opts;
     opts.totalDeadline = std::chrono::milliseconds(30000);
@@ -303,23 +312,21 @@ TEST_F(HttpClientRobustnessTests, EmptyResponse) {
 
 // Test HTTP status codes (local harness)
 TEST_F(HttpClientRobustnessTests, HttpStatusCodes) {
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     MiniDavServer server(tree, "/dav/");
     server.start();
     auto host = std::string("127.0.0.1:") + std::to_string(server.port());
 
-    struct StatusTest {
+    struct StatusTest
+    {
         std::string path;
         int expectedStatus;
     };
 
     std::vector<StatusTest> tests = {
-        {"/status/200", 200},
-        {"/status/201", 201},
-        {"/status/204", 204},
-        {"/status/400", 400},
-        {"/status/404", 404},
-        {"/status/500", 500},
+        {"/status/200", 200}, {"/status/201", 201}, {"/status/204", 204},
+        {"/status/400", 400}, {"/status/404", 404}, {"/status/500", 500},
     };
 
     for (const auto& test : tests) {
@@ -333,15 +340,15 @@ TEST_F(HttpClientRobustnessTests, HttpStatusCodes) {
         opts.totalDeadline = std::chrono::milliseconds(30000);
 
         auto resp = client.execute(req, opts);
-        EXPECT_EQ(resp.statusCode, test.expectedStatus)
-            << "Path: " << test.path << ", got status: " << resp.statusCode;
+        EXPECT_EQ(resp.statusCode, test.expectedStatus) << "Path: " << test.path << ", got status: " << resp.statusCode;
     }
 }
 
 // Test concurrent requests
 TEST_F(HttpClientRobustnessTests, ConcurrentRequests) {
     // Always-on local test for concurrent requests
-    DavTree tree; tree.addDir("/");
+    DavTree tree;
+    tree.addDir("/");
     // Add multiple files to fetch concurrently
     tree.addFile("/f0.txt", "zero", "text/plain");
     tree.addFile("/f1.txt", "one", "text/plain");
@@ -382,16 +389,21 @@ TEST_F(HttpClientRobustnessTests, ConcurrentRequests) {
 // Test header case normalization (local MiniDavServer, always-on)
 TEST_F(HttpClientRobustnessTests, HeaderCaseNormalization) {
     // Spin up a tiny local DAV server
-    DavTree tree; tree.addDir("/"); tree.addFile("/hello.txt", "hello", "text/plain");
+    DavTree tree;
+    tree.addDir("/");
+    tree.addFile("/hello.txt", "hello", "text/plain");
     MiniDavServer server(tree, "/dav/");
     server.start();
 
     HttpClient localClient;
-    HttpRequest req; req.method = HttpMethod::GET; req.scheme = "http";
+    HttpRequest req;
+    req.method = HttpMethod::GET;
+    req.scheme = "http";
     req.host = std::string("127.0.0.1:") + std::to_string(server.port());
     req.path = "/dav/hello.txt";
 
-    RequestOptions opts; opts.totalDeadline = std::chrono::milliseconds(10000);
+    RequestOptions opts;
+    opts.totalDeadline = std::chrono::milliseconds(10000);
     auto resp = localClient.execute(req, opts);
 
     ASSERT_EQ(resp.statusCode, 200);
@@ -411,7 +423,9 @@ TEST_F(HttpClientRobustnessTests, HeaderCaseNormalization) {
 // Test closeIdle functionality
 TEST_F(HttpClientRobustnessTests, CloseIdleConnections) {
     // Always-on local test for closeIdle()
-    DavTree tree; tree.addDir("/"); tree.addFile("/hello.txt", "hello", "text/plain");
+    DavTree tree;
+    tree.addDir("/");
+    tree.addFile("/hello.txt", "hello", "text/plain");
     MiniDavServer server(tree, "/dav/");
     server.start();
 

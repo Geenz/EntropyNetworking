@@ -13,8 +13,10 @@
 #include "../Core/ErrorCodes.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Serialization helpers for ComponentSchema ↔ Cap'n Proto
@@ -29,9 +31,7 @@ namespace Networking {
  * @param definition The C++ PropertyDefinition to serialize
  * @param builder Cap'n Proto builder for PropertyDefinitionData
  */
-void serializePropertyDefinition(
-    const PropertyDefinition& definition,
-    PropertyDefinitionData::Builder builder);
+void serializePropertyDefinition(const PropertyDefinition& definition, PropertyDefinitionData::Builder builder);
 
 /**
  * @brief Deserialize a PropertyDefinition from Cap'n Proto
@@ -39,8 +39,7 @@ void serializePropertyDefinition(
  * @param reader Cap'n Proto reader for PropertyDefinitionData
  * @return PropertyDefinition The deserialized C++ structure
  */
-PropertyDefinition deserializePropertyDefinition(
-    PropertyDefinitionData::Reader reader);
+PropertyDefinition deserializePropertyDefinition(PropertyDefinitionData::Reader reader);
 
 /**
  * @brief Serialize a ComponentSchema to Cap'n Proto
@@ -48,9 +47,7 @@ PropertyDefinition deserializePropertyDefinition(
  * @param schema The C++ ComponentSchema to serialize
  * @param builder Cap'n Proto builder for ComponentSchemaData
  */
-void serializeComponentSchema(
-    const ComponentSchema& schema,
-    ComponentSchemaData::Builder builder);
+void serializeComponentSchema(const ComponentSchema& schema, ComponentSchemaData::Builder builder);
 
 /**
  * @brief Deserialize a ComponentSchema from Cap'n Proto
@@ -58,8 +55,7 @@ void serializeComponentSchema(
  * @param reader Cap'n Proto reader for ComponentSchemaData
  * @return Result<ComponentSchema> The deserialized schema or error
  */
-Result<ComponentSchema> deserializeComponentSchema(
-    ComponentSchemaData::Reader reader);
+Result<ComponentSchema> deserializeComponentSchema(ComponentSchemaData::Reader reader);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

@@ -9,14 +9,17 @@
 
 #pragma once
 
-#include "ComponentSchema.h"
+#include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
-#include <shared_mutex>
-#include <optional>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ComponentSchema.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Thread-safe registry for component schemas
@@ -40,11 +43,11 @@ namespace Networking {
  * - Structural hash indexing for fast compatibility queries
  * - Public/private schema separation
  */
-class ComponentSchemaRegistry {
+class ComponentSchemaRegistry
+{
 public:
     /// Callback invoked when a schema is published (made public)
-    using SchemaPublishedCallback = std::function<void(ComponentTypeHash typeHash,
-                                                        const ComponentSchema& schema)>;
+    using SchemaPublishedCallback = std::function<void(ComponentTypeHash typeHash, const ComponentSchema& schema)>;
 
     /// Callback invoked when a schema is unpublished (made private)
     using SchemaUnpublishedCallback = std::function<void(ComponentTypeHash typeHash)>;
@@ -117,9 +120,7 @@ public:
      *
      * @threadsafety Thread-safe (read lock)
      */
-    std::vector<ComponentTypeHash> findCompatibleSchemas(
-        ComponentTypeHash typeHash
-    ) const;
+    std::vector<ComponentTypeHash> findCompatibleSchemas(ComponentTypeHash typeHash) const;
 
     /**
      * @brief Check if two schemas are structurally compatible
@@ -147,10 +148,7 @@ public:
      *
      * @threadsafety Thread-safe (read lock)
      */
-    Result<void> validateDetailedCompatibility(
-        ComponentTypeHash source,
-        ComponentTypeHash target
-    ) const;
+    Result<void> validateDetailedCompatibility(ComponentTypeHash source, ComponentTypeHash target) const;
 
     /**
      * @brief Check if schema is registered
@@ -269,5 +267,5 @@ private:
     SchemaUnpublishedCallback _schemaUnpublishedCallback;
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

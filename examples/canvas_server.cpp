@@ -15,16 +15,18 @@
  * Run this server first, then connect with canvas_client.
  */
 
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Transport/RemoteServer.h"
-#include "../src/Networking/Session/SessionManager.h"
-#include "../src/Networking/Core/ComponentSchemaRegistry.h"
-#include "../src/Networking/Core/ComponentSchema.h"
 #include <EntropyCore.h>
+
+#include <chrono>
 #include <memory>
 #include <thread>
-#include <chrono>
 #include <vector>
+
+#include "../src/Networking/Core/ComponentSchema.h"
+#include "../src/Networking/Core/ComponentSchemaRegistry.h"
+#include "../src/Networking/Session/SessionManager.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/RemoteServer.h"
 
 using namespace std;
 using namespace EntropyEngine;
@@ -53,18 +55,17 @@ int main() {
         // Step 2: Define a CanvasObject schema
         // This describes the structure of objects on our canvas
         vector<PropertyDefinition> canvasObjectProps = {
-            {"position", PropertyType::Vec2, 0, sizeof(Vec2)},          // x, y position
-            {"color", PropertyType::Vec4, sizeof(Vec2), sizeof(Vec4)},  // RGBA color
-            {"size", PropertyType::Float32, sizeof(Vec2) + sizeof(Vec4), sizeof(float)} // radius
+            {"position", PropertyType::Vec2, 0, sizeof(Vec2)},                           // x, y position
+            {"color", PropertyType::Vec4, sizeof(Vec2), sizeof(Vec4)},                   // RGBA color
+            {"size", PropertyType::Float32, sizeof(Vec2) + sizeof(Vec4), sizeof(float)}  // radius
         };
 
-        auto schemaResult = ComponentSchema::create(
-            "com.entropy.canvas",  // Application ID (reverse domain notation)
-            "CanvasObject",        // Component type name
-            1,                     // Schema version
-            canvasObjectProps,     // Property definitions
-            sizeof(Vec2) + sizeof(Vec4) + sizeof(float), // Total size
-            true                   // Make it public (discoverable)
+        auto schemaResult = ComponentSchema::create("com.entropy.canvas",  // Application ID (reverse domain notation)
+                                                    "CanvasObject",        // Component type name
+                                                    1,                     // Schema version
+                                                    canvasObjectProps,     // Property definitions
+                                                    sizeof(Vec2) + sizeof(Vec4) + sizeof(float),  // Total size
+                                                    true  // Make it public (discoverable)
         );
 
         if (schemaResult.failed()) {
@@ -138,8 +139,8 @@ int main() {
                 });
 
                 // Set up entity callbacks to handle messages from client
-                sessMgr.setEntityCreatedCallback(session,
-                    [](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId) {
+                sessMgr.setEntityCreatedCallback(
+                    session, [](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId) {
                         ENTROPY_LOG_INFO(std::format("Client created entity: {} ({})", entityId, typeName));
                     });
             }
@@ -184,11 +185,8 @@ int main() {
                 for (auto& session : sessions) {
                     if (!session.isConnected()) continue;
 
-                    auto result = session.sendEntityCreated(
-                        entityId,
-                        "com.entropy.canvas",
-                        "CanvasObject",
-                        0  // No parent (root level)
+                    auto result = session.sendEntityCreated(entityId, "com.entropy.canvas", "CanvasObject",
+                                                            0  // No parent (root level)
                     );
 
                     if (result.success()) {

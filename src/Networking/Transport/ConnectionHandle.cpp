@@ -8,10 +8,13 @@
  */
 
 #include "ConnectionHandle.h"
-#include "ConnectionManager.h"
+
 #include <format>
 
-namespace EntropyEngine::Networking {
+#include "ConnectionManager.h"
+
+namespace EntropyEngine::Networking
+{
 
 ConnectionManager* ConnectionHandle::manager() const {
     return static_cast<ConnectionManager*>(const_cast<void*>(handleOwner()));
@@ -110,9 +113,7 @@ void ConnectionHandle::setStateCallback(std::function<void(ConnectionState)> cal
 }
 
 uint64_t ConnectionHandle::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<ConnectionHandle>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<ConnectionHandle>().id);
     return hash;
 }
 
@@ -120,12 +121,8 @@ std::string ConnectionHandle::toString() const {
     if (!hasHandle()) {
         return std::format("{}@{}(invalid)", className(), static_cast<const void*>(this));
     }
-    return std::format("{}@{}(owner={}, idx={}, gen={})",
-                       className(),
-                       static_cast<const void*>(this),
-                       handleOwner(),
-                       handleIndex(),
-                       handleGeneration());
+    return std::format("{}@{}(owner={}, idx={}, gen={})", className(), static_cast<const void*>(this), handleOwner(),
+                       handleIndex(), handleGeneration());
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

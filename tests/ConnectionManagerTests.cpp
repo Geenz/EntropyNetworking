@@ -8,6 +8,7 @@
  */
 
 #include <gtest/gtest.h>
+
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/NetworkConnection.h"
 

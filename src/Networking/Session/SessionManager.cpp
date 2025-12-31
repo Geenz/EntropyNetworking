@@ -8,18 +8,20 @@
  */
 
 #include "SessionManager.h"
+
 #include <Logging/Logger.h>
+
 #include <format>
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 SessionManager::SessionManager(ConnectionManager* connectionManager, size_t capacity,
                                ComponentSchemaRegistry* schemaRegistry)
-    : _connectionManager(connectionManager)
-    , _schemaRegistry(schemaRegistry)
-    , _capacity(capacity)
-    , _sessionSlots(capacity)
-{
+    : _connectionManager(connectionManager),
+      _schemaRegistry(schemaRegistry),
+      _capacity(capacity),
+      _sessionSlots(capacity) {
     // Initialize lock-free free list
     for (size_t i = 0; i < _capacity - 1; ++i) {
         _sessionSlots[i].nextFree.store(static_cast<uint32_t>(i + 1), std::memory_order_relaxed);
@@ -29,17 +31,12 @@ SessionManager::SessionManager(ConnectionManager* connectionManager, size_t capa
 
     // Hook into schema registry changes if provided
     if (_schemaRegistry) {
-        _schemaRegistry->setSchemaPublishedCallback(
-            [this](ComponentTypeHash typeHash, const ComponentSchema& schema) {
-                broadcastSchemaAdvertisement(typeHash, schema);
-            }
-        );
+        _schemaRegistry->setSchemaPublishedCallback([this](ComponentTypeHash typeHash, const ComponentSchema& schema) {
+            broadcastSchemaAdvertisement(typeHash, schema);
+        });
 
         _schemaRegistry->setSchemaUnpublishedCallback(
-            [this](ComponentTypeHash typeHash) {
-                broadcastSchemaUnpublish(typeHash);
-            }
-        );
+            [this](ComponentTypeHash typeHash) { broadcastSchemaUnpublish(typeHash); });
     }
 }
 
@@ -65,9 +62,7 @@ uint32_t SessionManager::allocateSlot() {
         }
         uint32_t next = _sessionSlots[idx].nextFree.load(std::memory_order_acquire);
         uint64_t newHead = packHead(next, headTag(head) + 1);
-        if (_freeListHead.compare_exchange_weak(head, newHead,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(head, newHead, std::memory_order_acq_rel, std::memory_order_acquire)) {
             _activeCount.fetch_add(1, std::memory_order_acq_rel);
             return idx;
         }
@@ -98,9 +93,7 @@ void SessionManager::returnSlotToFreeList(uint32_t index) {
         uint32_t oldIdx = headIndex(old);
         slot.nextFree.store(oldIdx, std::memory_order_release);
         uint64_t newH = packHead(index, headTag(old) + 1);
-        if (_freeListHead.compare_exchange_weak(old, newH,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(old, newH, std::memory_order_acq_rel, std::memory_order_acquire)) {
             break;
         }
     }
@@ -126,14 +119,15 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
         // Get underlying connection pointer
         NetworkConnection* connPtr = _connectionManager->getConnectionPointer(connection);
         ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Got connection pointer {} for handle {}/{}",
-            (void*)connPtr, connection.handleIndex(), connection.handleGeneration()));
+                                      (void*)connPtr, connection.handleIndex(), connection.handleGeneration()));
         if (!connPtr) {
             returnSlotToFreeList(index);
             return SessionHandle();
         }
 
         // Create NetworkSession wrapping the connection, optional external registry, and schema registry
-        ENTROPY_LOG_DEBUG(std::format("SessionManager::createSession: Creating NetworkSession with connection {}", (void*)connPtr));
+        ENTROPY_LOG_DEBUG(
+            std::format("SessionManager::createSession: Creating NetworkSession with connection {}", (void*)connPtr));
         slot.session = std::make_unique<NetworkSession>(connPtr, externalRegistry, _schemaRegistry);
 
         // Register NetworkSession's callbacks with ConnectionManager's fan-out system
@@ -144,9 +138,8 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
             session->onMessageReceived(data);
         });
 
-        _connectionManager->setStateCallback(connection, [session](ConnectionState state) {
-            session->onConnectionStateChanged(state);
-        });
+        _connectionManager->setStateCallback(
+            connection, [session](ConnectionState state) { session->onConnectionStateChanged(state); });
 
         return SessionHandle(this, index, generation);
     } catch (const std::exception& e) {
@@ -154,6 +147,32 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
         returnSlotToFreeList(index);
         return SessionHandle();
     }
+}
+
+Result<void> SessionManager::destroySession(const SessionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    // Clear callbacks in NetworkSession before destroying
+    if (slot.session) {
+        slot.session->clearCallbacks();
+    }
+
+    // Clear connection callbacks in ConnectionManager
+    if (slot.connection.valid()) {
+        _connectionManager->setMessageCallback(slot.connection, nullptr);
+        _connectionManager->setStateCallback(slot.connection, nullptr);
+    }
+
+    // Return slot to free list (increments generation, clears session)
+    returnSlotToFreeList(index);
+
+    ENTROPY_LOG_DEBUG(std::format("SessionManager: Destroyed session at slot {}", index));
+    return Result<void>::ok();
 }
 
 bool SessionManager::validateHandle(const SessionHandle& handle) const noexcept {
@@ -278,13 +297,26 @@ Result<void> SessionManager::setErrorCallback(const SessionHandle& handle, Error
     return Result<void>::ok();
 }
 
-Result<void> SessionManager::sendEntityCreated(
-    const SessionHandle& handle,
-    uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    uint64_t parentId
-) {
+Result<void> SessionManager::setHeartbeatCallback(const SessionHandle& handle, HeartbeatCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setHeartbeatCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
+                                               const std::string& typeName, uint64_t parentId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -318,12 +350,8 @@ Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, ui
     return slot.session->sendEntityDestroyed(entityId);
 }
 
-Result<void> SessionManager::sendPropertyUpdate(
-    const SessionHandle& handle,
-    PropertyHash hash,
-    PropertyType type,
-    const PropertyValue& value
-) {
+Result<void> SessionManager::sendPropertyUpdate(const SessionHandle& handle, PropertyHash hash, PropertyType type,
+                                                const PropertyValue& value) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -340,10 +368,8 @@ Result<void> SessionManager::sendPropertyUpdate(
     return slot.session->sendPropertyUpdate(hash, type, value);
 }
 
-Result<void> SessionManager::sendPropertyUpdateBatch(
-    const SessionHandle& handle,
-    const std::vector<uint8_t>& batchData
-) {
+Result<void> SessionManager::sendPropertyUpdateBatch(const SessionHandle& handle,
+                                                     const std::vector<uint8_t>& batchData) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -360,10 +386,7 @@ Result<void> SessionManager::sendPropertyUpdateBatch(
     return slot.session->sendPropertyUpdateBatch(batchData);
 }
 
-Result<void> SessionManager::sendSceneSnapshot(
-    const SessionHandle& handle,
-    const std::vector<uint8_t>& snapshotData
-) {
+Result<void> SessionManager::sendSceneSnapshot(const SessionHandle& handle, const std::vector<uint8_t>& snapshotData) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -380,11 +403,25 @@ Result<void> SessionManager::sendSceneSnapshot(
     return slot.session->sendSceneSnapshot(snapshotData);
 }
 
-Result<void> SessionManager::performHandshake(
-    const SessionHandle& handle,
-    const std::string& clientType,
-    const std::string& clientId
-) {
+Result<void> SessionManager::sendHeartbeat(const SessionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendHeartbeat();
+}
+
+Result<void> SessionManager::performHandshake(const SessionHandle& handle, const std::string& clientType,
+                                              const std::string& clientId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -473,17 +510,12 @@ const PropertyRegistry& SessionManager::getPropertyRegistry(const SessionHandle&
 }
 
 uint64_t SessionManager::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<SessionManager>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<SessionManager>().id);
     return hash;
 }
 
 std::string SessionManager::toString() const {
-    return std::format("{}@{}(cap={}, active={})",
-                       className(),
-                       static_cast<const void*>(this),
-                       _capacity,
+    return std::format("{}@{}(cap={}, active={})", className(), static_cast<const void*>(this), _capacity,
                        _activeCount.load(std::memory_order_relaxed));
 }
 
@@ -508,18 +540,14 @@ void SessionManager::broadcastSchemaAdvertisement(ComponentTypeHash typeHash, co
         }
 
         // Send schema advertisement
-        auto result = slot.session->sendSchemaAdvertisement(
-            typeHash,
-            schema.appId,
-            schema.componentName,
-            schema.schemaVersion
-        );
+        auto result =
+            slot.session->sendSchemaAdvertisement(typeHash, schema.appId, schema.componentName, schema.schemaVersion);
 
         // Log errors but continue broadcasting to other sessions
         if (result.failed()) {
-            ENTROPY_LOG_WARNING_CAT("SessionManager",
-                std::format("Failed to broadcast schema advertisement to session {}: {}",
-                    i, result.errorMessage));
+            ENTROPY_LOG_WARNING_CAT(
+                "SessionManager",
+                std::format("Failed to broadcast schema advertisement to session {}: {}", i, result.errorMessage));
         }
     }
 }
@@ -549,9 +577,9 @@ void SessionManager::broadcastSchemaUnpublish(ComponentTypeHash typeHash) {
 
         // Log errors but continue broadcasting to other sessions
         if (result.failed()) {
-            ENTROPY_LOG_WARNING_CAT("SessionManager",
-                std::format("Failed to broadcast schema unpublish to session {}: {}",
-                    i, result.errorMessage));
+            ENTROPY_LOG_WARNING_CAT(
+                "SessionManager",
+                std::format("Failed to broadcast schema unpublish to session {}: {}", i, result.errorMessage));
         }
     }
 }
@@ -581,11 +609,10 @@ void SessionManager::flushAllPropertyBatches() {
 
         // Log errors but continue flushing other sessions
         if (result.failed()) {
-            ENTROPY_LOG_WARNING_CAT("SessionManager",
-                std::format("Failed to flush property batches for session {}: {}",
-                    i, result.errorMessage));
+            ENTROPY_LOG_WARNING_CAT("SessionManager", std::format("Failed to flush property batches for session {}: {}",
+                                                                  i, result.errorMessage));
         }
     }
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

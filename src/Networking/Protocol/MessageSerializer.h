@@ -17,14 +17,18 @@
 
 #pragma once
 
-#include "../Core/ErrorCodes.h"
-#include <vector>
-#include <cstdint>
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 
-namespace EntropyEngine {
-namespace Networking {
+#include <cstdint>
+#include <vector>
+
+#include "../Core/ErrorCodes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Serialize a Cap'n Proto message to a byte vector
@@ -104,5 +108,5 @@ Result<std::vector<uint8_t>> compress(const std::vector<uint8_t>& data, int comp
  */
 Result<std::vector<uint8_t>> decompress(const std::vector<uint8_t>& compressedData);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

@@ -4,11 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-#include <cstdint>
-#include <cstddef>
-#include <vector>
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <vector>
 
 // Lightweight, dependency-free fuzz target for Unix framing logic.
 // It simulates parsing of length-prefixed frames: [4-byte BE length][payload]
@@ -27,7 +27,7 @@ static inline uint32_t read_be32(const uint8_t* p) {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Treat data as a stream containing 0..N frames. Parse conservatively.
-    constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024; // 16 MB guard
+    constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16 MB guard
     size_t off = 0;
 
     // Local message buffer to simulate accumulation across recv() calls
@@ -37,7 +37,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // Iterate over the buffer in small chunks to simulate fragmentation
     while (off < size) {
-        size_t chunk = std::min<size_t>(size - off, (data[off] % 32) + 1); // 1..32 bytes per step
+        size_t chunk = std::min<size_t>(size - off, (data[off] % 32) + 1);  // 1..32 bytes per step
         size_t consumed = 0;
         while (consumed < chunk) {
             if (readingHeader) {
@@ -51,7 +51,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                     expectedLength = read_be32(message.data());
                     // Guard absurd sizes to stay bounded
                     if (expectedLength > MAX_MESSAGE_SIZE) {
-                        return 0; // treat as protocol error; stop parsing this input
+                        return 0;  // treat as protocol error; stop parsing this input
                     }
                     message.clear();
                     readingHeader = false;

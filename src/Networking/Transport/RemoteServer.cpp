@@ -8,28 +8,25 @@
  */
 
 #include "RemoteServer.h"
+
 #include "WebRTCServer.h"
 
-namespace EntropyEngine {
-namespace Networking {
-
-std::unique_ptr<RemoteServer> createRemoteServer(
-    ConnectionManager* connMgr,
-    uint16_t port)
+namespace EntropyEngine
 {
+namespace Networking
+{
+
+std::unique_ptr<RemoteServer> createRemoteServer(ConnectionManager* connMgr, uint16_t port) {
     RemoteServerConfig config;
     config.port = port;
     return createRemoteServer(connMgr, config);
 }
 
-std::unique_ptr<RemoteServer> createRemoteServer(
-    ConnectionManager* connMgr,
-    const RemoteServerConfig& config)
-{
+std::unique_ptr<RemoteServer> createRemoteServer(ConnectionManager* connMgr, const RemoteServerConfig& config) {
     // Currently only WebRTC is supported
     // Future: Check config for protocol selection (WebRTC, QUIC, etc.)
     return std::make_unique<WebRTCServer>(connMgr, config);
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

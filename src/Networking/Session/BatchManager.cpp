@@ -8,19 +8,18 @@
  */
 
 #include "BatchManager.h"
+
+#include <capnp/message.h>
+
 #include "SessionHandle.h"
 #include "SessionManager.h"
 #include "src/Networking/Protocol/entropy.capnp.h"
-#include <capnp/message.h>
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 BatchManager::BatchManager(SessionHandle session, uint32_t batchIntervalMs)
-    : _session(session)
-    , _batchIntervalMs(batchIntervalMs)
-    , _dynamicIntervalMs(batchIntervalMs)
-{
-}
+    : _session(session), _batchIntervalMs(batchIntervalMs), _dynamicIntervalMs(batchIntervalMs) {}
 
 BatchManager::~BatchManager() {
     // Flush any remaining pending updates
@@ -41,11 +40,7 @@ void BatchManager::updateProperty(PropertyHash hash, PropertyType type, const Pr
         _stats.updatesDeduped++;
     } else {
         // New update
-        _pendingUpdates[hash] = PendingUpdate{
-            type,
-            value,
-            std::chrono::steady_clock::now()
-        };
+        _pendingUpdates[hash] = PendingUpdate{type, value, std::chrono::steady_clock::now()};
     }
 }
 
@@ -79,7 +74,7 @@ void BatchManager::processBatch() {
     {
         std::lock_guard<std::mutex> lock(_mutex);
         if (_pendingUpdates.empty()) {
-            return; // Nothing to send
+            return;  // Nothing to send
         }
         updates = std::move(_pendingUpdates);
         _pendingUpdates.clear();
@@ -96,7 +91,7 @@ void BatchManager::processBatch() {
         if (_onBatchDropped) {
             _onBatchDropped(dropped);
         }
-        adjustBatchRate(); // Slow down
+        adjustBatchRate();  // Slow down
         return;
     }
 
@@ -109,9 +104,9 @@ void BatchManager::processBatch() {
         auto batch = message.initPropertyUpdateBatch();
 
         // Set timestamp and sequence
-        batch.setTimestamp(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count());
+        batch.setTimestamp(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
         batch.setSequence(_sequenceNumber++);
 
         // Add all updates
@@ -129,45 +124,47 @@ void BatchManager::processBatch() {
 
             // Set value based on type
             auto value = update.initValue();
-            std::visit([&value](const auto& val) {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, int32_t>) {
-                    value.setInt32(val);
-                } else if constexpr (std::is_same_v<T, int64_t>) {
-                    value.setInt64(val);
-                } else if constexpr (std::is_same_v<T, float>) {
-                    value.setFloat32(val);
-                } else if constexpr (std::is_same_v<T, double>) {
-                    value.setFloat64(val);
-                } else if constexpr (std::is_same_v<T, Vec2>) {
-                    auto vec = value.initVec2();
-                    vec.setX(val.x);
-                    vec.setY(val.y);
-                } else if constexpr (std::is_same_v<T, Vec3>) {
-                    auto vec = value.initVec3();
-                    vec.setX(val.x);
-                    vec.setY(val.y);
-                    vec.setZ(val.z);
-                } else if constexpr (std::is_same_v<T, Vec4>) {
-                    auto vec = value.initVec4();
-                    vec.setX(val.x);
-                    vec.setY(val.y);
-                    vec.setZ(val.z);
-                    vec.setW(val.w);
-                } else if constexpr (std::is_same_v<T, Quat>) {
-                    auto quat = value.initQuat();
-                    quat.setX(val.x);
-                    quat.setY(val.y);
-                    quat.setZ(val.z);
-                    quat.setW(val.w);
-                } else if constexpr (std::is_same_v<T, std::string>) {
-                    value.setString(val);
-                } else if constexpr (std::is_same_v<T, bool>) {
-                    value.setBool(val);
-                } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-                    value.setBytes(kj::arrayPtr(val.data(), val.size()));
-                }
-            }, pending.value);
+            std::visit(
+                [&value](const auto& val) {
+                    using T = std::decay_t<decltype(val)>;
+                    if constexpr (std::is_same_v<T, int32_t>) {
+                        value.setInt32(val);
+                    } else if constexpr (std::is_same_v<T, int64_t>) {
+                        value.setInt64(val);
+                    } else if constexpr (std::is_same_v<T, float>) {
+                        value.setFloat32(val);
+                    } else if constexpr (std::is_same_v<T, double>) {
+                        value.setFloat64(val);
+                    } else if constexpr (std::is_same_v<T, Vec2>) {
+                        auto vec = value.initVec2();
+                        vec.setX(val.x);
+                        vec.setY(val.y);
+                    } else if constexpr (std::is_same_v<T, Vec3>) {
+                        auto vec = value.initVec3();
+                        vec.setX(val.x);
+                        vec.setY(val.y);
+                        vec.setZ(val.z);
+                    } else if constexpr (std::is_same_v<T, Vec4>) {
+                        auto vec = value.initVec4();
+                        vec.setX(val.x);
+                        vec.setY(val.y);
+                        vec.setZ(val.z);
+                        vec.setW(val.w);
+                    } else if constexpr (std::is_same_v<T, Quat>) {
+                        auto quat = value.initQuat();
+                        quat.setX(val.x);
+                        quat.setY(val.y);
+                        quat.setZ(val.z);
+                        quat.setW(val.w);
+                    } else if constexpr (std::is_same_v<T, std::string>) {
+                        value.setString(val);
+                    } else if constexpr (std::is_same_v<T, bool>) {
+                        value.setBool(val);
+                    } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+                        value.setBytes(kj::arrayPtr(val.data(), val.size()));
+                    }
+                },
+                pending.value);
         }
 
         // Serialize
@@ -187,7 +184,8 @@ void BatchManager::processBatch() {
         if (result.success()) {
             _stats.totalBatchesSent++;
             _stats.totalUpdatesSent += updates.size();
-            _stats.averageBatchSize = _stats.totalUpdatesSent / std::max(_stats.totalBatchesSent, static_cast<uint64_t>(1));
+            _stats.averageBatchSize =
+                _stats.totalUpdatesSent / std::max(_stats.totalBatchesSent, static_cast<uint64_t>(1));
         }
 
         // Restore batch rate if things are flowing smoothly
@@ -201,15 +199,14 @@ void BatchManager::processBatch() {
     }
 }
 
-
 void BatchManager::adjustBatchRate() {
     // Increase batch interval (slow down) when under backpressure
     uint32_t current = _dynamicIntervalMs.load();
-    uint32_t newInterval = std::min(current * 2, 100u); // Cap at 100ms (10Hz)
+    uint32_t newInterval = std::min(current * 2, 100u);  // Cap at 100ms (10Hz)
     _dynamicIntervalMs = newInterval;
 
     std::lock_guard<std::mutex> lock(_statsMutex);
     _stats.currentBatchInterval = newInterval;
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -9,17 +9,20 @@
 
 #pragma once
 
-#include "Networking/HTTP/HttpTypes.h"
-#include "Networking/HTTP/Proxy.h"
 #include <curl/curl.h>
-#include <mutex>
-#include <memory>
-#include <functional>
+
 #include <array>
 #include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <thread>
 
-namespace EntropyEngine::Networking::HTTP {
+#include "Networking/HTTP/HttpTypes.h"
+#include "Networking/HTTP/Proxy.h"
+
+namespace EntropyEngine::Networking::HTTP
+{
 
 /**
  * @brief Streaming response state for incremental reads
@@ -27,28 +30,29 @@ namespace EntropyEngine::Networking::HTTP {
  * Ring buffer with producer/consumer pattern. HTTP parser writes to tail,
  * StreamHandle reads from head. Backpressure via CURL_WRITEFUNC_PAUSE.
  */
-struct StreamState {
-    std::mutex mutex;                                         ///< Protects ring buffer state
-    std::condition_variable cv;                               ///< Signals data available/consumed
-    bool headersReady = false;                                ///< true when HTTP headers parsed
-    bool done = false;                                        ///< true when response complete
-    bool failed = false;                                      ///< true on error
-    std::string failureReason;                                ///< Error description
-    int statusCode = 0;                                       ///< HTTP status code
-    HttpHeaders headers;                                      ///< Response headers (lowercase, last-seen)
-    HttpHeaderValuesMap headersMulti;                         ///< All values per header key
-    std::vector<uint8_t> buffer;                              ///< Ring buffer storage
-    size_t head = 0;                                          ///< Read index
-    size_t tail = 0;                                          ///< Write index
-    size_t size = 0;                                          ///< Bytes currently stored
-    size_t capacity = 0;                                      ///< Total capacity
-    size_t totalReceived = 0;                                 ///< Total bytes received
-    size_t maxBodyBytes = 0;                                  ///< Hard safety cap
-    bool cancelRequested = false;                             ///< Cancellation requested by consumer
+struct StreamState
+{
+    std::mutex mutex;                  ///< Protects ring buffer state
+    std::condition_variable cv;        ///< Signals data available/consumed
+    bool headersReady = false;         ///< true when HTTP headers parsed
+    bool done = false;                 ///< true when response complete
+    bool failed = false;               ///< true on error
+    std::string failureReason;         ///< Error description
+    int statusCode = 0;                ///< HTTP status code
+    HttpHeaders headers;               ///< Response headers (lowercase, last-seen)
+    HttpHeaderValuesMap headersMulti;  ///< All values per header key
+    std::vector<uint8_t> buffer;       ///< Ring buffer storage
+    size_t head = 0;                   ///< Read index
+    size_t tail = 0;                   ///< Write index
+    size_t size = 0;                   ///< Bytes currently stored
+    size_t capacity = 0;               ///< Total capacity
+    size_t totalReceived = 0;          ///< Total bytes received
+    size_t maxBodyBytes = 0;           ///< Hard safety cap
+    bool cancelRequested = false;      ///< Cancellation requested by consumer
     // Streaming control
-    CURL* easy = nullptr;                                     ///< cURL easy handle for this stream (set by worker thread)
-    bool paused = false;                                      ///< true if write callback paused due to backpressure
-    bool resumeRequested = false;                              ///< consumer requested resume (handled on worker thread)
+    CURL* easy = nullptr;          ///< cURL easy handle for this stream (set by worker thread)
+    bool paused = false;           ///< true if write callback paused due to backpressure
+    bool resumeRequested = false;  ///< consumer requested resume (handled on worker thread)
 };
 
 /**
@@ -67,10 +71,10 @@ struct StreamState {
  * }
  * @endcode
  */
-class StreamHandle {
+class StreamHandle
+{
 public:
-    explicit StreamHandle(std::shared_ptr<StreamState> state)
-        : _state(std::move(state)) {}
+    explicit StreamHandle(std::shared_ptr<StreamState> state) : _state(std::move(state)) {}
 
     /**
      * @brief Reads up to size bytes from stream
@@ -139,11 +143,12 @@ private:
 /**
  * @brief Options for streaming HTTP requests
  */
-struct StreamOptions {
-    size_t bufferBytes = 4ull * 1024ull * 1024ull;           ///< Ring buffer size (default 4 MiB)
-    size_t maxBodyBytes = 0;                                  ///< Max total bytes (0 = unlimited)
-    std::chrono::milliseconds connectTimeout{10000};          ///< Connection timeout
-    std::chrono::milliseconds totalDeadline{0};               ///< Total timeout (0 = no timeout)
+struct StreamOptions
+{
+    size_t bufferBytes = 4ull * 1024ull * 1024ull;    ///< Ring buffer size (default 4 MiB)
+    size_t maxBodyBytes = 0;                          ///< Max total bytes (0 = unlimited)
+    std::chrono::milliseconds connectTimeout{10000};  ///< Connection timeout
+    std::chrono::milliseconds totalDeadline{0};       ///< Total timeout (0 = no timeout)
 };
 
 /**
@@ -170,7 +175,8 @@ struct StreamOptions {
  * }
  * @endcode
  */
-class HttpClient {
+class HttpClient
+{
 public:
     /**
      * @brief Constructs HTTP client with libcurl backend
@@ -220,9 +226,9 @@ public:
     void closeIdle();
 
 private:
-    CURLSH* _connectionShare;  // Shared connection pool for HTTP/2 multiplexing
-    std::mutex _shareMutex;    // Protects connection share access
-    std::array<std::mutex, CURL_LOCK_DATA_LAST> _curlShareLocks; // libcurl share locks (per data slot)
+    CURLSH* _connectionShare;                                     // Shared connection pool for HTTP/2 multiplexing
+    std::mutex _shareMutex;                                       // Protects connection share access
+    std::array<std::mutex, CURL_LOCK_DATA_LAST> _curlShareLocks;  // libcurl share locks (per data slot)
 
     // Proxy auto-detection resolver (env + system)
     std::unique_ptr<ProxyResolver> _proxyResolver;
@@ -235,23 +241,22 @@ private:
     static size_t streamWriteCallback(char* data, size_t size, size_t nmemb, void* userdata);
     static size_t streamHeaderCallback(char* data, size_t size, size_t nmemb, void* userdata);
 
-    struct ResponseData {
+    struct ResponseData
+    {
         std::vector<uint8_t> body;
-        HttpHeaders headers;                // last-seen value per key
-        HttpHeaderValuesMap headersMulti;   // all values per key
+        HttpHeaders headers;               // last-seen value per key
+        HttpHeaderValuesMap headersMulti;  // all values per key
         std::string curHeaderLine;
-        size_t cap = 0;              // max response bytes (0 = unlimited)
-        bool abortedByCap = false;   // indicates we aborted due to cap
+        size_t cap = 0;             // max response bytes (0 = unlimited)
+        bool abortedByCap = false;  // indicates we aborted due to cap
         char errbuf[CURL_ERROR_SIZE] = {0};
     };
 
-    void configureCurlHandle(CURL* curl, const HttpRequest& req,
-                            const RequestOptions& opts, ResponseData& respData,
-                            struct curl_slist* headers);
+    void configureCurlHandle(CURL* curl, const HttpRequest& req, const RequestOptions& opts, ResponseData& respData,
+                             struct curl_slist* headers);
 
-    void configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
-                                   const StreamOptions& opts, StreamState& state,
+    void configureStreamCurlHandle(CURL* curl, const HttpRequest& req, const StreamOptions& opts, StreamState& state,
                                    struct curl_slist* headers);
 };
 
-} // namespace EntropyEngine::Networking::HTTP
+}  // namespace EntropyEngine::Networking::HTTP

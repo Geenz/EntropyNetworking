@@ -8,13 +8,16 @@
  */
 
 #include "NetworkSession.h"
-#include "../Core/TimeUtils.h"
-#include "../Protocol/ComponentSchemaSerializer.h"
-#include "src/Networking/Protocol/entropy.capnp.h"
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 
-namespace EntropyEngine::Networking {
+#include "../Core/TimeUtils.h"
+#include "../Protocol/ComponentSchemaSerializer.h"
+#include "src/Networking/Protocol/entropy.capnp.h"
+
+namespace EntropyEngine::Networking
+{
 
 std::string NetworkSession::generateSessionId() {
     static std::atomic<uint64_t> ctr{0};
@@ -22,21 +25,20 @@ std::string NetworkSession::generateSessionId() {
     return "session-" + std::to_string(now) + "-" + std::to_string(ctr.fetch_add(1, std::memory_order_relaxed));
 }
 
-NetworkSession::NetworkSession(NetworkConnection* connection,
-                               PropertyRegistry* externalRegistry,
+NetworkSession::NetworkSession(NetworkConnection* connection, PropertyRegistry* externalRegistry,
                                ComponentSchemaRegistry* schemaRegistry)
-    : _connection(connection)
-    , _propertyRegistry(externalRegistry)
-    , _schemaRegistry(schemaRegistry)
-    , _sessionId(generateSessionId())
-{
+    : _connection(connection),
+      _propertyRegistry(externalRegistry),
+      _schemaRegistry(schemaRegistry),
+      _sessionId(generateSessionId()) {
     // If no external registry provided, create and own one
     if (!_propertyRegistry) {
         _ownedRegistry = std::make_unique<PropertyRegistry>();
         _propertyRegistry = _ownedRegistry.get();
     }
 
-    ENTROPY_LOG_DEBUG(std::format("NetworkSession: Constructor called with connection {}, session {}", (void*)_connection, (void*)this));
+    ENTROPY_LOG_DEBUG(std::format("NetworkSession: Constructor called with connection {}, session {}",
+                                  (void*)_connection, (void*)this));
 
     if (_connection) {
         _connection->retain();
@@ -78,6 +80,8 @@ NetworkSession::~NetworkSession() {
     _unpublishSchemaResponseCallback = nullptr;
     _schemaNackCallback = nullptr;
     _schemaAdvertisementCallback = nullptr;
+    _heartbeatCallback = nullptr;
+    _heartbeatResponseCallback = nullptr;
 }
 
 Result<void> NetworkSession::connect() {
@@ -103,13 +107,9 @@ void NetworkSession::setupCallbacks() {
 
     // Register message and state callbacks with the connection
     // This is what SessionManager does automatically, but direct users must call manually
-    _connection->setMessageCallback([this](const std::vector<uint8_t>& data) {
-        this->onMessageReceived(data);
-    });
+    _connection->setMessageCallback([this](const std::vector<uint8_t>& data) { this->onMessageReceived(data); });
 
-    _connection->setStateCallback([this](ConnectionState state) {
-        this->onConnectionStateChanged(state);
-    });
+    _connection->setStateCallback([this](ConnectionState state) { this->onConnectionStateChanged(state); });
 }
 
 bool NetworkSession::isConnected() const {
@@ -153,13 +153,8 @@ Result<void> NetworkSession::performHandshake(const std::string& clientType, con
     }
 }
 
-Result<void> NetworkSession::sendEntityCreated(
-    uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    uint64_t parentId,
-    const std::vector<PropertyMetadata>& properties)
-{
+Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
+                                               uint64_t parentId, const std::vector<PropertyMetadata>& properties) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -233,11 +228,7 @@ Result<void> NetworkSession::sendEntityDestroyed(uint64_t entityId) {
     }
 }
 
-Result<void> NetworkSession::sendPropertyUpdate(
-    PropertyHash hash,
-    PropertyType type,
-    const PropertyValue& value)
-{
+Result<void> NetworkSession::sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -268,11 +259,7 @@ Result<void> NetworkSession::sendPropertyUpdate(
             _batchStats.updatesDeduped++;
         } else {
             // New update
-            _pendingPropertyUpdates[hash] = PendingPropertyUpdate{
-                type,
-                value,
-                std::chrono::steady_clock::now()
-            };
+            _pendingPropertyUpdates[hash] = PendingPropertyUpdate{type, value, std::chrono::steady_clock::now()};
         }
 
         return Result<void>::ok();
@@ -296,20 +283,46 @@ Result<void> NetworkSession::sendPropertyUpdate(
         update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(type)));
 
         auto valueBuilder = update.initValue();
-        std::visit([&valueBuilder](const auto& v) {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, int32_t>) valueBuilder.setInt32(v);
-            else if constexpr (std::is_same_v<T, int64_t>) valueBuilder.setInt64(v);
-            else if constexpr (std::is_same_v<T, float>) valueBuilder.setFloat32(v);
-            else if constexpr (std::is_same_v<T, double>) valueBuilder.setFloat64(v);
-            else if constexpr (std::is_same_v<T, Vec2>) { auto b = valueBuilder.initVec2(); b.setX(v.x); b.setY(v.y); }
-            else if constexpr (std::is_same_v<T, Vec3>) { auto b = valueBuilder.initVec3(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); }
-            else if constexpr (std::is_same_v<T, Vec4>) { auto b = valueBuilder.initVec4(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
-            else if constexpr (std::is_same_v<T, Quat>) { auto b = valueBuilder.initQuat(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
-            else if constexpr (std::is_same_v<T, std::string>) valueBuilder.setString(v);
-            else if constexpr (std::is_same_v<T, bool>) valueBuilder.setBool(v);
-            else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
-        }, value);
+        std::visit(
+            [&valueBuilder](const auto& v) {
+                using T = std::decay_t<decltype(v)>;
+                if constexpr (std::is_same_v<T, int32_t>)
+                    valueBuilder.setInt32(v);
+                else if constexpr (std::is_same_v<T, int64_t>)
+                    valueBuilder.setInt64(v);
+                else if constexpr (std::is_same_v<T, float>)
+                    valueBuilder.setFloat32(v);
+                else if constexpr (std::is_same_v<T, double>)
+                    valueBuilder.setFloat64(v);
+                else if constexpr (std::is_same_v<T, Vec2>) {
+                    auto b = valueBuilder.initVec2();
+                    b.setX(v.x);
+                    b.setY(v.y);
+                } else if constexpr (std::is_same_v<T, Vec3>) {
+                    auto b = valueBuilder.initVec3();
+                    b.setX(v.x);
+                    b.setY(v.y);
+                    b.setZ(v.z);
+                } else if constexpr (std::is_same_v<T, Vec4>) {
+                    auto b = valueBuilder.initVec4();
+                    b.setX(v.x);
+                    b.setY(v.y);
+                    b.setZ(v.z);
+                    b.setW(v.w);
+                } else if constexpr (std::is_same_v<T, Quat>) {
+                    auto b = valueBuilder.initQuat();
+                    b.setX(v.x);
+                    b.setY(v.y);
+                    b.setZ(v.z);
+                    b.setW(v.w);
+                } else if constexpr (std::is_same_v<T, std::string>)
+                    valueBuilder.setString(v);
+                else if constexpr (std::is_same_v<T, bool>)
+                    valueBuilder.setBool(v);
+                else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+                    valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+            },
+            value);
 
         auto serialized = serialize(builder);
         if (serialized.failed()) {
@@ -509,12 +522,8 @@ Result<void> NetworkSession::sendSchemaNack(ComponentTypeHash typeHash, const st
     }
 }
 
-Result<void> NetworkSession::sendSchemaAdvertisement(
-    ComponentTypeHash typeHash,
-    const std::string& appId,
-    const std::string& componentName,
-    uint32_t schemaVersion)
-{
+Result<void> NetworkSession::sendSchemaAdvertisement(ComponentTypeHash typeHash, const std::string& appId,
+                                                     const std::string& componentName, uint32_t schemaVersion) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -547,9 +556,73 @@ Result<void> NetworkSession::sendSchemaAdvertisement(
     }
 }
 
+Result<void> NetworkSession::sendHeartbeat() {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto heartbeat = message.initHeartbeat();
+
+        heartbeat.setTimestamp(getCurrentTimestampMicros());
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Heartbeats go on reliable channel
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendHeartbeatResponse(uint64_t clientTimestamp) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initHeartbeatResponse();
+
+        response.setTimestamp(clientTimestamp);
+        response.setServerTime(getCurrentTimestampMicros());
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Heartbeat responses go on reliable channel
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
+    uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
+    return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
+}
+
 void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _entityCreatedCallback = std::move(callback);
@@ -557,7 +630,7 @@ void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
 
 void NetworkSession::setEntityDestroyedCallback(EntityDestroyedCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _entityDestroyedCallback = std::move(callback);
@@ -565,7 +638,7 @@ void NetworkSession::setEntityDestroyedCallback(EntityDestroyedCallback callback
 
 void NetworkSession::setPropertyUpdateCallback(PropertyUpdateCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _propertyUpdateCallback = std::move(callback);
@@ -573,7 +646,7 @@ void NetworkSession::setPropertyUpdateCallback(PropertyUpdateCallback callback) 
 
 void NetworkSession::setSceneSnapshotCallback(SceneSnapshotCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _sceneSnapshotCallback = std::move(callback);
@@ -581,7 +654,7 @@ void NetworkSession::setSceneSnapshotCallback(SceneSnapshotCallback callback) {
 
 void NetworkSession::setHandshakeCallback(HandshakeCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _handshakeCallback = std::move(callback);
@@ -589,7 +662,7 @@ void NetworkSession::setHandshakeCallback(HandshakeCallback callback) {
 
 void NetworkSession::setErrorCallback(ErrorCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _errorCallback = std::move(callback);
@@ -597,7 +670,7 @@ void NetworkSession::setErrorCallback(ErrorCallback callback) {
 
 void NetworkSession::setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _registerSchemaResponseCallback = std::move(callback);
@@ -605,7 +678,7 @@ void NetworkSession::setRegisterSchemaResponseCallback(RegisterSchemaResponseCal
 
 void NetworkSession::setQueryPublicSchemasResponseCallback(QueryPublicSchemasResponseCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _queryPublicSchemasResponseCallback = std::move(callback);
@@ -613,7 +686,7 @@ void NetworkSession::setQueryPublicSchemasResponseCallback(QueryPublicSchemasRes
 
 void NetworkSession::setPublishSchemaResponseCallback(PublishSchemaResponseCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _publishSchemaResponseCallback = std::move(callback);
@@ -621,7 +694,7 @@ void NetworkSession::setPublishSchemaResponseCallback(PublishSchemaResponseCallb
 
 void NetworkSession::setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _unpublishSchemaResponseCallback = std::move(callback);
@@ -629,7 +702,7 @@ void NetworkSession::setUnpublishSchemaResponseCallback(UnpublishSchemaResponseC
 
 void NetworkSession::setSchemaNackCallback(SchemaNackCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _schemaNackCallback = std::move(callback);
@@ -637,10 +710,53 @@ void NetworkSession::setSchemaNackCallback(SchemaNackCallback callback) {
 
 void NetworkSession::setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // Don't set callbacks during shutdown
+        return;  // Don't set callbacks during shutdown
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _schemaAdvertisementCallback = std::move(callback);
+}
+
+void NetworkSession::setHeartbeatCallback(HeartbeatCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;  // Don't set callbacks during shutdown
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _heartbeatCallback = std::move(callback);
+}
+
+void NetworkSession::setHeartbeatResponseCallback(HeartbeatResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;  // Don't set callbacks during shutdown
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _heartbeatResponseCallback = std::move(callback);
+}
+
+void NetworkSession::clearCallbacks() {
+    // Mark as shutting down to prevent new callbacks
+    _shuttingDown.store(true, std::memory_order_release);
+
+    // Wait for active callbacks to complete
+    while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
+        std::this_thread::yield();
+    }
+
+    // Clear all callbacks
+    std::lock_guard<std::mutex> lock(_mutex);
+    _entityCreatedCallback = nullptr;
+    _entityDestroyedCallback = nullptr;
+    _propertyUpdateCallback = nullptr;
+    _sceneSnapshotCallback = nullptr;
+    _handshakeCallback = nullptr;
+    _errorCallback = nullptr;
+    _heartbeatCallback = nullptr;
+    _heartbeatResponseCallback = nullptr;
+    _registerSchemaResponseCallback = nullptr;
+    _queryPublicSchemasResponseCallback = nullptr;
+    _publishSchemaResponseCallback = nullptr;
+    _unpublishSchemaResponseCallback = nullptr;
+    _schemaNackCallback = nullptr;
+    _schemaAdvertisementCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -678,7 +794,8 @@ void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
-    ENTROPY_LOG_DEBUG(std::format("NetworkSession::onMessageReceived: {} bytes for session {}", data.size(), (void*)this));
+    ENTROPY_LOG_DEBUG(
+        std::format("NetworkSession::onMessageReceived: {} bytes for session {}", data.size(), (void*)this));
     handleReceivedMessage(data);
 }
 
@@ -709,10 +826,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         }
 
         // Read the message
-        kj::ArrayPtr<const ::capnp::word> words(
-            reinterpret_cast<const ::capnp::word*>(deserialized.value.begin()),
-            deserialized.value.size()
-        );
+        kj::ArrayPtr<const ::capnp::word> words(reinterpret_cast<const ::capnp::word*>(deserialized.value.begin()),
+                                                deserialized.value.size());
 
         ::capnp::FlatArrayMessageReader reader(words);
         auto message = reader.getRoot<Message>();
@@ -722,7 +837,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
         // Dispatch based on message type
         switch (message.which()) {
-            case Message::ENTITY_CREATED: {
+            case Message::ENTITY_CREATED:
+            {
                 auto entityCreated = message.getEntityCreated();
 
                 // Validate all ComponentTypeHash values in properties if schema registry is available
@@ -731,10 +847,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     for (auto prop : properties) {
                         if (prop.hasComponentType()) {
                             auto componentTypeReader = prop.getComponentType();
-                            ComponentTypeHash typeHash{
-                                componentTypeReader.getHigh(),
-                                componentTypeReader.getLow()
-                            };
+                            ComponentTypeHash typeHash{componentTypeReader.getHigh(), componentTypeReader.getLow()};
 
                             // Check if schema is registered
                             if (!_schemaRegistry->isRegistered(typeHash)) {
@@ -749,17 +862,16 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 // Application layer decides how to handle entities with unknown schemas
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _entityCreatedCallback) {
-                    _entityCreatedCallback(
-                        entityCreated.getEntityId(),
-                        std::string(entityCreated.getAppId().cStr()),
-                        std::string(entityCreated.getTypeName().cStr()),
-                        entityCreated.getParentId());
+                    _entityCreatedCallback(entityCreated.getEntityId(), std::string(entityCreated.getAppId().cStr()),
+                                           std::string(entityCreated.getTypeName().cStr()),
+                                           entityCreated.getParentId());
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::ENTITY_DESTROYED: {
+            case Message::ENTITY_DESTROYED:
+            {
                 auto entityDestroyed = message.getEntityDestroyed();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _entityDestroyedCallback) {
@@ -769,7 +881,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::PROPERTY_UPDATE_BATCH: {
+            case Message::PROPERTY_UPDATE_BATCH:
+            {
                 auto batch = message.getPropertyUpdateBatch();
                 uint32_t seq = batch.getSequence();
 
@@ -787,8 +900,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     }
 
                     // Atomically update if still valid
-                    if (_lastReceivedSequence.compare_exchange_weak(
-                        last, seq, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                    if (_lastReceivedSequence.compare_exchange_weak(last, seq, std::memory_order_relaxed,
+                                                                    std::memory_order_relaxed)) {
                         updateSucceeded = true;
                         break;
                     }
@@ -818,7 +931,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::SCENE_SNAPSHOT_CHUNK: {
+            case Message::SCENE_SNAPSHOT_CHUNK:
+            {
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _sceneSnapshotCallback) {
                     _sceneSnapshotCallback(data);
@@ -827,7 +941,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HANDSHAKE: {
+            case Message::HANDSHAKE:
+            {
                 // Server-side handshake handling: automatically respond
                 auto handshake = message.getHandshake();
                 std::string clientType = handshake.getClientType().cStr();
@@ -860,18 +975,15 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                             auto publicSchemas = _schemaRegistry->getPublicSchemas();
                             for (const auto& schema : publicSchemas) {
                                 // Send schema advertisement for each public schema
-                                auto result = sendSchemaAdvertisement(
-                                    schema.typeHash,
-                                    schema.appId,
-                                    schema.componentName,
-                                    schema.schemaVersion
-                                );
+                                auto result = sendSchemaAdvertisement(schema.typeHash, schema.appId,
+                                                                      schema.componentName, schema.schemaVersion);
 
                                 // Log errors but continue with other schemas
                                 if (result.failed()) {
-                                    ENTROPY_LOG_WARNING_CAT("NetworkSession",
-                                        std::format("Failed to auto-send schema {}.{}: {}",
-                                            schema.appId, schema.componentName, result.errorMessage));
+                                    ENTROPY_LOG_WARNING_CAT(
+                                        "NetworkSession",
+                                        std::format("Failed to auto-send schema {}.{}: {}", schema.appId,
+                                                    schema.componentName, result.errorMessage));
                                 }
                             }
                         }
@@ -906,7 +1018,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HANDSHAKE_RESPONSE: {
+            case Message::HANDSHAKE_RESPONSE:
+            {
                 auto resp = message.getHandshakeResponse();
                 ENTROPY_LOG_DEBUG("Received HANDSHAKE_RESPONSE");
                 if (resp.getSuccess()) {
@@ -937,8 +1050,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 } else {
                     _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                     if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
-                        _errorCallback(NetworkError::HandshakeFailed,
-                                     std::string(resp.getErrorMessage().cStr()));
+                        _errorCallback(NetworkError::HandshakeFailed, std::string(resp.getErrorMessage().cStr()));
                     }
                     _activeCallbacks.fetch_sub(1, std::memory_order_release);
                     disconnect();
@@ -946,19 +1058,19 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::REGISTER_SCHEMA_RESPONSE: {
+            case Message::REGISTER_SCHEMA_RESPONSE:
+            {
                 auto resp = message.getRegisterSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _registerSchemaResponseCallback) {
-                    _registerSchemaResponseCallback(
-                        resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr()));
+                    _registerSchemaResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::QUERY_PUBLIC_SCHEMAS_RESPONSE: {
+            case Message::QUERY_PUBLIC_SCHEMAS_RESPONSE:
+            {
                 auto resp = message.getQueryPublicSchemasResponse();
                 auto schemasReader = resp.getSchemas();
 
@@ -986,56 +1098,88 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::PUBLISH_SCHEMA_RESPONSE: {
+            case Message::PUBLISH_SCHEMA_RESPONSE:
+            {
                 auto resp = message.getPublishSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _publishSchemaResponseCallback) {
-                    _publishSchemaResponseCallback(
-                        resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr()));
+                    _publishSchemaResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::UNPUBLISH_SCHEMA_RESPONSE: {
+            case Message::UNPUBLISH_SCHEMA_RESPONSE:
+            {
                 auto resp = message.getUnpublishSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _unpublishSchemaResponseCallback) {
-                    _unpublishSchemaResponseCallback(
-                        resp.getSuccess(),
-                        std::string(resp.getErrorMessage().cStr()));
+                    _unpublishSchemaResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::SCHEMA_NACK: {
+            case Message::SCHEMA_NACK:
+            {
                 auto nack = message.getSchemaNack();
                 auto typeHashReader = nack.getTypeHash();
                 ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _schemaNackCallback) {
-                    _schemaNackCallback(
-                        typeHash,
-                        std::string(nack.getReason().cStr()),
-                        nack.getTimestamp());
+                    _schemaNackCallback(typeHash, std::string(nack.getReason().cStr()), nack.getTimestamp());
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::SCHEMA_ADVERTISEMENT: {
+            case Message::SCHEMA_ADVERTISEMENT:
+            {
                 auto advert = message.getSchemaAdvertisement();
                 auto typeHashReader = advert.getTypeHash();
                 ComponentTypeHash typeHash{typeHashReader.getHigh(), typeHashReader.getLow()};
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _schemaAdvertisementCallback) {
-                    _schemaAdvertisementCallback(
-                        typeHash,
-                        std::string(advert.getAppId().cStr()),
-                        std::string(advert.getComponentName().cStr()),
-                        advert.getSchemaVersion());
+                    _schemaAdvertisementCallback(typeHash, std::string(advert.getAppId().cStr()),
+                                                 std::string(advert.getComponentName().cStr()),
+                                                 advert.getSchemaVersion());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::HEARTBEAT:
+            {
+                auto heartbeat = message.getHeartbeat();
+                uint64_t clientTimestamp = heartbeat.getTimestamp();
+
+                // Update last heartbeat received time
+                auto now = std::chrono::steady_clock::now();
+                auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                _lastHeartbeatReceivedMs.store(static_cast<uint64_t>(nowMs), std::memory_order_relaxed);
+
+                // Send heartbeat response back to client
+                sendHeartbeatResponse(clientTimestamp);
+
+                // Invoke callback if set (for server-side tracking)
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _heartbeatCallback) {
+                    _heartbeatCallback(clientTimestamp);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::HEARTBEAT_RESPONSE:
+            {
+                auto response = message.getHeartbeatResponse();
+                uint64_t clientTimestamp = response.getTimestamp();
+                uint64_t serverTime = response.getServerTime();
+
+                // Invoke callback for RTT calculation (client-side)
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _heartbeatResponseCallback) {
+                    _heartbeatResponseCallback(clientTimestamp, serverTime);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
@@ -1072,7 +1216,7 @@ Result<void> NetworkSession::flushPropertyUpdates() {
     {
         std::lock_guard<std::mutex> lock(_pendingUpdatesMutex);
         if (_pendingPropertyUpdates.empty()) {
-            return Result<void>::ok(); // Nothing to flush
+            return Result<void>::ok();  // Nothing to flush
         }
         updates = std::move(_pendingPropertyUpdates);
         _pendingPropertyUpdates.clear();
@@ -1112,20 +1256,46 @@ Result<void> NetworkSession::flushPropertyUpdates() {
 
             // Set value based on type
             auto valueBuilder = update.initValue();
-            std::visit([&valueBuilder](const auto& v) {
-                using T = std::decay_t<decltype(v)>;
-                if constexpr (std::is_same_v<T, int32_t>) valueBuilder.setInt32(v);
-                else if constexpr (std::is_same_v<T, int64_t>) valueBuilder.setInt64(v);
-                else if constexpr (std::is_same_v<T, float>) valueBuilder.setFloat32(v);
-                else if constexpr (std::is_same_v<T, double>) valueBuilder.setFloat64(v);
-                else if constexpr (std::is_same_v<T, Vec2>) { auto b = valueBuilder.initVec2(); b.setX(v.x); b.setY(v.y); }
-                else if constexpr (std::is_same_v<T, Vec3>) { auto b = valueBuilder.initVec3(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); }
-                else if constexpr (std::is_same_v<T, Vec4>) { auto b = valueBuilder.initVec4(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
-                else if constexpr (std::is_same_v<T, Quat>) { auto b = valueBuilder.initQuat(); b.setX(v.x); b.setY(v.y); b.setZ(v.z); b.setW(v.w); }
-                else if constexpr (std::is_same_v<T, std::string>) valueBuilder.setString(v);
-                else if constexpr (std::is_same_v<T, bool>) valueBuilder.setBool(v);
-                else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
-            }, pending.value);
+            std::visit(
+                [&valueBuilder](const auto& v) {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<T, int32_t>)
+                        valueBuilder.setInt32(v);
+                    else if constexpr (std::is_same_v<T, int64_t>)
+                        valueBuilder.setInt64(v);
+                    else if constexpr (std::is_same_v<T, float>)
+                        valueBuilder.setFloat32(v);
+                    else if constexpr (std::is_same_v<T, double>)
+                        valueBuilder.setFloat64(v);
+                    else if constexpr (std::is_same_v<T, Vec2>) {
+                        auto b = valueBuilder.initVec2();
+                        b.setX(v.x);
+                        b.setY(v.y);
+                    } else if constexpr (std::is_same_v<T, Vec3>) {
+                        auto b = valueBuilder.initVec3();
+                        b.setX(v.x);
+                        b.setY(v.y);
+                        b.setZ(v.z);
+                    } else if constexpr (std::is_same_v<T, Vec4>) {
+                        auto b = valueBuilder.initVec4();
+                        b.setX(v.x);
+                        b.setY(v.y);
+                        b.setZ(v.z);
+                        b.setW(v.w);
+                    } else if constexpr (std::is_same_v<T, Quat>) {
+                        auto b = valueBuilder.initQuat();
+                        b.setX(v.x);
+                        b.setY(v.y);
+                        b.setZ(v.z);
+                        b.setW(v.w);
+                    } else if constexpr (std::is_same_v<T, std::string>)
+                        valueBuilder.setString(v);
+                    else if constexpr (std::is_same_v<T, bool>)
+                        valueBuilder.setBool(v);
+                    else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+                        valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+                },
+                pending.value);
         }
 
         // Serialize
@@ -1142,7 +1312,8 @@ Result<void> NetworkSession::flushPropertyUpdates() {
         if (result.success()) {
             _batchStats.totalBatchesSent++;
             _batchStats.totalUpdatesSent += updates.size();
-            _batchStats.averageBatchSize = _batchStats.totalUpdatesSent / std::max(_batchStats.totalBatchesSent, static_cast<uint64_t>(1));
+            _batchStats.averageBatchSize =
+                _batchStats.totalUpdatesSent / std::max(_batchStats.totalBatchesSent, static_cast<uint64_t>(1));
         }
 
         return result;
@@ -1162,4 +1333,4 @@ size_t NetworkSession::getPendingPropertyUpdateCount() const {
     return _pendingPropertyUpdates.size();
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

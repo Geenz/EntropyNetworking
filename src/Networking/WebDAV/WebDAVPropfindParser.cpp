@@ -9,9 +9,11 @@
 #include "Networking/WebDAV/WebDAVPropfindParser.h"
 
 #include <tinyxml2.h>
+
 #include "Networking/WebDAV/WebDAVUtils.h"
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 using tinyxml2::XMLElement;
 
@@ -47,7 +49,7 @@ std::vector<DavResourceInfo> parsePropfindXml(const std::vector<uint8_t>& xmlByt
         if (auto* href = firstByLocal(resp, "href"); href && href->GetText()) {
             ri.href = href->GetText();
         } else {
-            continue; // skip entries without href
+            continue;  // skip entries without href
         }
 
         XMLElement* okProp = nullptr;
@@ -81,4 +83,4 @@ std::vector<DavResourceInfo> parsePropfindXml(const std::vector<uint8_t>& xmlByt
     return out;
 }
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

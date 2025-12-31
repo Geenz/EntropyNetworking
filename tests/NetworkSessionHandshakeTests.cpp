@@ -8,15 +8,17 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Session/NetworkSession.h"
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Transport/LocalServer.h"
-#include "../src/Networking/Transport/ConnectionHandle.h"
-#include <thread>
+
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <atomic>
 #include <mutex>
+#include <thread>
+
+#include "../src/Networking/Session/NetworkSession.h"
+#include "../src/Networking/Transport/ConnectionHandle.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/LocalServer.h"
 
 using namespace EntropyEngine::Networking;
 
@@ -24,7 +26,8 @@ using namespace EntropyEngine::Networking;
  * Tests for handshake protocol in NetworkSession
  * Uses cross-platform LocalServer for local IPC
  */
-class NetworkSessionHandshakeTests : public ::testing::Test {
+class NetworkSessionHandshakeTests : public ::testing::Test
+{
 protected:
     void SetUp() override {
         endpoint = "/tmp/entropy_handshake_test_" + std::to_string(getTestCounter()) + ".sock";
@@ -76,9 +79,7 @@ protected:
 
     bool connectSessions() {
         // Start server accept in background
-        std::thread serverThread([this]() {
-            serverConnHandle = server->accept();
-        });
+        std::thread serverThread([this]() { serverConnHandle = server->accept(); });
 
         // Connect client
         clientConnHandle = clientMgr->openLocalConnection(endpoint);
@@ -218,17 +219,15 @@ TEST_F(NetworkSessionHandshakeTests, BidirectionalEntityMessagesAfterHandshake) 
     std::atomic<uint64_t> clientEntityId{0};
 
     // Set up callbacks
-    serverSession->setEntityCreatedCallback(
-        [&](uint64_t entityId, const std::string&, const std::string&, uint64_t) {
-            serverEntityId = entityId;
-            serverReceivedEntity = true;
-        });
+    serverSession->setEntityCreatedCallback([&](uint64_t entityId, const std::string&, const std::string&, uint64_t) {
+        serverEntityId = entityId;
+        serverReceivedEntity = true;
+    });
 
-    clientSession->setEntityCreatedCallback(
-        [&](uint64_t entityId, const std::string&, const std::string&, uint64_t) {
-            clientEntityId = entityId;
-            clientReceivedEntity = true;
-        });
+    clientSession->setEntityCreatedCallback([&](uint64_t entityId, const std::string&, const std::string&, uint64_t) {
+        clientEntityId = entityId;
+        clientReceivedEntity = true;
+    });
 
     // Perform handshake
     auto handshakeResult = clientSession->performHandshake("TestClient", "client-001");
@@ -304,13 +303,12 @@ TEST_F(NetworkSessionHandshakeTests, ServerHandshakeCallbackInvoked) {
     std::mutex callbackMutex;
 
     // Set handshake callback on server
-    serverSession->setHandshakeCallback(
-        [&](const std::string& clientType, const std::string& clientId) {
-            std::lock_guard<std::mutex> lock(callbackMutex);
-            receivedClientType = clientType;
-            receivedClientId = clientId;
-            callbackInvoked = true;
-        });
+    serverSession->setHandshakeCallback([&](const std::string& clientType, const std::string& clientId) {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        receivedClientType = clientType;
+        receivedClientId = clientId;
+        callbackInvoked = true;
+    });
 
     // Client initiates handshake
     auto handshakeResult = clientSession->performHandshake("TestClient", "client-123");
@@ -344,14 +342,13 @@ TEST_F(NetworkSessionHandshakeTests, HandshakeCallbackTimingCorrect) {
     std::mutex mtx;
 
     // Set handshake callback that signals when handshake completes
-    serverSession->setHandshakeCallback(
-        [&](const std::string& clientType, const std::string& clientId) {
-            handshakeCallbackInvoked = true;
-            // At this point, server should be able to send messages
-            auto result = serverSession->sendEntityCreated(999, "ServerApp", "ServerEntity", 0);
-            canSendMessages = result.success();
-            cv.notify_all();
-        });
+    serverSession->setHandshakeCallback([&](const std::string& clientType, const std::string& clientId) {
+        handshakeCallbackInvoked = true;
+        // At this point, server should be able to send messages
+        auto result = serverSession->sendEntityCreated(999, "ServerApp", "ServerEntity", 0);
+        canSendMessages = result.success();
+        cv.notify_all();
+    });
 
     // Client initiates handshake
     auto handshakeResult = clientSession->performHandshake("TestClient", "client-001");
@@ -360,7 +357,7 @@ TEST_F(NetworkSessionHandshakeTests, HandshakeCallbackTimingCorrect) {
     // Wait for callback with timeout
     {
         std::unique_lock<std::mutex> lock(mtx);
-        cv.wait_for(lock, std::chrono::seconds(1), [&]{ return handshakeCallbackInvoked.load(); });
+        cv.wait_for(lock, std::chrono::seconds(1), [&] { return handshakeCallbackInvoked.load(); });
     }
 
     EXPECT_TRUE(handshakeCallbackInvoked.load()) << "Handshake callback should be invoked";
@@ -378,12 +375,11 @@ TEST_F(NetworkSessionHandshakeTests, MultipleSessionHandshakeCallbacks) {
     std::mutex callbackMutex;
 
     // Set handshake callback on first server session
-    serverSession->setHandshakeCallback(
-        [&](const std::string& clientType, const std::string& clientId) {
-            std::lock_guard<std::mutex> lock(callbackMutex);
-            firstClientId = clientId;
-            handshakeCount++;
-        });
+    serverSession->setHandshakeCallback([&](const std::string& clientType, const std::string& clientId) {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        firstClientId = clientId;
+        handshakeCount++;
+    });
 
     // Client initiates handshake
     auto handshake1 = clientSession->performHandshake("TestClient", "client-001");
@@ -408,9 +404,7 @@ TEST_F(NetworkSessionHandshakeTests, MultipleSessionHandshakeCallbacks) {
     ASSERT_TRUE(server2->listen().success());
 
     ConnectionHandle serverConnHandle2;
-    std::thread serverThread([&]() {
-        serverConnHandle2 = server2->accept();
-    });
+    std::thread serverThread([&]() { serverConnHandle2 = server2->accept(); });
 
     auto clientConnHandle2 = clientMgr2->openLocalConnection(endpoint2);
     ASSERT_TRUE(clientConnHandle2.valid());
@@ -437,12 +431,11 @@ TEST_F(NetworkSessionHandshakeTests, MultipleSessionHandshakeCallbacks) {
     clientSession2->setupCallbacks();
 
     // Set handshake callback on second server session
-    serverSession2->setHandshakeCallback(
-        [&](const std::string& clientType, const std::string& clientId) {
-            std::lock_guard<std::mutex> lock(callbackMutex);
-            secondClientId = clientId;
-            handshakeCount++;
-        });
+    serverSession2->setHandshakeCallback([&](const std::string& clientType, const std::string& clientId) {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        secondClientId = clientId;
+        handshakeCount++;
+    });
 
     // Second client initiates handshake
     auto handshake2 = clientSession2->performHandshake("TestClient", "client-002");

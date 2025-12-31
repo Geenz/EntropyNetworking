@@ -1,23 +1,25 @@
 #pragma once
 
-#include <string>
-#include <unordered_map>
+#include <chrono>
 #include <memory>
 #include <optional>
-#include <chrono>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 // Minimal in-memory WebDAV-like tree for tests (no disk, no VFS)
-struct DavNode {
+struct DavNode
+{
     bool isDir = false;
-    std::string name;                      // last segment
-    std::string content;                   // files only
-    std::string mime;                      // optional mime type for files
-    std::optional<std::chrono::system_clock::time_point> mtime; // optional
-    std::unordered_map<std::string, std::unique_ptr<DavNode>> children; // for dirs
+    std::string name;                                                    // last segment
+    std::string content;                                                 // files only
+    std::string mime;                                                    // optional mime type for files
+    std::optional<std::chrono::system_clock::time_point> mtime;          // optional
+    std::unordered_map<std::string, std::unique_ptr<DavNode>> children;  // for dirs
 };
 
-class DavTree {
+class DavTree
+{
 public:
     DavTree() {
         _root = std::make_unique<DavNode>();
@@ -48,7 +50,7 @@ public:
         normalize(p, /*asCollection=*/false);
         if (p == "/" || p.empty()) return _root.get();
         const DavNode* cur = _root.get();
-        size_t i = 1; // skip leading '/'
+        size_t i = 1;  // skip leading '/'
         while (i < p.size()) {
             auto j = p.find('/', i);
             std::string seg = (j == std::string::npos) ? p.substr(i) : p.substr(i, j - i);
@@ -56,7 +58,10 @@ public:
             auto it = cur->children.find(seg);
             if (it == cur->children.end()) return nullptr;
             cur = it->second.get();
-            if (j == std::string::npos) break; else i = j + 1;
+            if (j == std::string::npos)
+                break;
+            else
+                i = j + 1;
         }
         return cur;
     }
@@ -67,8 +72,11 @@ private:
     static void normalize(std::string& path, bool asCollection) {
         if (path.empty() || path.front() != '/') path.insert(path.begin(), '/');
         if (path.find("..") != std::string::npos) throw std::invalid_argument("bad path");
-        if (asCollection) { if (path.back() != '/') path.push_back('/'); }
-        else { if (path.size() > 1 && path.back() == '/') path.pop_back(); }
+        if (asCollection) {
+            if (path.back() != '/') path.push_back('/');
+        } else {
+            if (path.size() > 1 && path.back() == '/') path.pop_back();
+        }
     }
 
     static std::pair<std::string, std::string> split(const std::string& p) {
@@ -76,7 +84,7 @@ private:
         if (!s.empty() && s.back() == '/') s.pop_back();
         auto pos = s.find_last_of('/');
         if (pos == std::string::npos) return {"/", s};
-        return { pos == 0 ? std::string("/") : s.substr(0, pos), s.substr(pos + 1) };
+        return {pos == 0 ? std::string("/") : s.substr(0, pos), s.substr(pos + 1)};
     }
 
     DavNode* ensure(std::string path) {
@@ -90,14 +98,18 @@ private:
             auto it = cur->children.find(seg);
             if (it == cur->children.end()) {
                 auto dir = std::make_unique<DavNode>();
-                dir->isDir = true; dir->name = seg;
+                dir->isDir = true;
+                dir->name = seg;
                 DavNode* raw = dir.get();
                 cur->children.emplace(seg, std::move(dir));
                 cur = raw;
             } else {
                 cur = it->second.get();
             }
-            if (j == std::string::npos) break; else i = j + 1;
+            if (j == std::string::npos)
+                break;
+            else
+                i = j + 1;
         }
         return cur;
     }

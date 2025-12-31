@@ -10,25 +10,25 @@
 #ifdef _WIN32
 
 #include "NamedPipeConnection.h"
-#include "../Core/ConnectionTypes.h"
+
 #include <Logging/Logger.h>
-#include <chrono>
-#include <cstring>
-#include <algorithm>
 #include <windows.h>
 
-namespace EntropyEngine::Networking {
+#include <algorithm>
+#include <chrono>
+#include <cstring>
+
+#include "../Core/ConnectionTypes.h"
+
+namespace EntropyEngine::Networking
+{
 
 static constexpr size_t FRAME_HEADER_SIZE = sizeof(uint32_t);
 
-NamedPipeConnection::NamedPipeConnection(std::string pipeName)
-    : _pipeName(normalizePipeName(std::move(pipeName)))
-{
-}
+NamedPipeConnection::NamedPipeConnection(std::string pipeName) : _pipeName(normalizePipeName(std::move(pipeName))) {}
 
 NamedPipeConnection::NamedPipeConnection(std::string pipeName, const ConnectionConfig* cfg)
-    : _pipeName(normalizePipeName(std::move(pipeName)))
-{
+    : _pipeName(normalizePipeName(std::move(pipeName))) {
     if (cfg) {
         _connectTimeoutMs = cfg->connectTimeoutMs;
         _sendPollTimeoutMs = cfg->sendPollTimeoutMs;
@@ -60,20 +60,14 @@ std::string NamedPipeConnection::normalizePipeName(std::string name) const {
     return "\\\\.\\pipe\\" + name;
 }
 
-NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*peerInfo*/)
-    : _pipe(connectedPipe)
-{
+NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*peerInfo*/) : _pipe(connectedPipe) {
     _state = ConnectionState::Connected;
 
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     _shouldStop = false;
     _receiveThread = std::thread([this]() { receiveLoop(); });
@@ -115,15 +109,8 @@ Result<void> NamedPipeConnection::connect() {
         return Result<void>::err(NetworkError::ConnectionClosed, "WaitNamedPipe failed: " + std::to_string(err));
     }
 
-    _pipe = CreateFileW(
-        wname.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-        nullptr
-    );
+    _pipe = CreateFileW(wname.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
 
     if (_pipe == INVALID_HANDLE_VALUE) {
         DWORD err = GetLastError();
@@ -142,21 +129,18 @@ Result<void> NamedPipeConnection::connect() {
         _state = ConnectionState::Failed;
         onStateChanged(ConnectionState::Failed);
         ENTROPY_LOG_ERROR("SetNamedPipeHandleState failed: " + std::to_string(err));
-        return Result<void>::err(NetworkError::ConnectionClosed, "SetNamedPipeHandleState failed: " + std::to_string(err));
+        return Result<void>::err(NetworkError::ConnectionClosed,
+                                 "SetNamedPipeHandleState failed: " + std::to_string(err));
     }
 
     _state = ConnectionState::Connected;
     onStateChanged(ConnectionState::Connected);
 
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     _shouldStop = false;
     _receiveThread = std::thread([this]() { receiveLoop(); });
@@ -250,8 +234,7 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
                         onStateChanged(ConnectionState::Disconnected);
                     }
                 }
-                return Result<void>::err(NetworkError::ConnectionClosed,
-                                         "Header write failed: " + std::to_string(e2));
+                return Result<void>::err(NetworkError::ConnectionClosed, "Header write failed: " + std::to_string(e2));
             }
             written = bytes;
         } else {
@@ -316,10 +299,8 @@ Result<void> NamedPipeConnection::sendInternal(const std::vector<uint8_t>& data)
     }
 
     auto now = std::chrono::system_clock::now();
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
     _bytesSent.fetch_add(sizeof(len) + data.size(), std::memory_order_relaxed);
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
 
@@ -427,10 +408,8 @@ void NamedPipeConnection::receiveLoop() {
         }
 
         auto now = std::chrono::system_clock::now();
-        _lastActivityTime.store(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-            std::memory_order_release
-        );
+        _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                                std::memory_order_release);
         _bytesReceived.fetch_add(FRAME_HEADER_SIZE + len, std::memory_order_relaxed);
         _messagesReceived.fetch_add(1, std::memory_order_relaxed);
 
@@ -455,6 +434,6 @@ ConnectionStats NamedPipeConnection::getStats() const {
     return s;
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // _WIN32
+#endif  // _WIN32

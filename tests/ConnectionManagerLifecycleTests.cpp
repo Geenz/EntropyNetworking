@@ -5,8 +5,10 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Transport/ConnectionManager.h"
+
 #include <thread>
+
+#include "../src/Networking/Transport/ConnectionManager.h"
 
 using namespace EntropyEngine::Networking;
 

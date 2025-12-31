@@ -9,15 +9,18 @@
 
 #pragma once
 
-#include "PropertyHash.h"
-#include "PropertyTypes.h"
-#include "ErrorCodes.h"
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ErrorCodes.h"
+#include "PropertyHash.h"
+#include "PropertyTypes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Property definition within a component schema
@@ -30,12 +33,13 @@ namespace Networking {
  * This allows applications to add default values or change required status
  * without breaking compatibility.
  */
-struct PropertyDefinition {
-    std::string name;           ///< Property name (e.g., "position", "health")
-    PropertyType type;          ///< Property type from PropertyTypes.h
-    size_t offset;              ///< Byte offset within component struct
-    size_t size;                ///< Size in bytes
-    bool required = true;       ///< Whether this property must be present (default: true)
+struct PropertyDefinition
+{
+    std::string name;      ///< Property name (e.g., "position", "health")
+    PropertyType type;     ///< Property type from PropertyTypes.h
+    size_t offset;         ///< Byte offset within component struct
+    size_t size;           ///< Size in bytes
+    bool required = true;  ///< Whether this property must be present (default: true)
     std::optional<PropertyValue> defaultValue = std::nullopt;  ///< Optional default value
 
     /**
@@ -45,12 +49,8 @@ struct PropertyDefinition {
      * Note: Structural hash only uses name/type/offset/size (not metadata).
      */
     bool operator==(const PropertyDefinition& other) const {
-        return name == other.name &&
-               type == other.type &&
-               offset == other.offset &&
-               size == other.size &&
-               required == other.required &&
-               defaultValue == other.defaultValue;
+        return name == other.name && type == other.type && offset == other.offset && size == other.size &&
+               required == other.required && defaultValue == other.defaultValue;
     }
 
     bool operator!=(const PropertyDefinition& other) const {
@@ -75,15 +75,16 @@ struct PropertyDefinition {
  * - Applications opt-in to publishing via isPublic flag
  * - Only public schemas are discoverable by other applications
  */
-struct ComponentSchema {
-    ComponentTypeHash typeHash;         ///< Unique component type identifier
-    std::string appId;                  ///< Originating application ID
-    std::string componentName;          ///< Human-readable component name
-    uint32_t schemaVersion;             ///< Schema version for evolution
-    PropertyHash structuralHash;        ///< Hash of field layout
+struct ComponentSchema
+{
+    ComponentTypeHash typeHash;   ///< Unique component type identifier
+    std::string appId;            ///< Originating application ID
+    std::string componentName;    ///< Human-readable component name
+    uint32_t schemaVersion;       ///< Schema version for evolution
+    PropertyHash structuralHash;  ///< Hash of field layout
     std::vector<PropertyDefinition> properties;
-    size_t totalSize;                   ///< Total component size in bytes
-    bool isPublic;                      ///< Whether schema is published for discovery
+    size_t totalSize;  ///< Total component size in bytes
+    bool isPublic;     ///< Whether schema is published for discovery
 
     /**
      * @brief Check structural compatibility with another schema
@@ -141,9 +142,7 @@ struct ComponentSchema {
      * @param properties List of property definitions
      * @return 128-bit structural hash
      */
-    static PropertyHash computeStructuralHash(
-        const std::vector<PropertyDefinition>& properties
-    );
+    static PropertyHash computeStructuralHash(const std::vector<PropertyDefinition>& properties);
 
     /**
      * @brief Compute component type hash
@@ -162,12 +161,8 @@ struct ComponentSchema {
      * @param structuralHash Structural hash from computeStructuralHash
      * @return 128-bit component type hash
      */
-    static ComponentTypeHash computeTypeHash(
-        const std::string& appId,
-        const std::string& componentName,
-        uint32_t schemaVersion,
-        const PropertyHash& structuralHash
-    );
+    static ComponentTypeHash computeTypeHash(const std::string& appId, const std::string& componentName,
+                                             uint32_t schemaVersion, const PropertyHash& structuralHash);
 
     /**
      * @brief Create and validate a component schema
@@ -209,15 +204,10 @@ struct ComponentSchema {
      * }
      * @endcode
      */
-    static Result<ComponentSchema> create(
-        const std::string& appId,
-        const std::string& componentName,
-        uint32_t schemaVersion,
-        const std::vector<PropertyDefinition>& properties,
-        size_t totalSize,
-        bool isPublic = false
-    );
+    static Result<ComponentSchema> create(const std::string& appId, const std::string& componentName,
+                                          uint32_t schemaVersion, const std::vector<PropertyDefinition>& properties,
+                                          size_t totalSize, bool isPublic = false);
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

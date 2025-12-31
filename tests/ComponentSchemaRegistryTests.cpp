@@ -8,19 +8,19 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Core/ComponentSchemaRegistry.h"
+
+#include <atomic>
 #include <thread>
 #include <vector>
-#include <atomic>
+
+#include "../src/Networking/Core/ComponentSchemaRegistry.h"
 
 using namespace EntropyEngine::Networking;
 
 TEST(ComponentSchemaRegistryTests, RegisterSchema_Success) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, false);
     ASSERT_TRUE(schemaResult.success());
@@ -33,9 +33,7 @@ TEST(ComponentSchemaRegistryTests, RegisterSchema_Success) {
 TEST(ComponentSchemaRegistryTests, RegisterSchema_Idempotent) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, false);
     ASSERT_TRUE(schemaResult.success());
@@ -53,9 +51,7 @@ TEST(ComponentSchemaRegistryTests, RegisterSchema_Idempotent) {
 TEST(ComponentSchemaRegistryTests, GetSchema_Found) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, false);
     ASSERT_TRUE(schemaResult.success());
@@ -80,9 +76,7 @@ TEST(ComponentSchemaRegistryTests, GetSchema_NotFound) {
 TEST(ComponentSchemaRegistryTests, PublicSchemas_DefaultPrivate) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     // Register private schema (default)
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, false);
@@ -103,9 +97,7 @@ TEST(ComponentSchemaRegistryTests, PublicSchemas_DefaultPrivate) {
 TEST(ComponentSchemaRegistryTests, PublishSchema_MakesDiscoverable) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     // Register private schema
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, false);
@@ -127,9 +119,7 @@ TEST(ComponentSchemaRegistryTests, PublishSchema_MakesDiscoverable) {
 TEST(ComponentSchemaRegistryTests, UnpublishSchema_RemovesFromDiscovery) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     // Register public schema
     auto schemaResult = ComponentSchema::create("TestApp", "Transform", 1, properties, 12, true);
@@ -156,9 +146,7 @@ TEST(ComponentSchemaRegistryTests, UnpublishSchema_RemovesFromDiscovery) {
 TEST(ComponentSchemaRegistryTests, FindCompatibleSchemas_StructuralMatch) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     // Register two schemas with same structure but different apps (both public)
     auto schema1Result = ComponentSchema::create("App1", "Transform", 1, properties, 12, true);
@@ -184,9 +172,7 @@ TEST(ComponentSchemaRegistryTests, FindCompatibleSchemas_StructuralMatch) {
 TEST(ComponentSchemaRegistryTests, FindCompatibleSchemas_NoMatches) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties1 = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties1 = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> properties2 = {
         {"velocity", PropertyType::Vec3, 0, 12}  // Different field name
@@ -212,9 +198,7 @@ TEST(ComponentSchemaRegistryTests, FindCompatibleSchemas_NoMatches) {
 TEST(ComponentSchemaRegistryTests, AreCompatible_True) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto schema1Result = ComponentSchema::create("App1", "Transform", 1, properties, 12, false);
     auto schema2Result = ComponentSchema::create("App2", "Transform", 1, properties, 12, false);
@@ -234,9 +218,7 @@ TEST(ComponentSchemaRegistryTests, AreCompatible_True) {
 TEST(ComponentSchemaRegistryTests, AreCompatible_False) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties1 = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties1 = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> properties2 = {
         {"position", PropertyType::Vec4, 0, 16}  // Different type
@@ -260,10 +242,8 @@ TEST(ComponentSchemaRegistryTests, AreCompatible_False) {
 TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Compatible) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12},
+                                                   {"velocity", PropertyType::Vec3, 12, 12}};
 
     std::vector<PropertyDefinition> targetProps = {
         {"position", PropertyType::Vec3, 0, 12}  // Subset
@@ -281,10 +261,7 @@ TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Compatible) {
     ASSERT_TRUE(sourceHashResult.success());
     ASSERT_TRUE(targetHashResult.success());
 
-    auto result = registry.validateDetailedCompatibility(
-        sourceHashResult.value,
-        targetHashResult.value
-    );
+    auto result = registry.validateDetailedCompatibility(sourceHashResult.value, targetHashResult.value);
 
     EXPECT_TRUE(result.success());
 }
@@ -292,13 +269,10 @@ TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Compatible) {
 TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Incompatible) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> targetProps = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}  // Source missing this
+        {"position", PropertyType::Vec3, 0, 12}, {"velocity", PropertyType::Vec3, 12, 12}  // Source missing this
     };
 
     auto sourceResult = ComponentSchema::create("App", "Transform", 1, sourceProps, 12, false);
@@ -313,10 +287,7 @@ TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Incompatible) {
     ASSERT_TRUE(sourceHashResult.success());
     ASSERT_TRUE(targetHashResult.success());
 
-    auto result = registry.validateDetailedCompatibility(
-        sourceHashResult.value,
-        targetHashResult.value
-    );
+    auto result = registry.validateDetailedCompatibility(sourceHashResult.value, targetHashResult.value);
 
     EXPECT_TRUE(result.failed());
     EXPECT_EQ(result.error, NetworkError::SchemaIncompatible);
@@ -325,20 +296,11 @@ TEST(ComponentSchemaRegistryTests, ValidateDetailedCompatibility_Incompatible) {
 TEST(ComponentSchemaRegistryTests, ThreadSafety_ConcurrentReadWrite) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> baseProperties = {
-        {"field", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> baseProperties = {{"field", PropertyType::Int32, 0, 4}};
 
     // Pre-register some schemas
     for (int i = 0; i < 10; ++i) {
-        auto schemaResult = ComponentSchema::create(
-            "App",
-            "Component" + std::to_string(i),
-            1,
-            baseProperties,
-            4,
-            true
-        );
+        auto schemaResult = ComponentSchema::create("App", "Component" + std::to_string(i), 1, baseProperties, 4, true);
         ASSERT_TRUE(schemaResult.success());
         auto result = registry.registerSchema(schemaResult.value);
         ASSERT_TRUE(result.success());
@@ -350,14 +312,8 @@ TEST(ComponentSchemaRegistryTests, ThreadSafety_ConcurrentReadWrite) {
     // Writer threads
     auto writerFunc = [&]() {
         for (int i = 10; i < 20 && !stopFlag; ++i) {
-            auto schemaResult = ComponentSchema::create(
-                "App",
-                "Component" + std::to_string(i),
-                1,
-                baseProperties,
-                4,
-                i % 2 == 0
-            );
+            auto schemaResult =
+                ComponentSchema::create("App", "Component" + std::to_string(i), 1, baseProperties, 4, i % 2 == 0);
 
             if (schemaResult.success()) {
                 auto result = registry.registerSchema(schemaResult.value);
@@ -417,20 +373,11 @@ TEST(ComponentSchemaRegistryTests, SchemaCount) {
     EXPECT_EQ(registry.schemaCount(), 0);
     EXPECT_EQ(registry.publicSchemaCount(), 0);
 
-    std::vector<PropertyDefinition> properties = {
-        {"field", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> properties = {{"field", PropertyType::Int32, 0, 4}};
 
     // Register 5 private schemas
     for (int i = 0; i < 5; ++i) {
-        auto schemaResult = ComponentSchema::create(
-            "App",
-            "Component" + std::to_string(i),
-            1,
-            properties,
-            4,
-            false
-        );
+        auto schemaResult = ComponentSchema::create("App", "Component" + std::to_string(i), 1, properties, 4, false);
         ASSERT_TRUE(schemaResult.success());
         auto result = registry.registerSchema(schemaResult.value);
         ASSERT_TRUE(result.success());
@@ -441,14 +388,7 @@ TEST(ComponentSchemaRegistryTests, SchemaCount) {
 
     // Register 3 public schemas
     for (int i = 5; i < 8; ++i) {
-        auto schemaResult = ComponentSchema::create(
-            "App",
-            "Component" + std::to_string(i),
-            1,
-            properties,
-            4,
-            true
-        );
+        auto schemaResult = ComponentSchema::create("App", "Component" + std::to_string(i), 1, properties, 4, true);
         ASSERT_TRUE(schemaResult.success());
         auto result = registry.registerSchema(schemaResult.value);
         ASSERT_TRUE(result.success());
@@ -461,9 +401,7 @@ TEST(ComponentSchemaRegistryTests, SchemaCount) {
 TEST(ComponentSchemaRegistryTests, PublicSchemaCount) {
     ComponentSchemaRegistry registry;
 
-    std::vector<PropertyDefinition> properties = {
-        {"field", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> properties = {{"field", PropertyType::Int32, 0, 4}};
 
     // Register private schema
     auto schema1Result = ComponentSchema::create("App", "Component1", 1, properties, 4, false);

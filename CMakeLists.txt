@@ -12,31 +12,38 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "EntropyNetworking only supports static lin
 option(BUILD_TESTS "Enable/build tests for EntropyNetworking" ON)
 option(BUILD_EXAMPLES "Build EntropyNetworking example executables" ON)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer (mutually exclusive with ASAN/UBSAN)" OFF)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Disable automatic C++20 module scanning - this project doesn't use modules
+# and the auto-scanning generates Clang-specific flags that GCC doesn't support
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
+# MSVC-specific: Enable conforming preprocessor for C++20 __VA_OPT__ support
+if(MSVC)
+    add_compile_options(/Zc:preprocessor)
+endif()
+
 # Configure sanitizers
-if(ENABLE_SANITIZERS)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        # ThreadSanitizer is mutually exclusive with AddressSanitizer
-        # To use TSAN instead: cmake -DENABLE_TSAN=ON
-        if(ENABLE_TSAN)
-            set(SANITIZER_FLAGS "-fsanitize=thread -fno-omit-frame-pointer -g")
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
-            message(STATUS "ThreadSanitizer (TSAN) enabled")
-        else()
-            set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g")
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
-            message(STATUS "Sanitizers enabled: AddressSanitizer (ASAN) and UndefinedBehaviorSanitizer (UBSAN)")
-        endif()
-    else()
-        message(WARNING "Sanitizers requested but not supported by ${CMAKE_CXX_COMPILER_ID}")
+# ThreadSanitizer is mutually exclusive with AddressSanitizer - TSAN takes precedence
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    if(ENABLE_TSAN)
+        set(SANITIZER_FLAGS "-fsanitize=thread -fno-omit-frame-pointer -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+        message(STATUS "ThreadSanitizer (TSAN) enabled")
+    elseif(ENABLE_SANITIZERS)
+        set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SANITIZER_FLAGS}")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${SANITIZER_FLAGS}")
+        message(STATUS "Sanitizers enabled: AddressSanitizer (ASAN) and UndefinedBehaviorSanitizer (UBSAN)")
     endif()
+elseif(ENABLE_SANITIZERS OR ENABLE_TSAN)
+    message(WARNING "Sanitizers requested but not supported by ${CMAKE_CXX_COMPILER_ID}")
 endif()
 
 # Configure vcpkg
@@ -253,6 +260,14 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
+
+# =============================================================================
+# Linting
+# =============================================================================
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntropyLinting.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntropyLinting.cmake")
+    entropy_enable_linting(EntropyNetworking)
+endif()
 
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfig.cmake"

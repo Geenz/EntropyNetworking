@@ -8,27 +8,41 @@
  */
 
 #include "PropertyRegistry.h"
-#include <mutex>
-#include <format>
 
-namespace EntropyEngine {
-namespace Networking {
+#include <format>
+#include <mutex>
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
     // Validate enum before acquiring lock
     auto isValidType = [](PropertyType t) {
         switch (t) {
-            case PropertyType::Int32: case PropertyType::Int64:
-            case PropertyType::Float32: case PropertyType::Float64:
-            case PropertyType::Vec2: case PropertyType::Vec3: case PropertyType::Vec4:
-            case PropertyType::Quat: case PropertyType::String:
-            case PropertyType::Bool: case PropertyType::Bytes:
-            case PropertyType::Int32Array: case PropertyType::Int64Array:
-            case PropertyType::Float32Array: case PropertyType::Float64Array:
-            case PropertyType::Vec2Array: case PropertyType::Vec3Array:
-            case PropertyType::Vec4Array: case PropertyType::QuatArray:
+            case PropertyType::Int32:
+            case PropertyType::Int64:
+            case PropertyType::Float32:
+            case PropertyType::Float64:
+            case PropertyType::Vec2:
+            case PropertyType::Vec3:
+            case PropertyType::Vec4:
+            case PropertyType::Quat:
+            case PropertyType::String:
+            case PropertyType::Bool:
+            case PropertyType::Bytes:
+            case PropertyType::Int32Array:
+            case PropertyType::Int64Array:
+            case PropertyType::Float32Array:
+            case PropertyType::Float64Array:
+            case PropertyType::Vec2Array:
+            case PropertyType::Vec3Array:
+            case PropertyType::Vec4Array:
+            case PropertyType::QuatArray:
                 return true;
-            default: return false;
+            default:
+                return false;
         }
     };
 
@@ -38,10 +52,7 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
 
     // Validate metadata before acquiring lock
     if (metadata.propertyName.empty() || metadata.propertyName.size() > MAX_NAME_LENGTH) {
-        return Result<void>::err(
-            NetworkError::InvalidParameter,
-            "Invalid propertyName length"
-        );
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid propertyName length");
     }
 
     std::unique_lock<std::shared_mutex> lock(_mutex);
@@ -63,12 +74,9 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
             "Property hash collision for {}\n"
             "Existing: entity={}, component={}, property={}, type={}\n"
             "Incoming: entity={}, component={}, property={}, type={}",
-            toString(metadata.hash),
-            existing.entityId, toString(existing.componentType),
-            existing.propertyName, propertyTypeToString(existing.type),
-            metadata.entityId, toString(metadata.componentType),
-            metadata.propertyName, propertyTypeToString(metadata.type)
-        );
+            toString(metadata.hash), existing.entityId, toString(existing.componentType), existing.propertyName,
+            propertyTypeToString(existing.type), metadata.entityId, toString(metadata.componentType),
+            metadata.propertyName, propertyTypeToString(metadata.type));
         return Result<void>::err(NetworkError::HashCollision, errorMsg);
     }
 
@@ -111,25 +119,19 @@ bool PropertyRegistry::validateType(PropertyHash hash, PropertyType expectedType
 
     auto it = _registry.find(hash);
     if (it == _registry.end()) {
-        return false; // Property not registered
+        return false;  // Property not registered
     }
 
     return it->second.type == expectedType;
 }
 
-Result<void> PropertyRegistry::validatePropertyValue(
-    PropertyHash hash,
-    const PropertyValue& value) const
-{
+Result<void> PropertyRegistry::validatePropertyValue(PropertyHash hash, const PropertyValue& value) const {
     std::shared_lock<std::shared_mutex> lock(_mutex);
 
     // Check if property is registered
     auto it = _registry.find(hash);
     if (it == _registry.end()) {
-        return Result<void>::err(
-            NetworkError::UnknownProperty,
-            "Property hash not registered"
-        );
+        return Result<void>::err(NetworkError::UnknownProperty, "Property hash not registered");
     }
 
     const auto& metadata = it->second;
@@ -139,12 +141,9 @@ Result<void> PropertyRegistry::validatePropertyValue(
 
     // Validate type matches
     if (actualType != metadata.type) {
-        return Result<void>::err(
-            NetworkError::TypeMismatch,
-            std::string("Property type mismatch: expected ") +
-            propertyTypeToString(metadata.type) + ", got " +
-            propertyTypeToString(actualType)
-        );
+        return Result<void>::err(NetworkError::TypeMismatch, std::string("Property type mismatch: expected ") +
+                                                                 propertyTypeToString(metadata.type) + ", got " +
+                                                                 propertyTypeToString(actualType));
     }
 
     return Result<void>::ok();
@@ -155,7 +154,7 @@ std::vector<PropertyHash> PropertyRegistry::getEntityProperties(uint64_t entityI
 
     auto it = _entityProperties.find(entityId);
     if (it == _entityProperties.end()) {
-        return {}; // Entity not found
+        return {};  // Entity not found
     }
 
     // Convert set to vector
@@ -167,7 +166,7 @@ std::vector<PropertyHash> PropertyRegistry::unregisterEntity(uint64_t entityId) 
 
     auto it = _entityProperties.find(entityId);
     if (it == _entityProperties.end()) {
-        return {}; // Entity not found
+        return {};  // Entity not found
     }
 
     // Collect hashes to return
@@ -189,7 +188,7 @@ bool PropertyRegistry::unregisterProperty(PropertyHash hash) {
 
     auto it = _registry.find(hash);
     if (it == _registry.end()) {
-        return false; // Property not found
+        return false;  // Property not found
     }
 
     // Get entity ID before erasing from registry
@@ -241,5 +240,5 @@ void PropertyRegistry::clear() {
     _entityProperties.clear();
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

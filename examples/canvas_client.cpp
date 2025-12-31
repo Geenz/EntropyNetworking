@@ -15,12 +15,14 @@
  * Run canvas_server first, then run this client.
  */
 
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Session/SessionManager.h"
 #include <EntropyCore.h>
-#include <thread>
-#include <chrono>
+
 #include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "../src/Networking/Session/SessionManager.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
 
 using namespace std;
 using namespace EntropyEngine;
@@ -70,15 +72,15 @@ int main() {
         });
 
         // Entity created callback - receive canvas objects from server
-        sessMgr.setEntityCreatedCallback(session,
-            [&entitiesReceived](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId) {
-                ENTROPY_LOG_INFO("\n>>> Received Entity Created:");
-                ENTROPY_LOG_INFO(std::format("    Entity ID: {}", entityId));
-                ENTROPY_LOG_INFO(std::format("    App ID: {}", appId));
-                ENTROPY_LOG_INFO(std::format("    Type: {}", typeName));
-                ENTROPY_LOG_INFO(std::format("    Parent: {}", parentId));
-                entitiesReceived++;
-            });
+        sessMgr.setEntityCreatedCallback(session, [&entitiesReceived](uint64_t entityId, const string& appId,
+                                                                      const string& typeName, uint64_t parentId) {
+            ENTROPY_LOG_INFO("\n>>> Received Entity Created:");
+            ENTROPY_LOG_INFO(std::format("    Entity ID: {}", entityId));
+            ENTROPY_LOG_INFO(std::format("    App ID: {}", appId));
+            ENTROPY_LOG_INFO(std::format("    Type: {}", typeName));
+            ENTROPY_LOG_INFO(std::format("    Parent: {}", parentId));
+            entitiesReceived++;
+        });
 
         // Error callback
         sessMgr.setErrorCallback(session, [](NetworkError error, const string& message) {

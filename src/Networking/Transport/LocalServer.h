@@ -10,11 +10,14 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "ConnectionHandle.h"
-#include "../Core/ErrorCodes.h"
+
 #include <string>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ErrorCodes.h"
+#include "ConnectionHandle.h"
+
+namespace EntropyEngine::Networking
+{
 
 // Forward declarations
 class ConnectionManager;
@@ -47,7 +50,8 @@ class ConnectionManager;
  * }
  * @endcode
  */
-class LocalServer : public Core::EntropyObject {
+class LocalServer : public Core::EntropyObject
+{
 public:
     virtual ~LocalServer() = default;
 
@@ -82,11 +86,12 @@ protected:
 /**
  * @brief Local server configuration (platform-agnostic)
  */
-struct LocalServerConfig {
-    int backlog = 128;                 ///< listen() backlog
-    int acceptPollIntervalMs = 500;    ///< poll interval or wait timeout in accept loop
-    int chmodMode = -1;                ///< if >= 0, chmod the socket path to this mode (Unix)
-    bool unlinkOnStart = true;         ///< if true, unlink socket path before bind (Unix)
+struct LocalServerConfig
+{
+    int backlog = 128;                           ///< listen() backlog
+    int acceptPollIntervalMs = 500;              ///< poll interval or wait timeout in accept loop
+    int chmodMode = -1;                          ///< if >= 0, chmod the socket path to this mode (Unix)
+    bool unlinkOnStart = true;                   ///< if true, unlink socket path before bind (Unix)
     size_t pipeOutBufferSize = 1 * 1024 * 1024;  ///< Named pipe output buffer size (Windows)
     size_t pipeInBufferSize = 1 * 1024 * 1024;   ///< Named pipe input buffer size (Windows)
 };
@@ -98,18 +103,12 @@ struct LocalServerConfig {
  * @param endpoint Platform-specific endpoint (socket path or pipe name)
  * @return Unique pointer to LocalServer implementation
  */
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint
-);
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint);
 
 /**
  * @brief Creates a LocalServer with configuration options
  */
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint,
-    const LocalServerConfig& config
-);
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint,
+                                               const LocalServerConfig& config);
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

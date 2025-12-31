@@ -7,14 +7,16 @@
  * This file is part of the Entropy Networking project.
  */
 
-#include <gtest/gtest.h>
-#include "WebRTCTestHelpers.h"
-#include "../src/Networking/Transport/WebRTCConnection.h"
-#include <thread>
-#include <chrono>
-#include <atomic>
 #include <EntropyCore.h>
 #include <Logging/Logger.h>
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "../src/Networking/Transport/WebRTCConnection.h"
+#include "WebRTCTestHelpers.h"
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Networking::Testing;
@@ -46,7 +48,8 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
 
     // Track connection state - use shared_ptr to prevent stack-use-after-scope
     // when callbacks fire from libdatachannel threads after test ends
-    struct State {
+    struct State
+    {
         std::mutex mutex;
         bool peer1Connected = false;
         bool peer2Connected = false;
@@ -100,7 +103,8 @@ TEST(WebRTCIntegrationTests, TwoPeerConnect) {
     // If connection succeeded, test message exchange
     if (peer1.isConnected() && peer2.isConnected()) {
         // Use shared_ptr to prevent stack-use-after-scope
-        struct MessageState {
+        struct MessageState
+        {
             std::mutex mutex;
             bool gotMessage = false;
             std::vector<uint8_t> receivedData;
@@ -192,12 +196,8 @@ TEST(WebRTCIntegrationTests, TwoPeerBidirectionalMessaging) {
     std::atomic<int> peer1Messages{0};
     std::atomic<int> peer2Messages{0};
 
-    peer1.setMessageCallback([&](const std::vector<uint8_t>&) {
-        peer1Messages.fetch_add(1);
-    });
-    peer2.setMessageCallback([&](const std::vector<uint8_t>&) {
-        peer2Messages.fetch_add(1);
-    });
+    peer1.setMessageCallback([&](const std::vector<uint8_t>&) { peer1Messages.fetch_add(1); });
+    peer2.setMessageCallback([&](const std::vector<uint8_t>&) { peer2Messages.fetch_add(1); });
 
     // Send messages both directions
     std::vector<uint8_t> msg1{'1', '2', '3'};
@@ -262,11 +262,11 @@ TEST(WebRTCIntegrationTests, TwoPeerReconnection) {
     std::atomic<bool> aUp{false}, bUp{false};
     std::atomic<bool> aDown{false}, bDown{false};
 
-    a.setStateCallback([&](ConnectionState s){
+    a.setStateCallback([&](ConnectionState s) {
         if (s == ConnectionState::Connected) aUp = true;
         if (s == ConnectionState::Disconnected) aDown = true;
     });
-    b.setStateCallback([&](ConnectionState s){
+    b.setStateCallback([&](ConnectionState s) {
         if (s == ConnectionState::Connected) bUp = true;
         if (s == ConnectionState::Disconnected) bDown = true;
     });
@@ -274,15 +274,15 @@ TEST(WebRTCIntegrationTests, TwoPeerReconnection) {
     // 1) Initial connection
     ASSERT_TRUE(a.connect().success());
     ASSERT_TRUE(b.connect().success());
-    for (int i=0;i<100 && !(aUp.load() && bUp.load());++i)
+    for (int i = 0; i < 100 && !(aUp.load() && bUp.load()); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_TRUE(a.isConnected() && b.isConnected());
 
     // Smoke messaging
     std::atomic<bool> bGot{false};
-    b.setMessageCallback([&](const std::vector<uint8_t>& d){ bGot = (std::string(d.begin(), d.end()) == "ping"); });
-    ASSERT_TRUE(a.send(std::vector<uint8_t>{'p','i','n','g'}).success());
-    for (int i=0;i<50 && !bGot.load();++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    b.setMessageCallback([&](const std::vector<uint8_t>& d) { bGot = (std::string(d.begin(), d.end()) == "ping"); });
+    ASSERT_TRUE(a.send(std::vector<uint8_t>{'p', 'i', 'n', 'g'}).success());
+    for (int i = 0; i < 50 && !bGot.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_TRUE(bGot.load());
 
     // 2) Test ICE restart: both sides call disconnect() then reconnect()
@@ -297,20 +297,20 @@ TEST(WebRTCIntegrationTests, TwoPeerReconnection) {
     int d0 = signaling.getDescriptionsExchanged();
     ASSERT_TRUE(a.reconnect().success());
     ASSERT_TRUE(b.reconnect().success());
-    for (int i=0;i<120 && !(aUp.load() && bUp.load()); ++i)
+    for (int i = 0; i < 120 && !(aUp.load() && bUp.load()); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_TRUE(a.isConnected() && b.isConnected());
     // With optimistic reconnect, state callbacks fire immediately but signaling happens async
     // Wait for signaling to complete (description count to stabilize)
-    for (int i=0; i<20 && signaling.getDescriptionsExchanged() < d0 + 2; ++i)
+    for (int i = 0; i < 20 && signaling.getDescriptionsExchanged() < d0 + 2; ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_GE(signaling.getDescriptionsExchanged(), d0 + 2);
 
     // Verify messaging post-reconnect
     bGot = false;
-    b.setMessageCallback([&](const std::vector<uint8_t>& d){ bGot = (std::string(d.begin(), d.end()) == "pong"); });
-    ASSERT_TRUE(a.send(std::vector<uint8_t>{'p','o','n','g'}).success());
-    for (int i=0;i<50 && !bGot.load();++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    b.setMessageCallback([&](const std::vector<uint8_t>& d) { bGot = (std::string(d.begin(), d.end()) == "pong"); });
+    ASSERT_TRUE(a.send(std::vector<uint8_t>{'p', 'o', 'n', 'g'}).success());
+    for (int i = 0; i < 50 && !bGot.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_TRUE(bGot.load());
 
     // 4) Second ICE restart cycle to verify repeatability
@@ -320,7 +320,7 @@ TEST(WebRTCIntegrationTests, TwoPeerReconnection) {
 
     ASSERT_TRUE(a.reconnect().success());
     ASSERT_TRUE(b.reconnect().success());
-    for (int i=0;i<120 && !(aUp.load() && bUp.load()); ++i)
+    for (int i = 0; i < 120 && !(aUp.load() && bUp.load()); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_TRUE(a.isConnected() && b.isConnected());
 
@@ -427,9 +427,7 @@ TEST(WebRTCIntegrationTests, TwoPeerCustomDataChannelLabel) {
 
     // Test message exchange on custom channel
     std::atomic<bool> peer2GotMessage{false};
-    peer2.setMessageCallback([&](const std::vector<uint8_t>&) {
-        peer2GotMessage = true;
-    });
+    peer2.setMessageCallback([&](const std::vector<uint8_t>&) { peer2GotMessage = true; });
 
     std::vector<uint8_t> testData{'t', 'e', 's', 't'};
     ASSERT_TRUE(peer1.send(testData).success());

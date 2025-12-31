@@ -16,20 +16,24 @@
 
 #pragma once
 
-#include "NetworkTypes.h"
+#include <string>
 #include <variant>
 #include <vector>
-#include <string>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "NetworkTypes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Property type enumeration
  *
  * Matches the PropertyType enum in entropy.capnp
  */
-enum class PropertyType {
+enum class PropertyType
+{
     Int32,
     Int64,
     Float32,
@@ -59,29 +63,12 @@ enum class PropertyType {
  * Holds any of the supported property types in a type-safe manner.
  * Includes scalar types and array types.
  */
-using PropertyValue = std::variant<
-    int32_t,
-    int64_t,
-    float,
-    double,
-    Vec2,
-    Vec3,
-    Vec4,
-    Quat,
-    std::string,
-    bool,
-    std::vector<uint8_t>,  // Bytes
+using PropertyValue = std::variant<int32_t, int64_t, float, double, Vec2, Vec3, Vec4, Quat, std::string, bool,
+                                   std::vector<uint8_t>,  // Bytes
 
-    // Array types
-    std::vector<int32_t>,
-    std::vector<int64_t>,
-    std::vector<float>,
-    std::vector<double>,
-    std::vector<Vec2>,
-    std::vector<Vec3>,
-    std::vector<Vec4>,
-    std::vector<Quat>
->;
+                                   // Array types
+                                   std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>,
+                                   std::vector<Vec2>, std::vector<Vec3>, std::vector<Vec4>, std::vector<Quat> >;
 
 /**
  * @brief Validate that a property value matches the expected type
@@ -144,5 +131,5 @@ uint16_t toCapnpPropertyType(PropertyType type);
  */
 PropertyType fromCapnpPropertyType(uint16_t capnpType);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

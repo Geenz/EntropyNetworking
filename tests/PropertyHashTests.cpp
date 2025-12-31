@@ -8,17 +8,16 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Core/PropertyHash.h"
+
 #include "../src/Networking/Core/ComponentSchema.h"
+#include "../src/Networking/Core/PropertyHash.h"
 
 using namespace EntropyEngine::Networking;
 
 // Helper function to create a ComponentTypeHash for testing
 static ComponentTypeHash createTestComponentType(const std::string& appId, const std::string& componentName) {
     // Create a minimal valid schema with one dummy property
-    std::vector<PropertyDefinition> props = {
-        {"dummy", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"dummy", PropertyType::Int32, 0, 4}};
     auto schemaResult = ComponentSchema::create(appId, componentName, 1, props, 4, false);
     if (schemaResult.success()) {
         return schemaResult.value.typeHash;

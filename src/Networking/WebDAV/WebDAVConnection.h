@@ -17,20 +17,22 @@
 
 #pragma once
 
-#include <string>
-#include <string_view>
-#include <vector>
-#include <unordered_map>
-#include <mutex>
-#include <condition_variable>
-#include <chrono>
-#include <optional>
-#include <atomic>
-
-#include "Networking/Transport/NetworkConnection.h"
 #include <llhttp.h>
 
-namespace EntropyEngine::Networking::WebDAV {
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+#include "Networking/Transport/NetworkConnection.h"
+
+namespace EntropyEngine::Networking::WebDAV
+{
 
 // Default configuration constants
 static constexpr size_t DEFAULT_STREAM_BUFFER_BYTES = 4ull * 1024ull * 1024ull;  // 4 MiB
@@ -55,7 +57,8 @@ static constexpr size_t DEFAULT_MAX_BODY_BYTES = 128ull * 1024ull * 1024ull;    
  * }
  * @endcode
  */
-class WebDAVConnection {
+class WebDAVConnection
+{
 public:
     /**
      * @brief Internal state for streaming GET operations
@@ -63,33 +66,35 @@ public:
      * Ring buffer state shared between HTTP parser (producer) and
      * WebDAVReadStream (consumer). Protected by mutex with condition variable.
      */
-    struct StreamState {
-        std::mutex m;                                         ///< Protects ring buffer state
-        std::condition_variable cv;                           ///< Signals data available/consumed
-        bool headersReady = false;                            ///< true when HTTP headers parsed
-        bool done = false;                                    ///< true when response complete
-        bool failed = false;                                  ///< true on parse or network error
-        std::string failureReason;                            ///< Error description if failed
-        int statusCode = 0;                                   ///< HTTP status code (e.g., 200, 404)
-        std::unordered_map<std::string, std::string> headers; ///< Response headers (lowercase keys)
-        std::vector<uint8_t> buf;                             ///< Ring buffer storage
-        size_t head = 0;                                      ///< Read index
-        size_t tail = 0;                                      ///< Write index
-        size_t size = 0;                                      ///< Bytes currently stored
-        size_t capacity = 0;                                  ///< Total capacity (buf.size())
-        size_t maxBodyBytes = 0;                              ///< Hard safety cap across whole message
-        size_t receivedTotal = 0;                             ///< Byte counter for cap enforcement
-        bool parserPaused = false;                            ///< true if llhttp parser is paused due to backpressure
-        std::string curHeaderField;                           ///< Temp accumulator for header field
-        std::string curHeaderValue;                           ///< Temp accumulator for header value
+    struct StreamState
+    {
+        std::mutex m;                                          ///< Protects ring buffer state
+        std::condition_variable cv;                            ///< Signals data available/consumed
+        bool headersReady = false;                             ///< true when HTTP headers parsed
+        bool done = false;                                     ///< true when response complete
+        bool failed = false;                                   ///< true on parse or network error
+        std::string failureReason;                             ///< Error description if failed
+        int statusCode = 0;                                    ///< HTTP status code (e.g., 200, 404)
+        std::unordered_map<std::string, std::string> headers;  ///< Response headers (lowercase keys)
+        std::vector<uint8_t> buf;                              ///< Ring buffer storage
+        size_t head = 0;                                       ///< Read index
+        size_t tail = 0;                                       ///< Write index
+        size_t size = 0;                                       ///< Bytes currently stored
+        size_t capacity = 0;                                   ///< Total capacity (buf.size())
+        size_t maxBodyBytes = 0;                               ///< Hard safety cap across whole message
+        size_t receivedTotal = 0;                              ///< Byte counter for cap enforcement
+        bool parserPaused = false;                             ///< true if llhttp parser is paused due to backpressure
+        std::string curHeaderField;                            ///< Temp accumulator for header field
+        std::string curHeaderValue;                            ///< Temp accumulator for header value
     };
 
     /**
      * @brief Configuration for streaming GET operations
      */
-    struct StreamConfig {
-        size_t bufferBytes = DEFAULT_STREAM_BUFFER_BYTES;                  ///< Ring buffer capacity
-        std::vector<std::pair<std::string,std::string>> headers;           ///< Extra request headers (e.g., Range)
+    struct StreamConfig
+    {
+        size_t bufferBytes = DEFAULT_STREAM_BUFFER_BYTES;          ///< Ring buffer capacity
+        std::vector<std::pair<std::string, std::string>> headers;  ///< Extra request headers (e.g., Range)
     };
 
     /**
@@ -98,7 +103,8 @@ public:
      * Provides access to shared StreamState for reading response data.
      * Returned by openGetStream().
      */
-    class StreamHandle {
+    class StreamHandle
+    {
     public:
         /**
          * @brief Constructs handle from stream state
@@ -110,7 +116,9 @@ public:
          * @brief Gets shared stream state
          * @return Pointer to StreamState
          */
-        std::shared_ptr<StreamState> state() const { return _st; }
+        std::shared_ptr<StreamState> state() const {
+            return _st;
+        }
 
     private:
         std::shared_ptr<StreamState> _st;  ///< Shared stream state
@@ -120,28 +128,32 @@ public:
     /**
      * @brief Connection configuration
      */
-    struct Config {
-        std::string host;                                     ///< Required for Host header (e.g., "example.com")
-        std::string userAgent = "EntropyWebDAV/1.0";          ///< User-Agent header value
-        std::string authHeader;                               ///< Optional: "Bearer ..." or "Basic ..."
-        std::chrono::milliseconds requestTimeout{30000};      ///< Timeout for aggregated requests (30s default)
-        size_t maxBodyBytes = DEFAULT_MAX_BODY_BYTES;         ///< Maximum response body size
+    struct Config
+    {
+        std::string host;                                 ///< Required for Host header (e.g., "example.com")
+        std::string userAgent = "EntropyWebDAV/1.0";      ///< User-Agent header value
+        std::string authHeader;                           ///< Optional: "Bearer ..." or "Basic ..."
+        std::chrono::milliseconds requestTimeout{30000};  ///< Timeout for aggregated requests (30s default)
+        size_t maxBodyBytes = DEFAULT_MAX_BODY_BYTES;     ///< Maximum response body size
     };
 
     /**
      * @brief HTTP response for aggregated operations
      */
-    struct Response {
-        int statusCode = 0;                                   ///< HTTP status code (0 on timeout/error)
-        std::string statusMessage;                            ///< Status message or error description
-        std::unordered_map<std::string, std::string> headers; ///< Response headers (lowercase keys)
-        std::vector<uint8_t> body;                            ///< Response body bytes
+    struct Response
+    {
+        int statusCode = 0;                                    ///< HTTP status code (0 on timeout/error)
+        std::string statusMessage;                             ///< Status message or error description
+        std::unordered_map<std::string, std::string> headers;  ///< Response headers (lowercase keys)
+        std::vector<uint8_t> body;                             ///< Response body bytes
 
         /**
          * @brief Checks if response indicates success
          * @return true if status code is 2xx
          */
-        bool isSuccess() const { return statusCode >= 200 && statusCode < 300; }
+        bool isSuccess() const {
+            return statusCode >= 200 && statusCode < 300;
+        }
     };
 
     /**
@@ -165,8 +177,7 @@ public:
      * @param extraHeaders Additional headers to include
      * @return Response with status, headers, and body
      */
-    Response get(const std::string& path,
-                 const std::vector<std::pair<std::string,std::string>>& extraHeaders = {});
+    Response get(const std::string& path, const std::vector<std::pair<std::string, std::string>>& extraHeaders = {});
 
     /**
      * @brief Performs HTTP HEAD request
@@ -174,8 +185,7 @@ public:
      * @param extraHeaders Additional headers to include
      * @return Response with status and headers (no body)
      */
-    Response head(const std::string& path,
-                  const std::vector<std::pair<std::string,std::string>>& extraHeaders = {});
+    Response head(const std::string& path, const std::vector<std::pair<std::string, std::string>>& extraHeaders = {});
 
     /**
      * @brief Performs WebDAV PROPFIND request
@@ -210,7 +220,9 @@ public:
      * @brief Checks if underlying connection is connected
      * @return true if NetworkConnection reports connected state
      */
-    bool isConnected() const { return _conn && _conn->isConnected(); }
+    bool isConnected() const {
+        return _conn && _conn->isConnected();
+    }
 
     /**
      * @brief Resumes a paused streaming parser if there is now buffer capacity
@@ -221,33 +233,34 @@ public:
     /**
      * @brief Internal state for aggregated HTTP requests
      */
-    struct PendingResponse {
-        std::condition_variable cv;                           ///< Signals request completion
-        bool done = false;                                    ///< true when response complete
-        bool failed = false;                                  ///< true on parse or network error
-        std::string failureReason;                            ///< Error description if failed
-        Response resp;                                        ///< Accumulated response
-        std::string curHeaderField;                           ///< Accumulator for header field (llhttp may chunk)
-        std::string curHeaderValue;                           ///< Accumulator for header value (llhttp may chunk)
-        std::string statusText;                               ///< Accumulated status text
-        size_t maxBodyBytes = DEFAULT_MAX_BODY_BYTES;         ///< Body size cap for this request
+    struct PendingResponse
+    {
+        std::condition_variable cv;                    ///< Signals request completion
+        bool done = false;                             ///< true when response complete
+        bool failed = false;                           ///< true on parse or network error
+        std::string failureReason;                     ///< Error description if failed
+        Response resp;                                 ///< Accumulated response
+        std::string curHeaderField;                    ///< Accumulator for header field (llhttp may chunk)
+        std::string curHeaderValue;                    ///< Accumulator for header value (llhttp may chunk)
+        std::string statusText;                        ///< Accumulated status text
+        size_t maxBodyBytes = DEFAULT_MAX_BODY_BYTES;  ///< Body size cap for this request
     };
 
 private:
     std::shared_ptr<EntropyEngine::Networking::NetworkConnection> _conn;  ///< Underlying network connection
-    Config _cfg;                                                           ///< Connection configuration
+    Config _cfg;                                                          ///< Connection configuration
 
-    std::mutex _reqMutex;                                                  ///< Serializes requests and protects parser
-    std::unique_ptr<PendingResponse> _active;                              ///< State for current aggregated request
-    std::shared_ptr<StreamState> _activeStream;                            ///< State for current streaming request
-    llhttp_t _parser{};                                                    ///< llhttp parser instance
-    llhttp_settings_t _settings{};                                         ///< llhttp callbacks for aggregated responses
-    llhttp_settings_t _streamSettings{};                                   ///< llhttp callbacks for streaming responses
-    std::vector<uint8_t> _leftover;                                        ///< Bytes received when no request active
-    std::vector<uint8_t> _pausedRemainder;                                  ///< Bytes held while parser is paused
+    std::mutex _reqMutex;                        ///< Serializes requests and protects parser
+    std::unique_ptr<PendingResponse> _active;    ///< State for current aggregated request
+    std::shared_ptr<StreamState> _activeStream;  ///< State for current streaming request
+    llhttp_t _parser{};                          ///< llhttp parser instance
+    llhttp_settings_t _settings{};               ///< llhttp callbacks for aggregated responses
+    llhttp_settings_t _streamSettings{};         ///< llhttp callbacks for streaming responses
+    std::vector<uint8_t> _leftover;              ///< Bytes received when no request active
+    std::vector<uint8_t> _pausedRemainder;       ///< Bytes held while parser is paused
 
-    std::atomic<bool> _shuttingDown{false};                                ///< Shutdown flag for receive callback
-    std::atomic<int>  _inCallback{0};                                      ///< In-flight callback reference count
+    std::atomic<bool> _shuttingDown{false};  ///< Shutdown flag for receive callback
+    std::atomic<int> _inCallback{0};         ///< In-flight callback reference count
 
     /**
      * @brief Callback invoked when data arrives on connection
@@ -270,10 +283,8 @@ private:
      * @param body Request body (empty for GET/HEAD)
      * @return Complete HTTP request text
      */
-    std::string buildRequest(const char* method,
-                             const std::string& path,
-                             const std::vector<std::pair<std::string,std::string>>& headers,
-                             const std::string& body);
+    std::string buildRequest(const char* method, const std::string& path,
+                             const std::vector<std::pair<std::string, std::string>>& headers, const std::string& body);
 };
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

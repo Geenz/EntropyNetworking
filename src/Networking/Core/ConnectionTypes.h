@@ -17,17 +17,18 @@
 
 #pragma once
 
-#include <string>
-#include <optional>
-#include <vector>
 #include <functional>
+#include <optional>
+#include <string>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 // Default configuration constants
-static constexpr size_t DEFAULT_MAX_MESSAGE_SIZE = 16ull * 1024ull * 1024ull;   // 16 MiB
-static constexpr size_t DEFAULT_XPC_MAX_MESSAGE_SIZE = 64ull * 1024ull * 1024ull; // 64 MiB
-static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;               // 256 KiB
+static constexpr size_t DEFAULT_MAX_MESSAGE_SIZE = 16ull * 1024ull * 1024ull;      // 16 MiB
+static constexpr size_t DEFAULT_XPC_MAX_MESSAGE_SIZE = 64ull * 1024ull * 1024ull;  // 64 MiB
+static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;                 // 256 KiB
 
 /**
  * @brief High-level connection type abstraction
@@ -36,9 +37,10 @@ static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;              
  * - Local: In-process or local IPC (Unix socket, Named pipe, XPC)
  * - Remote: Network connections (WebRTC, future: QUIC, WebTransport)
  */
-enum class ConnectionType {
-    Local,   ///< Local IPC - platform selects appropriate backend
-    Remote   ///< Remote network connection - uses WebRTC
+enum class ConnectionType
+{
+    Local,  ///< Local IPC - platform selects appropriate backend
+    Remote  ///< Remote network connection - uses WebRTC
 };
 
 /**
@@ -47,18 +49,20 @@ enum class ConnectionType {
  * Allows overriding platform auto-selection for specific backend choice.
  * Use Auto for typical cases - platform picks the best backend.
  */
-enum class ConnectionBackend {
-    Auto,           ///< Automatic selection based on platform
-    UnixSocket,     ///< Force Unix domain socket (Linux/macOS)
-    NamedPipe,      ///< Force named pipe (Windows)
-    XPC,            ///< Force XPC connection (macOS)
-    WebRTC          ///< Force WebRTC data channel (all platforms)
+enum class ConnectionBackend
+{
+    Auto,        ///< Automatic selection based on platform
+    UnixSocket,  ///< Force Unix domain socket (Linux/macOS)
+    NamedPipe,   ///< Force named pipe (Windows)
+    XPC,         ///< Force XPC connection (macOS)
+    WebRTC       ///< Force WebRTC data channel (all platforms)
 };
 
 /**
  * @brief Connection state during lifecycle
  */
-enum class ConnectionState {
+enum class ConnectionState
+{
     Disconnected,   ///< Initial state or after disconnect
     Connecting,     ///< Connection in progress
     Connected,      ///< Fully connected and ready
@@ -72,23 +76,23 @@ enum class ConnectionState {
  * Uses atomic counters to allow lock-free updates in hot paths while still
  * being copyable for snapshot reads via getStats().
  */
-struct ConnectionStats {
+struct ConnectionStats
+{
     std::atomic<uint64_t> bytesSent{0};
     std::atomic<uint64_t> bytesReceived{0};
     std::atomic<uint64_t> messagesSent{0};
     std::atomic<uint64_t> messagesReceived{0};
-    std::atomic<uint64_t> connectTime{0};      ///< Timestamp of connection establishment (ms since epoch)
-    std::atomic<uint64_t> lastActivityTime{0}; ///< Timestamp of last send/receive activity (ms since epoch)
+    std::atomic<uint64_t> connectTime{0};       ///< Timestamp of connection establishment (ms since epoch)
+    std::atomic<uint64_t> lastActivityTime{0};  ///< Timestamp of last send/receive activity (ms since epoch)
 
     // Copy constructor for snapshot reads
     ConnectionStats(const ConnectionStats& other)
-        : bytesSent(other.bytesSent.load(std::memory_order_relaxed))
-        , bytesReceived(other.bytesReceived.load(std::memory_order_relaxed))
-        , messagesSent(other.messagesSent.load(std::memory_order_relaxed))
-        , messagesReceived(other.messagesReceived.load(std::memory_order_relaxed))
-        , connectTime(other.connectTime.load(std::memory_order_relaxed))
-        , lastActivityTime(other.lastActivityTime.load(std::memory_order_relaxed))
-    {}
+        : bytesSent(other.bytesSent.load(std::memory_order_relaxed)),
+          bytesReceived(other.bytesReceived.load(std::memory_order_relaxed)),
+          messagesSent(other.messagesSent.load(std::memory_order_relaxed)),
+          messagesReceived(other.messagesReceived.load(std::memory_order_relaxed)),
+          connectTime(other.connectTime.load(std::memory_order_relaxed)),
+          lastActivityTime(other.lastActivityTime.load(std::memory_order_relaxed)) {}
 
     ConnectionStats& operator=(const ConnectionStats& other) {
         bytesSent.store(other.bytesSent.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -107,15 +111,16 @@ struct ConnectionStats {
 /**
  * @brief WebRTC-specific configuration
  */
-struct WebRTCConfig {
-    std::vector<std::string> iceServers;                          ///< ICE server URLs (STUN/TURN)
-    std::string proxyServer;                                      ///< Optional proxy server
-    std::string bindAddress;                                      ///< Optional local bind address
-    uint16_t portRangeBegin = 0;                                  ///< Port range start (0 = OS chooses)
-    uint16_t portRangeEnd = 0;                                    ///< Port range end (0 = OS chooses)
-    int maxMessageSize = DEFAULT_WEBRTC_MAX_MESSAGE_SIZE;         ///< Maximum message size
-    bool enableIceTcp = false;                                    ///< Enable ICE-TCP candidates
-    bool polite = false;                                          ///< Perfect negotiation: true = polite peer (accepts remote offers during glare)
+struct WebRTCConfig
+{
+    std::vector<std::string> iceServers;                   ///< ICE server URLs (STUN/TURN)
+    std::string proxyServer;                               ///< Optional proxy server
+    std::string bindAddress;                               ///< Optional local bind address
+    uint16_t portRangeBegin = 0;                           ///< Port range start (0 = OS chooses)
+    uint16_t portRangeEnd = 0;                             ///< Port range end (0 = OS chooses)
+    int maxMessageSize = DEFAULT_WEBRTC_MAX_MESSAGE_SIZE;  ///< Maximum message size
+    bool enableIceTcp = false;                             ///< Enable ICE-TCP candidates
+    bool polite = false;  ///< Perfect negotiation: true = polite peer (accepts remote offers during glare)
 };
 
 /**
@@ -124,7 +129,8 @@ struct WebRTCConfig {
  * The application must provide these callbacks to handle WebRTC signaling.
  * Typically, these would send data over WebSocket or another signaling channel.
  */
-struct SignalingCallbacks {
+struct SignalingCallbacks
+{
     using LocalDescriptionCallback = std::function<void(const std::string& type, const std::string& sdp)>;
     using LocalCandidateCallback = std::function<void(const std::string& candidate, const std::string& mid)>;
 
@@ -139,7 +145,8 @@ struct SignalingCallbacks {
  * Use the high-level helpers (openLocalConnection, openRemoteConnection) for
  * typical scenarios, or populate this struct for advanced control.
  */
-struct ConnectionConfig {
+struct ConnectionConfig
+{
     ConnectionType type = ConnectionType::Local;
     ConnectionBackend backend = ConnectionBackend::Auto;
 
@@ -147,27 +154,27 @@ struct ConnectionConfig {
     std::string endpoint;  ///< Path, pipe name, or signaling server URL
 
     // Operational knobs (defaults preserve current behavior)
-    int connectTimeoutMs = 5000;                          ///< Connect timeout for blocking waits (Unix sockets)
-    int sendPollTimeoutMs = 1000;                         ///< Per-poll timeout during send retries (ms)
-    int sendMaxPolls = 100;                               ///< Max poll iterations before timing out a send
-    int recvIdlePollMs = -1;                              ///< If >= 0, use poll(POLLIN, recvIdlePollMs) instead of fixed sleep when idle
-    size_t maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE;     ///< Max message size for local transports
+    int connectTimeoutMs = 5000;   ///< Connect timeout for blocking waits (Unix sockets)
+    int sendPollTimeoutMs = 1000;  ///< Per-poll timeout during send retries (ms)
+    int sendMaxPolls = 100;        ///< Max poll iterations before timing out a send
+    int recvIdlePollMs = -1;       ///< If >= 0, use poll(POLLIN, recvIdlePollMs) instead of fixed sleep when idle
+    size_t maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE;  ///< Max message size for local transports
 
     // Socket buffer sizing (Unix); 0 = leave as OS default
-    int socketSendBuf = 0;                                ///< SO_SNDBUF size in bytes (0 to skip)
-    int socketRecvBuf = 0;                                ///< SO_RCVBUF size in bytes (0 to skip)
+    int socketSendBuf = 0;  ///< SO_SNDBUF size in bytes (0 to skip)
+    int socketRecvBuf = 0;  ///< SO_RCVBUF size in bytes (0 to skip)
 
     // WebRTC-specific (only for Remote/WebRTC)
-    WebRTCConfig webrtcConfig;                            ///< WebRTC configuration
-    SignalingCallbacks signalingCallbacks;                ///< Signaling callbacks for SDP/ICE
-    std::string dataChannelLabel = "entropy-data";        ///< Data channel label
+    WebRTCConfig webrtcConfig;                      ///< WebRTC configuration
+    SignalingCallbacks signalingCallbacks;          ///< Signaling callbacks for SDP/ICE
+    std::string dataChannelLabel = "entropy-data";  ///< Data channel label
 
     // XPC-specific (Apple)
-    size_t xpcMaxMessageSize = DEFAULT_XPC_MAX_MESSAGE_SIZE; ///< Max allowed XPC payload size
-    int xpcReplyTimeoutMs = 5000;                         ///< Default reply timeout for XPC sendWithReply
+    size_t xpcMaxMessageSize = DEFAULT_XPC_MAX_MESSAGE_SIZE;  ///< Max allowed XPC payload size
+    int xpcReplyTimeoutMs = 5000;                             ///< Default reply timeout for XPC sendWithReply
 
     // Platform-specific options
     std::optional<std::string> xpcServiceName;  ///< macOS XPC service identifier
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -18,17 +18,20 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "../Core/NetworkTypes.h"
-#include "../Core/ConnectionTypes.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
-#include <functional>
+
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ConnectionTypes.h"
+#include "../Core/ErrorCodes.h"
+#include "../Core/NetworkTypes.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Abstract base interface for network connections
@@ -46,7 +49,8 @@ namespace EntropyEngine::Networking {
  * Thread Safety: All methods are thread-safe unless documented otherwise.
  * Callbacks are invoked with reference-counted guards to prevent use-after-free.
  */
-class NetworkConnection : public Core::EntropyObject {
+class NetworkConnection : public Core::EntropyObject
+{
 public:
     using MessageCallback = std::function<void(const std::vector<uint8_t>&)>;  ///< Callback for received messages
     using StateCallback = std::function<void(ConnectionState)>;                ///< Callback for state changes
@@ -176,26 +180,30 @@ protected:
 
         // Increment active callback counter (RAII guard ensures decrement)
         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
-        struct CallbackGuard {
+        struct CallbackGuard
+        {
             std::atomic<int>& counter;
-            ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
         bool shutdown2 = _callbacksShutdown.load(std::memory_order_acquire);
         if (shutdown2) {
-            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
-            return; // Bail early if shutting down
+            ENTROPY_LOG_DEBUG(
+                "NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
+            return;  // Bail early if shutting down
         }
 
         MessageCallback cb;
         {
             std::lock_guard<std::mutex> lock(_cbMutex);
-            cb = _messageCallback; // copy under lock
+            cb = _messageCallback;  // copy under lock
         }
 
         if (cb) {
-            cb(data); // invoke outside lock
+            cb(data);  // invoke outside lock
         }
 
         // Counter decrements here via RAII, ensuring destructor waits
@@ -217,24 +225,27 @@ protected:
 
         // Increment active callback counter (RAII guard ensures decrement)
         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
-        struct CallbackGuard {
+        struct CallbackGuard
+        {
             std::atomic<int>& counter;
-            ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
         if (_callbacksShutdown.load(std::memory_order_acquire)) {
-            return; // Bail early if shutting down
+            return;  // Bail early if shutting down
         }
 
         StateCallback cb;
         {
             std::lock_guard<std::mutex> lock(_cbMutex);
-            cb = _stateCallback; // copy under lock
+            cb = _stateCallback;  // copy under lock
         }
 
         if (cb) {
-            cb(state); // invoke outside lock
+            cb(state);  // invoke outside lock
         }
 
         // Counter decrements here via RAII, ensuring destructor waits
@@ -259,11 +270,11 @@ protected:
     }
 
 private:
-    mutable std::mutex _cbMutex;                         ///< Protects callback access
-    MessageCallback _messageCallback;                    ///< User message callback
-    StateCallback _stateCallback;                        ///< User state callback
-    std::atomic<int> _activeCallbacks{0};                ///< Count of active callback invocations
-    std::atomic<bool> _callbacksShutdown{false};         ///< Shutdown flag for destructor
+    mutable std::mutex _cbMutex;                  ///< Protects callback access
+    MessageCallback _messageCallback;             ///< User message callback
+    StateCallback _stateCallback;                 ///< User state callback
+    std::atomic<int> _activeCallbacks{0};         ///< Count of active callback invocations
+    std::atomic<bool> _callbacksShutdown{false};  ///< Shutdown flag for destructor
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

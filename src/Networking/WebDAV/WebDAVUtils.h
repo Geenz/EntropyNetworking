@@ -17,12 +17,13 @@
 
 #pragma once
 
+#include <chrono>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <optional>
-#include <chrono>
 
-namespace EntropyEngine::Networking::WebDAV::Utils {
+namespace EntropyEngine::Networking::WebDAV::Utils
+{
 
 /**
  * @brief Percent-encodes a string for use in URLs
@@ -113,4 +114,4 @@ std::string normalizeHrefForCompare(const std::string& href, bool ensureTrailing
  */
 std::optional<std::chrono::system_clock::time_point> parseHttpDate(const char* s);
 
-} // namespace EntropyEngine::Networking::WebDAV::Utils
+}  // namespace EntropyEngine::Networking::WebDAV::Utils

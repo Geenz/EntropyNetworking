@@ -18,13 +18,15 @@
 
 #pragma once
 
-#include "NetworkConnection.h"
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <thread>
-#include <mutex>
-#include <atomic>
 
-namespace EntropyEngine::Networking {
+#include "NetworkConnection.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Unix domain socket implementation for local IPC
@@ -72,7 +74,8 @@ namespace EntropyEngine::Networking {
  * // Connection is already established, ready to send/receive
  * @endcode
  */
-class UnixSocketConnection : public NetworkConnection {
+class UnixSocketConnection : public NetworkConnection
+{
 public:
     /**
      * @brief Constructs client-side connection to socket path
@@ -108,14 +111,20 @@ public:
     // NetworkConnection interface
     Result<void> connect() override;
     Result<void> disconnect() override;
-    bool isConnected() const override { return _state.load() == ConnectionState::Connected; }
+    bool isConnected() const override {
+        return _state.load() == ConnectionState::Connected;
+    }
 
     Result<void> send(const std::vector<uint8_t>& data) override;
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
     Result<void> trySend(const std::vector<uint8_t>& data) override;
 
-    ConnectionState getState() const override { return _state.load(); }
-    ConnectionType getType() const override { return ConnectionType::Local; }
+    ConnectionState getState() const override {
+        return _state.load();
+    }
+    ConnectionType getType() const override {
+        return ConnectionType::Local;
+    }
     ConnectionStats getStats() const override;
 
 private:
@@ -134,31 +143,31 @@ private:
      */
     Result<void> sendInternal(const std::vector<uint8_t>& data);
 
-    std::string _socketPath;                                 ///< Socket path for client connections
-    int _socket{-1};                                         ///< Socket file descriptor
-    std::atomic<ConnectionState> _state{ConnectionState::Disconnected}; ///< Current connection state
+    std::string _socketPath;                                             ///< Socket path for client connections
+    int _socket{-1};                                                     ///< Socket file descriptor
+    std::atomic<ConnectionState> _state{ConnectionState::Disconnected};  ///< Current connection state
 
-    std::thread _receiveThread;                              ///< Dedicated receive thread
-    std::atomic<bool> _shouldStop{false};                    ///< Shutdown signal for receive thread
+    std::thread _receiveThread;            ///< Dedicated receive thread
+    std::atomic<bool> _shouldStop{false};  ///< Shutdown signal for receive thread
 
-    mutable std::mutex _sendMutex;                           ///< Serializes send operations
+    mutable std::mutex _sendMutex;  ///< Serializes send operations
 
     // Configurable parameters (initialized from ConnectionConfig or defaults)
-    int _connectTimeoutMs{5000};                             ///< Connect timeout (milliseconds)
-    int _sendPollTimeoutMs{100};                             ///< Per-poll timeout during send (ms)
-    int _sendMaxPolls{20};                                   ///< Max poll iterations before send timeout
-    int _recvIdlePollMs{-1};                                 ///< Receive poll timeout (-1 = blocking)
-    size_t _maxMessageSize{16ull * 1024ull * 1024ull};      ///< Maximum message size (16 MiB)
-    int _socketSendBuf{0};                                   ///< SO_SNDBUF size (0 = OS default)
-    int _socketRecvBuf{0};                                   ///< SO_RCVBUF size (0 = OS default)
+    int _connectTimeoutMs{5000};                        ///< Connect timeout (milliseconds)
+    int _sendPollTimeoutMs{100};                        ///< Per-poll timeout during send (ms)
+    int _sendMaxPolls{20};                              ///< Max poll iterations before send timeout
+    int _recvIdlePollMs{-1};                            ///< Receive poll timeout (-1 = blocking)
+    size_t _maxMessageSize{16ull * 1024ull * 1024ull};  ///< Maximum message size (16 MiB)
+    int _socketSendBuf{0};                              ///< SO_SNDBUF size (0 = OS default)
+    int _socketRecvBuf{0};                              ///< SO_RCVBUF size (0 = OS default)
 
     // Atomic stats to avoid data races between send/receive threads
-    std::atomic<uint64_t> _bytesSent{0};                     ///< Total bytes sent
-    std::atomic<uint64_t> _bytesReceived{0};                 ///< Total bytes received
-    std::atomic<uint64_t> _messagesSent{0};                  ///< Total messages sent
-    std::atomic<uint64_t> _messagesReceived{0};              ///< Total messages received
-    std::atomic<uint64_t> _connectTime{0};                   ///< Connection timestamp (ms since epoch)
-    std::atomic<uint64_t> _lastActivityTime{0};              ///< Last activity timestamp (ms since epoch)
+    std::atomic<uint64_t> _bytesSent{0};         ///< Total bytes sent
+    std::atomic<uint64_t> _bytesReceived{0};     ///< Total bytes received
+    std::atomic<uint64_t> _messagesSent{0};      ///< Total messages sent
+    std::atomic<uint64_t> _messagesReceived{0};  ///< Total messages received
+    std::atomic<uint64_t> _connectTime{0};       ///< Connection timestamp (ms since epoch)
+    std::atomic<uint64_t> _lastActivityTime{0};  ///< Last activity timestamp (ms since epoch)
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -18,17 +18,20 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "ConnectionHandle.h"
-#include "NetworkConnection.h"
-#include "../Core/ConnectionTypes.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
+
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
-#include <functional>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ConnectionTypes.h"
+#include "../Core/ErrorCodes.h"
+#include "ConnectionHandle.h"
+#include "NetworkConnection.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Slot-based connection manager with platform-agnostic API
@@ -62,7 +65,8 @@ namespace EntropyEngine::Networking {
  * remote.connect().wait();
  * @endcode
  */
-class ConnectionManager : public Core::EntropyObject {
+class ConnectionManager : public Core::EntropyObject
+{
 public:
     /**
      * @brief Constructs connection manager with specified capacity
@@ -111,11 +115,8 @@ public:
      * @param callbacks Signaling callbacks for SDP/ICE exchange
      * @return ConnectionHandle for operations, or invalid if full
      */
-    ConnectionHandle openRemoteConnection(
-        const std::string& signalingServer,
-        WebRTCConfig config,
-        SignalingCallbacks callbacks
-    );
+    ConnectionHandle openRemoteConnection(const std::string& signalingServer, WebRTCConfig config,
+                                          SignalingCallbacks callbacks);
 
     /**
      * @brief Opens connection with explicit configuration
@@ -224,7 +225,8 @@ public:
      * @param handle Connection handle
      * @param callback Function called when messages are received
      */
-    void setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) noexcept;
+    void setMessageCallback(const ConnectionHandle& handle,
+                            std::function<void(const std::vector<uint8_t>&)> callback) noexcept;
 
     /**
      * @brief Sets state callback (called by handle.setStateCallback())
@@ -245,12 +247,15 @@ public:
      * @brief Gets maximum capacity
      * @return Maximum number of connections this manager can handle
      */
-    size_t capacity() const noexcept { return _capacity; }
+    size_t capacity() const noexcept {
+        return _capacity;
+    }
 
     /**
      * @brief Lightweight aggregate metrics snapshot for observability
      */
-    struct ManagerMetrics {
+    struct ManagerMetrics
+    {
         uint64_t totalBytesSent = 0;
         uint64_t totalBytesReceived = 0;
         uint64_t totalMessagesSent = 0;
@@ -267,7 +272,9 @@ public:
     ManagerMetrics getManagerMetrics() const noexcept;
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "ConnectionManager"; }
+    const char* className() const noexcept override {
+        return "ConnectionManager";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -281,25 +288,28 @@ private:
     /**
      * @brief Internal storage for a connection slot
      */
-    struct ConnectionSlot {
-        std::atomic<uint32_t> generation{1};                                        ///< Generation counter for handle validation
-        std::atomic<ConnectionState> state{ConnectionState::Disconnected};          ///< Current connection state (query source)
-        std::atomic<ConnectionState> lastPublishedState{ConnectionState::Disconnected}; ///< Last state sent to metrics (dedup tracking)
-        std::unique_ptr<NetworkConnection> connection;                              ///< Backend implementation (Unix/WebRTC/XPC)
-        ConnectionType type;                                                        ///< Connection type (Local or Remote)
-        std::atomic<uint32_t> nextFree{INVALID_INDEX};                              ///< Next free slot index (free list)
+    struct ConnectionSlot
+    {
+        std::atomic<uint32_t> generation{1};  ///< Generation counter for handle validation
+        std::atomic<ConnectionState> state{ConnectionState::Disconnected};  ///< Current connection state (query source)
+        std::atomic<ConnectionState> lastPublishedState{
+            ConnectionState::Disconnected};             ///< Last state sent to metrics (dedup tracking)
+        std::unique_ptr<NetworkConnection> connection;  ///< Backend implementation (Unix/WebRTC/XPC)
+        ConnectionType type;                            ///< Connection type (Local or Remote)
+        std::atomic<uint32_t> nextFree{INVALID_INDEX};  ///< Next free slot index (free list)
 
-        // User-provided callbacks (set via ConnectionHandle); accessed via atomic_load/atomic_store on shared_ptr for lock-free fanout
+        // User-provided callbacks (set via ConnectionHandle); accessed via atomic_load/atomic_store on shared_ptr for
+        // lock-free fanout
         std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>> userMessageCb;  ///< User message callback
         std::shared_ptr<std::function<void(ConnectionState)>> userStateCb;                ///< User state callback
 
         std::mutex mutex;  ///< Per-slot mutex for connection operations
     };
 
-    const size_t _capacity;                      ///< Maximum number of connections
-    std::vector<ConnectionSlot> _connectionSlots; ///< Pre-allocated connection slots
-    std::atomic<uint64_t> _freeListHead{0};      ///< Free list head (packed: tag(32) | index(32))
-    std::atomic<size_t> _activeCount{0};         ///< Currently allocated connections
+    const size_t _capacity;                        ///< Maximum number of connections
+    std::vector<ConnectionSlot> _connectionSlots;  ///< Pre-allocated connection slots
+    std::atomic<uint64_t> _freeListHead{0};        ///< Free list head (packed: tag(32) | index(32))
+    std::atomic<size_t> _activeCount{0};           ///< Currently allocated connections
 
     // Handle validation
     bool validateHandle(const ConnectionHandle& handle) const noexcept;
@@ -319,18 +329,19 @@ private:
     friend class SessionManager;
 
     // Lightweight aggregate metrics counters (atomic)
-    struct MetricsCounters {
-        std::atomic<uint64_t> totalBytesSent{0};        ///< Total bytes sent across all connections
-        std::atomic<uint64_t> totalBytesReceived{0};    ///< Total bytes received across all connections
-        std::atomic<uint64_t> totalMessagesSent{0};     ///< Total messages sent
-        std::atomic<uint64_t> totalMessagesReceived{0}; ///< Total messages received
-        std::atomic<uint64_t> connectionsOpened{0};     ///< Count of successful connections
-        std::atomic<uint64_t> connectionsFailed{0};     ///< Count of failed connection attempts
-        std::atomic<uint64_t> connectionsClosed{0};     ///< Count of closed connections
-        std::atomic<uint64_t> wouldBlockSends{0};       ///< Count of WouldBlock from trySend()
+    struct MetricsCounters
+    {
+        std::atomic<uint64_t> totalBytesSent{0};         ///< Total bytes sent across all connections
+        std::atomic<uint64_t> totalBytesReceived{0};     ///< Total bytes received across all connections
+        std::atomic<uint64_t> totalMessagesSent{0};      ///< Total messages sent
+        std::atomic<uint64_t> totalMessagesReceived{0};  ///< Total messages received
+        std::atomic<uint64_t> connectionsOpened{0};      ///< Count of successful connections
+        std::atomic<uint64_t> connectionsFailed{0};      ///< Count of failed connection attempts
+        std::atomic<uint64_t> connectionsClosed{0};      ///< Count of closed connections
+        std::atomic<uint64_t> wouldBlockSends{0};        ///< Count of WouldBlock from trySend()
     };
 
     mutable MetricsCounters _metrics;  ///< Aggregate observability metrics
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
+
+#include <sstream>
+
 #include "Networking/WebDAV/WebDAVPropfindParser.h"
 #include "Networking/WebDAV/WebDAVUtils.h"
-#include <sstream>
 
 using namespace EntropyEngine::Networking::WebDAV;
 
@@ -11,15 +13,19 @@ static std::string davDepth1Body(const std::string& selfHref) {
     x << "<D:multistatus xmlns:D=\"DAV:\">\n";
     x << "  <D:response>\n";
     x << "    <D:href>" << selfHref << "</D:href>\n";
-    x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
+    x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 "
+         "OK</D:status></D:propstat>\n";
     x << "  </D:response>\n";
     x << "  <D:response>\n";
     x << "    <D:href>" << selfHref << "file1.bin</D:href>\n";
-    x << "    <D:propstat><D:prop><D:getcontentlength>123</D:getcontentlength><D:getcontenttype>application/octet-stream</D:getcontenttype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
+    x << "    "
+         "<D:propstat><D:prop><D:getcontentlength>123</D:getcontentlength><D:getcontenttype>application/octet-stream</"
+         "D:getcontenttype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
     x << "  </D:response>\n";
     x << "  <D:response>\n";
     x << "    <D:href>" << selfHref << "subdir/</D:href>\n";
-    x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
+    x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 "
+         "OK</D:status></D:propstat>\n";
     x << "  </D:response>\n";
     x << "</D:multistatus>\n";
     return x.str();
@@ -33,7 +39,8 @@ TEST(WebDAVPropfindParser, Depth0File) {
         x << "<D:multistatus xmlns:D=\"DAV:\">\n";
         x << "  <D:response>\n";
         x << "    <D:href>/dav/a.txt</D:href>\n";
-        x << "    <D:propstat><D:prop><D:getcontentlength>42</D:getcontentlength><D:getlastmodified>Sun, 06 Nov 1994 08:49:37 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
+        x << "    <D:propstat><D:prop><D:getcontentlength>42</D:getcontentlength><D:getlastmodified>Sun, 06 Nov 1994 "
+             "08:49:37 GMT</D:getlastmodified></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
         x << "  </D:response>\n";
         x << "</D:multistatus>\n";
         xml = x.str();
@@ -79,7 +86,8 @@ TEST(WebDAVPropfindParser, AbsoluteHref) {
         x << "<D:multistatus xmlns:D=\"DAV:\">\n";
         x << "  <D:response>\n";
         x << "    <D:href>https://example.com/dav/root/</D:href>\n";
-        x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\n";
+        x << "    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 "
+             "OK</D:status></D:propstat>\n";
         x << "  </D:response>\n";
         x << "</D:multistatus>\n";
         xml = x.str();
