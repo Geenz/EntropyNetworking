@@ -19,15 +19,19 @@
 #pragma once
 
 #include <TypeSystem/Reflection.h>
-#include "ComponentSchema.h"
-#include "PropertyTypes.h"
-#include "NetworkTypes.h"
-#include "ErrorCodes.h"
+
 #include <format>
 #include <type_traits>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ComponentSchema.h"
+#include "ErrorCodes.h"
+#include "NetworkTypes.h"
+#include "PropertyTypes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 using namespace EntropyEngine::Core::TypeSystem;
 
@@ -44,87 +48,122 @@ using namespace EntropyEngine::Core::TypeSystem;
  * };
  * @endcode
  */
-template<typename T>
-struct TypeToPropertyType {
-    static_assert(!std::is_same_v<std::type_identity_t<T>, T>,
-                  "Type not mapped to PropertyType - add specialization");
+template <typename T>
+struct TypeToPropertyType
+{
+    static_assert(!std::is_same_v<std::type_identity_t<T>, T>, "Type not mapped to PropertyType - add specialization");
 };
 
 // Fundamental types
-template<> struct TypeToPropertyType<int32_t> {
+template <>
+struct TypeToPropertyType<int32_t>
+{
     static constexpr PropertyType value = PropertyType::Int32;
 };
 
-template<> struct TypeToPropertyType<int64_t> {
+template <>
+struct TypeToPropertyType<int64_t>
+{
     static constexpr PropertyType value = PropertyType::Int64;
 };
 
-template<> struct TypeToPropertyType<uint64_t> {
+template <>
+struct TypeToPropertyType<uint64_t>
+{
     static constexpr PropertyType value = PropertyType::Int64;  // Map unsigned to signed for network
 };
 
-template<> struct TypeToPropertyType<float> {
+template <>
+struct TypeToPropertyType<float>
+{
     static constexpr PropertyType value = PropertyType::Float32;
 };
 
-template<> struct TypeToPropertyType<double> {
+template <>
+struct TypeToPropertyType<double>
+{
     static constexpr PropertyType value = PropertyType::Float64;
 };
 
-template<> struct TypeToPropertyType<bool> {
+template <>
+struct TypeToPropertyType<bool>
+{
     static constexpr PropertyType value = PropertyType::Bool;
 };
 
-template<> struct TypeToPropertyType<std::string> {
+template <>
+struct TypeToPropertyType<std::string>
+{
     static constexpr PropertyType value = PropertyType::String;
 };
 
 // EntropyNetworking vector types (from NetworkTypes.h)
-template<> struct TypeToPropertyType<Vec2> {
+template <>
+struct TypeToPropertyType<Vec2>
+{
     static constexpr PropertyType value = PropertyType::Vec2;
 };
 
-template<> struct TypeToPropertyType<Vec3> {
+template <>
+struct TypeToPropertyType<Vec3>
+{
     static constexpr PropertyType value = PropertyType::Vec3;
 };
 
-template<> struct TypeToPropertyType<Vec4> {
+template <>
+struct TypeToPropertyType<Vec4>
+{
     static constexpr PropertyType value = PropertyType::Vec4;
 };
 
-template<> struct TypeToPropertyType<Quat> {
+template <>
+struct TypeToPropertyType<Quat>
+{
     static constexpr PropertyType value = PropertyType::Quat;
 };
 
 // Array types
-template<> struct TypeToPropertyType<std::vector<uint8_t>> {
+template <>
+struct TypeToPropertyType<std::vector<uint8_t>>
+{
     static constexpr PropertyType value = PropertyType::Bytes;
 };
 
-template<> struct TypeToPropertyType<std::vector<int32_t>> {
+template <>
+struct TypeToPropertyType<std::vector<int32_t>>
+{
     static constexpr PropertyType value = PropertyType::Int32Array;
 };
 
-template<> struct TypeToPropertyType<std::vector<int64_t>> {
+template <>
+struct TypeToPropertyType<std::vector<int64_t>>
+{
     static constexpr PropertyType value = PropertyType::Int64Array;
 };
 
-template<> struct TypeToPropertyType<std::vector<uint64_t>> {
+template <>
+struct TypeToPropertyType<std::vector<uint64_t>>
+{
     static constexpr PropertyType value = PropertyType::Int64Array;
 };
 
-template<> struct TypeToPropertyType<std::vector<float>> {
+template <>
+struct TypeToPropertyType<std::vector<float>>
+{
     static constexpr PropertyType value = PropertyType::Float32Array;
 };
 
-template<> struct TypeToPropertyType<std::vector<Vec3>> {
+template <>
+struct TypeToPropertyType<std::vector<Vec3>>
+{
     static constexpr PropertyType value = PropertyType::Vec3Array;
 };
 
 // Generic enum support (all enums map to Int32)
-template<typename T>
-requires std::is_enum_v<T>
-struct TypeToPropertyType<T> {
+template <typename T>
+    requires std::is_enum_v<T>
+struct TypeToPropertyType<T>
+{
     static constexpr PropertyType value = PropertyType::Int32;
 };
 
@@ -257,19 +296,15 @@ inline size_t getFieldSize(TypeID typeId) {
  * @param isPublic Whether to publish for discovery (default: true)
  * @return Result with ComponentSchema on success, error on failure
  */
-template<typename T>
-Result<ComponentSchema> generateComponentSchema(
-    const std::string& appId,
-    uint32_t schemaVersion,
-    bool isPublic = true
-) {
+template <typename T>
+Result<ComponentSchema> generateComponentSchema(const std::string& appId, uint32_t schemaVersion,
+                                                bool isPublic = true) {
     // 1. Get TypeInfo for component
     const auto* typeInfo = TypeInfo::get<T>();
     if (!typeInfo) {
         return Result<ComponentSchema>::err(
             NetworkError::InvalidParameter,
-            std::format("Type '{}' not registered with ENTROPY_REGISTER_TYPE", typeid(T).name())
-        );
+            std::format("Type '{}' not registered with ENTROPY_REGISTER_TYPE", typeid(T).name()));
     }
 
     // 2. Extract component name from TypeInfo
@@ -284,11 +319,9 @@ Result<ComponentSchema> generateComponentSchema(
         std::optional<PropertyType> propType = mapTypeIdToPropertyType(field.type);
 
         if (!propType.has_value()) {
-            return Result<ComponentSchema>::err(
-                NetworkError::InvalidParameter,
-                std::format("Field '{}' has unmapped type (TypeID: {}, hash: {})",
-                           field.name, field.type.prettyName(), field.type.id)
-            );
+            return Result<ComponentSchema>::err(NetworkError::InvalidParameter,
+                                                std::format("Field '{}' has unmapped type (TypeID: {}, hash: {})",
+                                                            field.name, field.type.prettyName(), field.type.id));
         }
 
         // Get field size
@@ -296,33 +329,22 @@ Result<ComponentSchema> generateComponentSchema(
         if (fieldSize == 0) {
             return Result<ComponentSchema>::err(
                 NetworkError::InvalidParameter,
-                std::format("Field '{}' has unknown size (TypeID: {})",
-                           field.name, field.type.prettyName())
-            );
+                std::format("Field '{}' has unknown size (TypeID: {})", field.name, field.type.prettyName()));
         }
 
-        PropertyDefinition def{
-            .name = std::string(field.name),
-            .type = propType.value(),
-            .offset = field.offset,
-            .size = fieldSize,
-            .required = true,
-            .defaultValue = std::nullopt
-        };
+        PropertyDefinition def{.name = std::string(field.name),
+                               .type = propType.value(),
+                               .offset = field.offset,
+                               .size = fieldSize,
+                               .required = true,
+                               .defaultValue = std::nullopt};
 
         properties.push_back(std::move(def));
     }
 
     // 4. Create ComponentSchema with validation
-    return ComponentSchema::create(
-        appId,
-        componentName,
-        schemaVersion,
-        properties,
-        sizeof(T),
-        isPublic
-    );
+    return ComponentSchema::create(appId, componentName, schemaVersion, properties, sizeof(T), isPublic);
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

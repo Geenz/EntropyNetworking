@@ -8,6 +8,7 @@
  */
 
 #include <gtest/gtest.h>
+
 #include "../src/Networking/Core/PropertyTypes.h"
 
 using namespace EntropyEngine::Networking;
@@ -106,19 +107,10 @@ TEST(PropertyTypesTests, QuaternionIdentity) {
 // Round-trip tests: verify all PropertyType enums can be converted to Cap'n Proto and back
 TEST(PropertyTypesTests, RoundTrip_ScalarTypes) {
     // Test all scalar types
-    std::vector<PropertyType> scalarTypes = {
-        PropertyType::Int32,
-        PropertyType::Int64,
-        PropertyType::Float32,
-        PropertyType::Float64,
-        PropertyType::Vec2,
-        PropertyType::Vec3,
-        PropertyType::Vec4,
-        PropertyType::Quat,
-        PropertyType::String,
-        PropertyType::Bool,
-        PropertyType::Bytes
-    };
+    std::vector<PropertyType> scalarTypes = {PropertyType::Int32,   PropertyType::Int64, PropertyType::Float32,
+                                             PropertyType::Float64, PropertyType::Vec2,  PropertyType::Vec3,
+                                             PropertyType::Vec4,    PropertyType::Quat,  PropertyType::String,
+                                             PropertyType::Bool,    PropertyType::Bytes};
 
     for (auto type : scalarTypes) {
         uint16_t capnpType = toCapnpPropertyType(type);
@@ -130,15 +122,8 @@ TEST(PropertyTypesTests, RoundTrip_ScalarTypes) {
 TEST(PropertyTypesTests, RoundTrip_ArrayTypes) {
     // Test all array types
     std::vector<PropertyType> arrayTypes = {
-        PropertyType::Int32Array,
-        PropertyType::Int64Array,
-        PropertyType::Float32Array,
-        PropertyType::Float64Array,
-        PropertyType::Vec2Array,
-        PropertyType::Vec3Array,
-        PropertyType::Vec4Array,
-        PropertyType::QuatArray
-    };
+        PropertyType::Int32Array, PropertyType::Int64Array, PropertyType::Float32Array, PropertyType::Float64Array,
+        PropertyType::Vec2Array,  PropertyType::Vec3Array,  PropertyType::Vec4Array,    PropertyType::QuatArray};
 
     for (auto type : arrayTypes) {
         uint16_t capnpType = toCapnpPropertyType(type);
@@ -150,26 +135,11 @@ TEST(PropertyTypesTests, RoundTrip_ArrayTypes) {
 TEST(PropertyTypesTests, RoundTrip_AllTypes) {
     // Comprehensive test of all types
     std::vector<PropertyType> allTypes = {
-        PropertyType::Int32,
-        PropertyType::Int64,
-        PropertyType::Float32,
-        PropertyType::Float64,
-        PropertyType::Vec2,
-        PropertyType::Vec3,
-        PropertyType::Vec4,
-        PropertyType::Quat,
-        PropertyType::String,
-        PropertyType::Bool,
-        PropertyType::Bytes,
-        PropertyType::Int32Array,
-        PropertyType::Int64Array,
-        PropertyType::Float32Array,
-        PropertyType::Float64Array,
-        PropertyType::Vec2Array,
-        PropertyType::Vec3Array,
-        PropertyType::Vec4Array,
-        PropertyType::QuatArray
-    };
+        PropertyType::Int32,      PropertyType::Int64,        PropertyType::Float32,      PropertyType::Float64,
+        PropertyType::Vec2,       PropertyType::Vec3,         PropertyType::Vec4,         PropertyType::Quat,
+        PropertyType::String,     PropertyType::Bool,         PropertyType::Bytes,        PropertyType::Int32Array,
+        PropertyType::Int64Array, PropertyType::Float32Array, PropertyType::Float64Array, PropertyType::Vec2Array,
+        PropertyType::Vec3Array,  PropertyType::Vec4Array,    PropertyType::QuatArray};
 
     for (auto type : allTypes) {
         // Convert to Cap'n Proto

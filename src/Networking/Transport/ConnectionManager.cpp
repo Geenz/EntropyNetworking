@@ -8,11 +8,13 @@
  */
 
 #include "ConnectionManager.h"
+
 #include "WebRTCConnection.h"
 
 #if defined(__APPLE__)
-#include "XPCConnection.h"
 #include <TargetConditionals.h>
+
+#include "XPCConnection.h"
 #endif
 
 #if defined(_WIN32)
@@ -24,12 +26,10 @@
 #include <format>
 #include <stdexcept>
 
-namespace EntropyEngine::Networking {
-
-ConnectionManager::ConnectionManager(size_t capacity)
-    : _capacity(capacity)
-    , _connectionSlots(capacity)
+namespace EntropyEngine::Networking
 {
+
+ConnectionManager::ConnectionManager(size_t capacity) : _capacity(capacity), _connectionSlots(capacity) {
     // Initialize lock-free free list
     if (_capacity == 0) {
         // Set free list head to INVALID_INDEX to indicate no available slots
@@ -77,9 +77,7 @@ uint32_t ConnectionManager::allocateSlot() {
         }
         uint32_t next = _connectionSlots[idx].nextFree.load(std::memory_order_acquire);
         uint64_t newHead = packHead(next, headTag(head) + 1);
-        if (_freeListHead.compare_exchange_weak(head, newHead,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(head, newHead, std::memory_order_acq_rel, std::memory_order_acquire)) {
             _activeCount.fetch_add(1, std::memory_order_acq_rel);
             return idx;
         }
@@ -122,9 +120,7 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
         uint32_t oldIdx = headIndex(old);
         slot.nextFree.store(oldIdx, std::memory_order_release);
         uint64_t newH = packHead(index, headTag(old) + 1);
-        if (_freeListHead.compare_exchange_weak(old, newH,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(old, newH, std::memory_order_acq_rel, std::memory_order_acquire)) {
             break;
         }
     }
@@ -139,12 +135,10 @@ void ConnectionManager::handleStatePublish(uint32_t index, ConnectionState newSt
     for (;;) {
         ConnectionState prev = slot.lastPublishedState.load(std::memory_order_acquire);
         if (prev == newState) {
-            return; // no change
+            return;  // no change
         }
-        if (slot.lastPublishedState.compare_exchange_weak(
-                prev, newState,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
+        if (slot.lastPublishedState.compare_exchange_weak(prev, newState, std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
             switch (newState) {
                 case ConnectionState::Connected:
                     _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
@@ -167,13 +161,13 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
     if (config.backend == ConnectionBackend::Auto) {
         // Automatic platform detection
 #if defined(__APPLE__)
-        #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
-            // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
-            return std::make_unique<XPCConnection>(config.endpoint, &config);
-        #else
-            // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
-            return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
-        #endif
+#if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+        // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
+        return std::make_unique<XPCConnection>(config.endpoint, &config);
+#else
+        // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
+        return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
+#endif
 #elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
         // Linux/Android - use Unix sockets
         return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
@@ -212,12 +206,9 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 }
 
 std::unique_ptr<NetworkConnection> ConnectionManager::createRemoteBackend(const ConnectionConfig& config) {
-    return std::make_unique<WebRTCConnection>(
-        config.webrtcConfig,
-        config.signalingCallbacks,
-        config.endpoint,  // Signaling server URL for client mode
-        config.dataChannelLabel
-    );
+    return std::make_unique<WebRTCConnection>(config.webrtcConfig, config.signalingCallbacks,
+                                              config.endpoint,  // Signaling server URL for client mode
+                                              config.dataChannelLabel);
 }
 
 ConnectionHandle ConnectionManager::openLocalConnection(const std::string& endpoint) {
@@ -231,17 +222,14 @@ ConnectionHandle ConnectionManager::openRemoteConnection(const std::string& sign
     ConnectionConfig config;
     config.type = ConnectionType::Remote;
     config.backend = ConnectionBackend::WebRTC;
-    config.endpoint = signalingUrl;  // WebSocket URL for client-side signaling
+    config.endpoint = signalingUrl;     // WebSocket URL for client-side signaling
     config.webrtcConfig.polite = true;  // Client is polite peer
     // signalingCallbacks left empty - WebRTCConnection will create internal WebSocket
     return openConnection(config);
 }
 
-ConnectionHandle ConnectionManager::openRemoteConnection(
-    const std::string& signalingServer,
-    WebRTCConfig config,
-    SignalingCallbacks callbacks
-) {
+ConnectionHandle ConnectionManager::openRemoteConnection(const std::string& signalingServer, WebRTCConfig config,
+                                                         SignalingCallbacks callbacks) {
     ConnectionConfig connConfig;
     connConfig.type = ConnectionType::Remote;
     connConfig.endpoint = signalingServer;
@@ -547,7 +535,8 @@ NetworkConnection* ConnectionManager::getConnectionPointer(const ConnectionHandl
     return _connectionSlots[index].connection.get();
 }
 
-void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
+void ConnectionManager::setMessageCallback(const ConnectionHandle& handle,
+                                           std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
@@ -558,7 +547,8 @@ void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::
     std::atomic_store(&slot.userMessageCb, std::move(sp));
 }
 
-void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) noexcept {
+void ConnectionManager::setStateCallback(const ConnectionHandle& handle,
+                                         std::function<void(ConnectionState)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
@@ -570,17 +560,12 @@ void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::fu
 }
 
 uint64_t ConnectionManager::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<ConnectionManager>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<ConnectionManager>().id);
     return hash;
 }
 
 std::string ConnectionManager::toString() const {
-    return std::format("{}@{}(cap={}, active={})",
-                       className(),
-                       static_cast<const void*>(this),
-                       _capacity,
+    return std::format("{}@{}(cap={}, active={})", className(), static_cast<const void*>(this), _capacity,
                        _activeCount.load(std::memory_order_relaxed));
 }
 
@@ -621,5 +606,4 @@ Result<void> ConnectionManager::trySend(const ConnectionHandle& handle, const st
     return r;
 }
 
-} // namespace EntropyEngine::Networking
-
+}  // namespace EntropyEngine::Networking

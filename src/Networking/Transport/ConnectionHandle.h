@@ -18,12 +18,15 @@
 #pragma once
 
 #include <EntropyCore.h>
+
+#include <cstdint>
+#include <vector>
+
 #include "../Core/ConnectionTypes.h"
 #include "../Core/ErrorCodes.h"
-#include <vector>
-#include <cstdint>
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 // Forward declaration
 class ConnectionManager;
@@ -58,7 +61,8 @@ class ConnectionManager;
  * }
  * @endcode
  */
-class ConnectionHandle : public Core::EntropyObject {
+class ConnectionHandle : public Core::EntropyObject
+{
 private:
     friend class ConnectionManager;
 
@@ -74,10 +78,8 @@ public:
     // Copy constructor: create a new handle object stamped with the same identity
     ConnectionHandle(const ConnectionHandle& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -85,10 +87,8 @@ public:
     ConnectionHandle& operator=(const ConnectionHandle& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -99,10 +99,8 @@ public:
     // Move constructor
     ConnectionHandle(ConnectionHandle&& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -110,10 +108,8 @@ public:
     ConnectionHandle& operator=(ConnectionHandle&& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -230,7 +226,9 @@ public:
     void setStateCallback(std::function<void(ConnectionState)> callback) noexcept;
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "ConnectionHandle"; }
+    const char* className() const noexcept override {
+        return "ConnectionHandle";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -238,4 +236,4 @@ private:
     ConnectionManager* manager() const;
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -1,13 +1,16 @@
 #include <gtest/gtest.h>
-#include "MiniDavServer.h"
+
 #include "DavTree.h"
+#include "MiniDavServer.h"
 #include "Networking/HTTP/HttpClient.h"
 
 using namespace EntropyEngine::Networking::HTTP;
 
-namespace {
+namespace
+{
 
-class HttpClientFixture : public ::testing::Test {
+class HttpClientFixture : public ::testing::Test
+{
 protected:
     void SetUp() override {
         // Build a small DAV tree
@@ -28,18 +31,18 @@ protected:
     DavTree tree;
 };
 
-} // namespace
+}  // namespace
 
 TEST_F(HttpClientFixture, Get_BasicFile_Aggregated) {
     HttpClient client;
 
     HttpRequest req;
     req.method = HttpMethod::GET;
-    req.scheme = "http"; // Local test server doesn't use TLS
+    req.scheme = "http";  // Local test server doesn't use TLS
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
 
-    RequestOptions opts{}; // defaults OK
+    RequestOptions opts{};  // defaults OK
 
     auto resp = client.execute(req, opts);
     ASSERT_EQ(resp.statusCode, 200) << resp.statusMessage;
@@ -55,7 +58,7 @@ TEST_F(HttpClientFixture, Head_NoBody_ContentLengthPresent) {
 
     HttpRequest req;
     req.method = HttpMethod::HEAD;
-    req.scheme = "http"; // Local test server doesn't use TLS
+    req.scheme = "http";  // Local test server doesn't use TLS
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
 
@@ -75,7 +78,7 @@ TEST_F(HttpClientFixture, MultipleSequentialGets_Succeed) {
     for (int i = 0; i < 5; ++i) {
         HttpRequest req;
         req.method = HttpMethod::GET;
-        req.scheme = "http"; // Local test server doesn't use TLS
+        req.scheme = "http";  // Local test server doesn't use TLS
         req.host = std::string("127.0.0.1:") + std::to_string(server->port());
         req.path = "/dav/hello.txt";
         auto resp = client.execute(req);

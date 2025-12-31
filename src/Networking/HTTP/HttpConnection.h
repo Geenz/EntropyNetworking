@@ -9,11 +9,13 @@
 
 #pragma once
 
-#include "Networking/HTTP/HttpTypes.h"
 #include <llhttp.h>
-#include <vector>
-#include <string>
+
 #include <mutex>
+#include <string>
+#include <vector>
+
+#include "Networking/HTTP/HttpTypes.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -23,11 +25,13 @@
 
 #include <openssl/ssl.h>
 
-namespace EntropyEngine::Networking::HTTP {
+namespace EntropyEngine::Networking::HTTP
+{
 
 // A single HTTP/1.1 connection operating on a TCP socket.
 // Sends one aggregated request and parses one aggregated response using llhttp.
-class HttpConnection {
+class HttpConnection
+{
 public:
     HttpConnection();
 
@@ -46,4 +50,4 @@ private:
     // llhttp state per-call (stack allocated in execute methods)
 };
 
-} // namespace EntropyEngine::Networking::HTTP
+}  // namespace EntropyEngine::Networking::HTTP

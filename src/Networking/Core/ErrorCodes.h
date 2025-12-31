@@ -17,41 +17,44 @@
 #pragma once
 
 #include <optional>
-#include <string>
 #include <stdexcept>
+#include <string>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Error codes for networking operations
  */
-enum class NetworkError {
-    None,                       ///< No error
-    HashCollision,              ///< Property hash collision detected
-    UnknownProperty,            ///< Property hash not found in registry
-    TypeMismatch,               ///< Property value type doesn't match expected type
-    InvalidMessage,             ///< Malformed or invalid message
-    SerializationFailed,        ///< Failed to serialize message
-    DeserializationFailed,      ///< Failed to deserialize message
-    CompressionFailed,          ///< Failed to compress data
-    DecompressionFailed,        ///< Failed to decompress data
-    ConnectionClosed,           ///< Connection was closed
-    Timeout,                    ///< Operation timed out
-    InvalidParameter,           ///< Invalid parameter provided
-    RegistryFull,               ///< Registry has reached capacity limit
-    EntityNotFound,             ///< Entity ID not found
-    AlreadyExists,              ///< Entity or property already exists
-    WouldBlock,                 ///< Operation would block (non-blocking backpressure)
-    ResourceLimitExceeded,      ///< Resource limit exceeded (entities, properties, etc.)
-    HandshakeFailed,            ///< Handshake protocol failed
+enum class NetworkError
+{
+    None,                   ///< No error
+    HashCollision,          ///< Property hash collision detected
+    UnknownProperty,        ///< Property hash not found in registry
+    TypeMismatch,           ///< Property value type doesn't match expected type
+    InvalidMessage,         ///< Malformed or invalid message
+    SerializationFailed,    ///< Failed to serialize message
+    DeserializationFailed,  ///< Failed to deserialize message
+    CompressionFailed,      ///< Failed to compress data
+    DecompressionFailed,    ///< Failed to decompress data
+    ConnectionClosed,       ///< Connection was closed
+    Timeout,                ///< Operation timed out
+    InvalidParameter,       ///< Invalid parameter provided
+    RegistryFull,           ///< Registry has reached capacity limit
+    EntityNotFound,         ///< Entity ID not found
+    AlreadyExists,          ///< Entity or property already exists
+    WouldBlock,             ///< Operation would block (non-blocking backpressure)
+    ResourceLimitExceeded,  ///< Resource limit exceeded (entities, properties, etc.)
+    HandshakeFailed,        ///< Handshake protocol failed
 
     // Component schema errors
-    SchemaNotFound,             ///< Component schema not found in registry
-    SchemaAlreadyExists,        ///< Schema already registered with different content
-    SchemaIncompatible,         ///< Schemas are structurally incompatible
-    SchemaValidationFailed,     ///< Schema field validation failed
-    SchemaNotPublic             ///< Schema is not published for discovery
+    SchemaNotFound,          ///< Component schema not found in registry
+    SchemaAlreadyExists,     ///< Schema already registered with different content
+    SchemaIncompatible,      ///< Schemas are structurally incompatible
+    SchemaValidationFailed,  ///< Schema field validation failed
+    SchemaNotPublic          ///< Schema is not published for discovery
 };
 
 /**
@@ -61,30 +64,54 @@ enum class NetworkError {
  */
 inline const char* errorToString(NetworkError error) {
     switch (error) {
-        case NetworkError::None: return "No error";
-        case NetworkError::HashCollision: return "Property hash collision";
-        case NetworkError::UnknownProperty: return "Unknown property";
-        case NetworkError::TypeMismatch: return "Type mismatch";
-        case NetworkError::InvalidMessage: return "Invalid message";
-        case NetworkError::SerializationFailed: return "Serialization failed";
-        case NetworkError::DeserializationFailed: return "Deserialization failed";
-        case NetworkError::CompressionFailed: return "Compression failed";
-        case NetworkError::DecompressionFailed: return "Decompression failed";
-        case NetworkError::ConnectionClosed: return "Connection closed";
-        case NetworkError::Timeout: return "Timeout";
-        case NetworkError::InvalidParameter: return "Invalid parameter";
-        case NetworkError::RegistryFull: return "Registry full";
-        case NetworkError::EntityNotFound: return "Entity not found";
-        case NetworkError::AlreadyExists: return "Already exists";
-        case NetworkError::WouldBlock: return "Would block";
-        case NetworkError::ResourceLimitExceeded: return "Resource limit exceeded";
-        case NetworkError::HandshakeFailed: return "Handshake failed";
-        case NetworkError::SchemaNotFound: return "Schema not found";
-        case NetworkError::SchemaAlreadyExists: return "Schema already exists";
-        case NetworkError::SchemaIncompatible: return "Schema incompatible";
-        case NetworkError::SchemaValidationFailed: return "Schema validation failed";
-        case NetworkError::SchemaNotPublic: return "Schema not public";
-        default: return "Unknown error";
+        case NetworkError::None:
+            return "No error";
+        case NetworkError::HashCollision:
+            return "Property hash collision";
+        case NetworkError::UnknownProperty:
+            return "Unknown property";
+        case NetworkError::TypeMismatch:
+            return "Type mismatch";
+        case NetworkError::InvalidMessage:
+            return "Invalid message";
+        case NetworkError::SerializationFailed:
+            return "Serialization failed";
+        case NetworkError::DeserializationFailed:
+            return "Deserialization failed";
+        case NetworkError::CompressionFailed:
+            return "Compression failed";
+        case NetworkError::DecompressionFailed:
+            return "Decompression failed";
+        case NetworkError::ConnectionClosed:
+            return "Connection closed";
+        case NetworkError::Timeout:
+            return "Timeout";
+        case NetworkError::InvalidParameter:
+            return "Invalid parameter";
+        case NetworkError::RegistryFull:
+            return "Registry full";
+        case NetworkError::EntityNotFound:
+            return "Entity not found";
+        case NetworkError::AlreadyExists:
+            return "Already exists";
+        case NetworkError::WouldBlock:
+            return "Would block";
+        case NetworkError::ResourceLimitExceeded:
+            return "Resource limit exceeded";
+        case NetworkError::HandshakeFailed:
+            return "Handshake failed";
+        case NetworkError::SchemaNotFound:
+            return "Schema not found";
+        case NetworkError::SchemaAlreadyExists:
+            return "Schema already exists";
+        case NetworkError::SchemaIncompatible:
+            return "Schema incompatible";
+        case NetworkError::SchemaValidationFailed:
+            return "Schema validation failed";
+        case NetworkError::SchemaNotPublic:
+            return "Schema not public";
+        default:
+            return "Unknown error";
     }
 }
 
@@ -102,11 +129,12 @@ inline const char* errorToString(NetworkError error) {
  * }
  * @endcode
  */
-template<typename T>
-struct Result {
-    T value;                    ///< Result value (valid only if error == None)
-    NetworkError error;         ///< Error code
-    std::string errorMessage;   ///< Optional detailed error message
+template <typename T>
+struct Result
+{
+    T value;                   ///< Result value (valid only if error == None)
+    NetworkError error;        ///< Error code
+    std::string errorMessage;  ///< Optional detailed error message
 
     /**
      * @brief Check if operation succeeded
@@ -131,8 +159,7 @@ struct Result {
      */
     T& valueOrThrow() {
         if (failed()) {
-            throw std::runtime_error(errorMessage.empty() ?
-                errorToString(error) : errorMessage);
+            throw std::runtime_error(errorMessage.empty() ? errorToString(error) : errorMessage);
         }
         return value;
     }
@@ -143,7 +170,7 @@ struct Result {
      * @return Result with no error
      */
     static Result<T> ok(T val) {
-        return Result<T>{std::move(val), NetworkError::None, ""};
+        return Result<T>{std::move(val), NetworkError::None, {}};
     }
 
     /**
@@ -160,23 +187,27 @@ struct Result {
 /**
  * @brief Result specialization for void operations
  */
-template<>
-struct Result<void> {
+template <>
+struct Result<void>
+{
     NetworkError error;
     std::string errorMessage;
 
-    bool success() const { return error == NetworkError::None; }
-    bool failed() const { return error != NetworkError::None; }
+    bool success() const {
+        return error == NetworkError::None;
+    }
+    bool failed() const {
+        return error != NetworkError::None;
+    }
 
     void throwOnError() const {
         if (failed()) {
-            throw std::runtime_error(errorMessage.empty() ?
-                errorToString(error) : errorMessage);
+            throw std::runtime_error(errorMessage.empty() ? errorToString(error) : errorMessage);
         }
     }
 
     static Result<void> ok() {
-        return Result<void>{NetworkError::None, ""};
+        return Result<void>{NetworkError::None, {}};
     }
 
     static Result<void> err(NetworkError err, std::string message = "") {
@@ -184,5 +215,5 @@ struct Result<void> {
     }
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

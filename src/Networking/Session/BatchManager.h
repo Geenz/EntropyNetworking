@@ -9,18 +9,21 @@
 
 #pragma once
 
-#include "../Core/PropertyHash.h"
-#include "../Core/PropertyTypes.h"
-#include "../Core/ErrorCodes.h"
-#include "SessionHandle.h"
 #include <EntropyCore.h>
-#include <unordered_map>
-#include <vector>
-#include <mutex>
+
 #include <atomic>
 #include <chrono>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ErrorCodes.h"
+#include "../Core/PropertyHash.h"
+#include "../Core/PropertyTypes.h"
+#include "SessionHandle.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Batches high-frequency property updates for efficient network transmission
@@ -61,7 +64,8 @@ namespace EntropyEngine::Networking {
  * });
  * @endcode
  */
-class BatchManager {
+class BatchManager
+{
 public:
     /**
      * @brief Construct a batch manager for a network session
@@ -110,7 +114,9 @@ public:
     /**
      * @brief Get current batch interval
      */
-    uint32_t getBatchInterval() const { return _batchIntervalMs; }
+    uint32_t getBatchInterval() const {
+        return _batchIntervalMs;
+    }
 
     /**
      * @brief Get number of pending updates waiting to be batched
@@ -120,11 +126,12 @@ public:
     /**
      * @brief Get statistics
      */
-    struct Stats {
+    struct Stats
+    {
         uint64_t totalBatchesSent{0};
         uint64_t totalUpdatesSent{0};
-        uint64_t batchesDropped{0};      // Due to backpressure
-        uint64_t updatesDeduped{0};       // Same property updated multiple times
+        uint64_t batchesDropped{0};  // Due to backpressure
+        uint64_t updatesDeduped{0};  // Same property updated multiple times
         uint64_t averageBatchSize{0};
         uint32_t currentBatchInterval{0};
     };
@@ -137,7 +144,8 @@ public:
     void setOnBatchDropped(std::function<void(size_t)> callback);
 
 private:
-    struct PendingUpdate {
+    struct PendingUpdate
+    {
         PropertyType type;
         PropertyValue value;
         std::chrono::steady_clock::time_point timestamp;
@@ -145,7 +153,7 @@ private:
 
     void adjustBatchRate();
 
-    SessionHandle _session;          // Session handle
+    SessionHandle _session;  // Session handle
 
     // Pending updates (keyed by property hash)
     std::unordered_map<PropertyHash, PendingUpdate> _pendingUpdates;
@@ -153,7 +161,7 @@ private:
 
     // Batch scheduling
     uint32_t _batchIntervalMs;
-    std::atomic<uint32_t> _dynamicIntervalMs; // Adjusted for backpressure
+    std::atomic<uint32_t> _dynamicIntervalMs;  // Adjusted for backpressure
 
     // Sequencing
     std::atomic<uint32_t> _sequenceNumber{0};
@@ -163,11 +171,11 @@ private:
     Stats _stats;
 
     // Backpressure tracking
-    std::atomic<uint32_t> _pendingBatchCount{0}; // Batches waiting to send
+    std::atomic<uint32_t> _pendingBatchCount{0};  // Batches waiting to send
     static constexpr uint32_t MAX_PENDING_BATCHES = 3;
 
     // Callbacks
     std::function<void(size_t)> _onBatchDropped;
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

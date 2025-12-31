@@ -19,7 +19,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Configure sanitizers
-if(ENABLE_SANITIZERS)
+# Configure sanitizers
+# Always enable ASAN+UBSAN for Debug builds on minimal supported compilers
+if(ENABLE_SANITIZERS OR (CMAKE_BUILD_TYPE MATCHES "Debug" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU"))
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         # ThreadSanitizer is mutually exclusive with AddressSanitizer
         # To use TSAN instead: cmake -DENABLE_TSAN=ON
@@ -253,6 +255,14 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
+
+# =============================================================================
+# Linting
+# =============================================================================
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntropyLinting.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/EntropyLinting.cmake")
+    entropy_enable_linting(EntropyNetworking)
+endif()
 
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/EntropyNetworkingConfig.cmake"

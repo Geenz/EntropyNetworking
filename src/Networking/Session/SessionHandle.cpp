@@ -8,21 +8,20 @@
  */
 
 #include "SessionHandle.h"
-#include "SessionManager.h"
+
 #include <format>
 
-namespace EntropyEngine::Networking {
+#include "SessionManager.h"
+
+namespace EntropyEngine::Networking
+{
 
 SessionManager* SessionHandle::manager() const {
     return static_cast<SessionManager*>(const_cast<void*>(handleOwner()));
 }
 
-Result<void> SessionHandle::sendEntityCreated(
-    uint64_t entityId,
-    const std::string& appId,
-    const std::string& typeName,
-    uint64_t parentId
-) const {
+Result<void> SessionHandle::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
+                                              uint64_t parentId) const {
     auto* mgr = manager();
     if (!mgr) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
@@ -38,11 +37,7 @@ Result<void> SessionHandle::sendEntityDestroyed(uint64_t entityId) const {
     return mgr->sendEntityDestroyed(*this, entityId);
 }
 
-Result<void> SessionHandle::sendPropertyUpdate(
-    PropertyHash hash,
-    PropertyType type,
-    const PropertyValue& value
-) const {
+Result<void> SessionHandle::sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value) const {
     auto* mgr = manager();
     if (!mgr) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
@@ -125,9 +120,7 @@ bool SessionHandle::valid() const {
 }
 
 uint64_t SessionHandle::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<SessionHandle>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<SessionHandle>().id);
     return hash;
 }
 
@@ -135,12 +128,8 @@ std::string SessionHandle::toString() const {
     if (!hasHandle()) {
         return std::format("{}@{}(invalid)", className(), static_cast<const void*>(this));
     }
-    return std::format("{}@{}(owner={}, idx={}, gen={})",
-                       className(),
-                       static_cast<const void*>(this),
-                       handleOwner(),
-                       handleIndex(),
-                       handleGeneration());
+    return std::format("{}@{}(owner={}, idx={}, gen={})", className(), static_cast<const void*>(this), handleOwner(),
+                       handleIndex(), handleGeneration());
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

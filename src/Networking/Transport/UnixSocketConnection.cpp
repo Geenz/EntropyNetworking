@@ -10,33 +10,33 @@
 #if defined(__unix__) || defined(__APPLE__)
 
 #include "UnixSocketConnection.h"
+
+#include <Logging/Logger.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <arpa/inet.h>
-#include <cstring>
-#include <cstddef>
-#include <chrono>
-#include <cerrno>
-#include "../Core/ConnectionTypes.h"
-#include <Logging/Logger.h>
 
-namespace EntropyEngine::Networking {
+#include <cerrno>
+#include <chrono>
+#include <cstddef>
+#include <cstring>
+
+#include "../Core/ConnectionTypes.h"
+
+namespace EntropyEngine::Networking
+{
 
 // Message framing: [4-byte length][payload]
 static constexpr size_t FRAME_HEADER_SIZE = sizeof(uint32_t);
-static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024; // 16MB
+static constexpr size_t MAX_MESSAGE_SIZE = 16 * 1024 * 1024;  // 16MB
 
-UnixSocketConnection::UnixSocketConnection(std::string socketPath)
-    : _socketPath(std::move(socketPath))
-{
-}
+UnixSocketConnection::UnixSocketConnection(std::string socketPath) : _socketPath(std::move(socketPath)) {}
 
 UnixSocketConnection::UnixSocketConnection(std::string socketPath, const ConnectionConfig* cfg)
-    : _socketPath(std::move(socketPath))
-{
+    : _socketPath(std::move(socketPath)) {
     if (cfg) {
         _connectTimeoutMs = cfg->connectTimeoutMs;
         _sendPollTimeoutMs = cfg->sendPollTimeoutMs;
@@ -49,9 +49,7 @@ UnixSocketConnection::UnixSocketConnection(std::string socketPath, const Connect
 }
 
 UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string peerInfo)
-    : _socketPath(std::move(peerInfo))
-    , _socket(connectedSocketFd)
-{
+    : _socketPath(std::move(peerInfo)), _socket(connectedSocketFd) {
     // Socket is already connected - set it up for our use
 
     // Set non-blocking and preserve FD flags (CLOEXEC)
@@ -75,14 +73,10 @@ UnixSocketConnection::UnixSocketConnection(int connectedSocketFd, std::string pe
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     // Start receive thread
     _shouldStop = false;
@@ -115,7 +109,7 @@ Result<void> UnixSocketConnection::connect() {
         onStateChanged(ConnectionState::Failed);
         ENTROPY_LOG_ERROR(std::string("Failed to create socket: ") + strerror(errno));
         return Result<void>::err(NetworkError::ConnectionClosed,
-            std::string("Failed to create socket: ") + strerror(errno));
+                                 std::string("Failed to create socket: ") + strerror(errno));
     }
 
 #if !defined(SOCK_NONBLOCK) || !defined(SOCK_CLOEXEC)
@@ -155,9 +149,7 @@ Result<void> UnixSocketConnection::connect() {
     strncpy(addr.sun_path, _socketPath.c_str(), sizeof(addr.sun_path) - 1);
 
     // Use BSD-portable sockaddr length for better portability
-    socklen_t addrlen = static_cast<socklen_t>(
-        offsetof(sockaddr_un, sun_path) + std::strlen(addr.sun_path)
-    );
+    socklen_t addrlen = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + std::strlen(addr.sun_path));
 
     if (::connect(_socket, reinterpret_cast<sockaddr*>(&addr), addrlen) < 0) {
         if (errno == EINPROGRESS) {
@@ -174,7 +166,7 @@ Result<void> UnixSocketConnection::connect() {
                 onStateChanged(ConnectionState::Failed);
                 ENTROPY_LOG_ERROR(std::string("Poll failed during connect: ") + strerror(errno));
                 return Result<void>::err(NetworkError::ConnectionClosed,
-                    std::string("Poll failed: ") + strerror(errno));
+                                         std::string("Poll failed: ") + strerror(errno));
             }
 
             if (ret == 0) {
@@ -196,7 +188,7 @@ Result<void> UnixSocketConnection::connect() {
                 onStateChanged(ConnectionState::Failed);
                 ENTROPY_LOG_ERROR(std::string("getsockopt(SO_ERROR) failed: ") + strerror(errno));
                 return Result<void>::err(NetworkError::ConnectionClosed,
-                    std::string("getsockopt failed: ") + strerror(errno));
+                                         std::string("getsockopt failed: ") + strerror(errno));
             }
 
             if (error != 0) {
@@ -206,7 +198,7 @@ Result<void> UnixSocketConnection::connect() {
                 onStateChanged(ConnectionState::Failed);
                 ENTROPY_LOG_ERROR(std::string("Unix socket connect failed: ") + strerror(error));
                 return Result<void>::err(NetworkError::ConnectionClosed,
-                    std::string("Connection failed: ") + strerror(error));
+                                         std::string("Connection failed: ") + strerror(error));
             }
         } else {
             close(_socket);
@@ -215,7 +207,7 @@ Result<void> UnixSocketConnection::connect() {
             onStateChanged(ConnectionState::Failed);
             ENTROPY_LOG_ERROR(std::string("Failed to connect: ") + strerror(errno));
             return Result<void>::err(NetworkError::ConnectionClosed,
-                std::string("Failed to connect: ") + strerror(errno));
+                                     std::string("Failed to connect: ") + strerror(errno));
         }
     }
 
@@ -225,14 +217,10 @@ Result<void> UnixSocketConnection::connect() {
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     // Start receive thread
     _shouldStop = false;
@@ -321,7 +309,7 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
     size_t hdrSent = 0;
     int retryCount = 0;
     const int MAX_RETRIES = 100;
-    ssize_t sent; // Declare outside both loops
+    ssize_t sent;  // Declare outside both loops
 
     while (hdrSent < sizeof(lengthBE)) {
         sent = ::send(_socket, hdrPtr + hdrSent, sizeof(lengthBE) - hdrSent, sendFlags);
@@ -335,7 +323,7 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
                 int ret = poll(&pfd, 1, _sendPollTimeoutMs);
                 if (ret < 0) {
                     return Result<void>::err(NetworkError::ConnectionClosed,
-                        std::string("Poll failed during header send: ") + strerror(errno));
+                                             std::string("Poll failed during header send: ") + strerror(errno));
                 }
                 if (ret == 0) {
                     if (++retryCount > _sendMaxPolls) {
@@ -346,15 +334,15 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
                 continue;
             }
             return Result<void>::err(NetworkError::ConnectionClosed,
-                std::string("Failed to send frame header: ") + strerror(errno));
+                                     std::string("Failed to send frame header: ") + strerror(errno));
         }
         hdrSent += static_cast<size_t>(sent);
-        retryCount = 0; // Reset retry count on successful send
+        retryCount = 0;  // Reset retry count on successful send
     }
 
     // Send payload with proper EAGAIN handling
     size_t totalSent = 0;
-    retryCount = 0; // Reset for payload send
+    retryCount = 0;  // Reset for payload send
 
     while (totalSent < data.size()) {
         sent = ::send(_socket, data.data() + totalSent, data.size() - totalSent, sendFlags);
@@ -369,7 +357,7 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
                 if (ret < 0) {
                     ENTROPY_LOG_ERROR(std::string("Poll failed during send: ") + strerror(errno));
                     return Result<void>::err(NetworkError::ConnectionClosed,
-                        std::string("Poll failed during send: ") + strerror(errno));
+                                             std::string("Poll failed during send: ") + strerror(errno));
                 }
                 if (ret == 0) {
                     if (++retryCount > _sendMaxPolls) {
@@ -381,20 +369,18 @@ Result<void> UnixSocketConnection::sendInternal(const std::vector<uint8_t>& data
             }
             ENTROPY_LOG_ERROR(std::string("Failed to send data: ") + strerror(errno));
             return Result<void>::err(NetworkError::ConnectionClosed,
-                std::string("Failed to send data: ") + strerror(errno));
+                                     std::string("Failed to send data: ") + strerror(errno));
         }
         totalSent += sent;
-        retryCount = 0; // Reset retry count on successful send
+        retryCount = 0;  // Reset retry count on successful send
     }
 
     // Update stats atomically
     _bytesSent.fetch_add(FRAME_HEADER_SIZE + data.size(), std::memory_order_relaxed);
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
     auto now2 = std::chrono::system_clock::now();
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now2.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now2.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     return Result<void>::ok();
 }
@@ -450,8 +436,7 @@ void UnixSocketConnection::receiveLoop() {
             auto now3 = std::chrono::system_clock::now();
             _lastActivityTime.store(
                 std::chrono::duration_cast<std::chrono::milliseconds>(now3.time_since_epoch()).count(),
-                std::memory_order_release
-            );
+                std::memory_order_release);
         }
 
         // Process received data
@@ -468,9 +453,7 @@ void UnixSocketConnection::receiveLoop() {
                 size_t available = received - offset;
                 size_t toCopy = std::min(needed, available);
 
-                messageBuffer.insert(messageBuffer.end(),
-                                   buffer.begin() + offset,
-                                   buffer.begin() + offset + toCopy);
+                messageBuffer.insert(messageBuffer.end(), buffer.begin() + offset, buffer.begin() + offset + toCopy);
                 offset += toCopy;
 
                 if (messageBuffer.size() == FRAME_HEADER_SIZE) {
@@ -494,9 +477,7 @@ void UnixSocketConnection::receiveLoop() {
                 size_t available = received - offset;
                 size_t toCopy = std::min(needed, available);
 
-                messageBuffer.insert(messageBuffer.end(),
-                                   buffer.begin() + offset,
-                                   buffer.begin() + offset + toCopy);
+                messageBuffer.insert(messageBuffer.end(), buffer.begin() + offset, buffer.begin() + offset + toCopy);
                 offset += toCopy;
 
                 if (messageBuffer.size() == expectedLength) {
@@ -531,6 +512,6 @@ ConnectionStats UnixSocketConnection::getStats() const {
     return stats;
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // defined(__unix__) || defined(__APPLE__)
+#endif  // defined(__unix__) || defined(__APPLE__)

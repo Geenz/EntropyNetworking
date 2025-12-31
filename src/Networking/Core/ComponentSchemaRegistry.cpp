@@ -8,29 +8,27 @@
  */
 
 #include "ComponentSchemaRegistry.h"
+
 #include <Logging/Logger.h>
+
 #include <algorithm>
 #include <format>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 Result<ComponentTypeHash> ComponentSchemaRegistry::registerSchema(const ComponentSchema& schema) {
     // Pre-lock validation
     if (schema.typeHash.isNull()) {
         ENTROPY_LOG_ERROR("Cannot register schema with null type hash");
-        return Result<ComponentTypeHash>::err(
-            NetworkError::InvalidParameter,
-            "Schema type hash is null"
-        );
+        return Result<ComponentTypeHash>::err(NetworkError::InvalidParameter, "Schema type hash is null");
     }
 
     if (schema.structuralHash.isNull()) {
         ENTROPY_LOG_ERROR("Cannot register schema with null structural hash");
-        return Result<ComponentTypeHash>::err(
-            NetworkError::InvalidParameter,
-            "Schema structural hash is null"
-        );
+        return Result<ComponentTypeHash>::err(NetworkError::InvalidParameter, "Schema structural hash is null");
     }
 
     // Acquire write lock
@@ -42,25 +40,19 @@ Result<ComponentTypeHash> ComponentSchemaRegistry::registerSchema(const Componen
         // Schema already registered - check if it's identical (idempotent)
         const auto& existing = it->second;
 
-        if (existing.structuralHash == schema.structuralHash &&
-            existing.appId == schema.appId &&
-            existing.componentName == schema.componentName &&
-            existing.schemaVersion == schema.schemaVersion) {
+        if (existing.structuralHash == schema.structuralHash && existing.appId == schema.appId &&
+            existing.componentName == schema.componentName && existing.schemaVersion == schema.schemaVersion) {
             // Identical schema - idempotent registration
             ENTROPY_LOG_DEBUG_CAT("ComponentSchemaRegistry",
-                std::format("Schema {}.{} v{} already registered (idempotent)",
-                    schema.appId, schema.componentName, schema.schemaVersion));
+                                  std::format("Schema {}.{} v{} already registered (idempotent)", schema.appId,
+                                              schema.componentName, schema.schemaVersion));
             return Result<ComponentTypeHash>::ok(schema.typeHash);
         } else {
             // Different schema with same type hash - conflict
             std::string errorMsg = std::format(
-                "Schema conflict: type hash {} already registered with different content",
-                toString(schema.typeHash));
+                "Schema conflict: type hash {} already registered with different content", toString(schema.typeHash));
             ENTROPY_LOG_ERROR_CAT("ComponentSchemaRegistry", errorMsg);
-            return Result<ComponentTypeHash>::err(
-                NetworkError::SchemaAlreadyExists,
-                errorMsg
-            );
+            return Result<ComponentTypeHash>::err(NetworkError::SchemaAlreadyExists, errorMsg);
         }
     }
 
@@ -75,10 +67,9 @@ Result<ComponentTypeHash> ComponentSchemaRegistry::registerSchema(const Componen
         _publicSchemas.insert(schema.typeHash);
     }
 
-    std::string logMsg = std::format(
-        "Registered schema {}.{} v{} (public: {}, properties: {})",
-        schema.appId, schema.componentName, schema.schemaVersion,
-        schema.isPublic, schema.properties.size());
+    std::string logMsg =
+        std::format("Registered schema {}.{} v{} (public: {}, properties: {})", schema.appId, schema.componentName,
+                    schema.schemaVersion, schema.isPublic, schema.properties.size());
     ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
 
     return Result<ComponentTypeHash>::ok(schema.typeHash);
@@ -111,9 +102,7 @@ std::vector<ComponentSchema> ComponentSchemaRegistry::getPublicSchemas() const {
     return publicSchemas;
 }
 
-std::vector<ComponentTypeHash> ComponentSchemaRegistry::findCompatibleSchemas(
-    ComponentTypeHash typeHash) const
-{
+std::vector<ComponentTypeHash> ComponentSchemaRegistry::findCompatibleSchemas(ComponentTypeHash typeHash) const {
     std::shared_lock<std::shared_mutex> lock(_mutex);
 
     // Find the schema
@@ -158,10 +147,8 @@ bool ComponentSchemaRegistry::areCompatible(ComponentTypeHash a, ComponentTypeHa
     return aIt->second.isStructurallyCompatible(bIt->second);
 }
 
-Result<void> ComponentSchemaRegistry::validateDetailedCompatibility(
-    ComponentTypeHash source,
-    ComponentTypeHash target) const
-{
+Result<void> ComponentSchemaRegistry::validateDetailedCompatibility(ComponentTypeHash source,
+                                                                    ComponentTypeHash target) const {
     std::shared_lock<std::shared_mutex> lock(_mutex);
 
     // Find source schema
@@ -220,9 +207,8 @@ Result<void> ComponentSchemaRegistry::publishSchema(ComponentTypeHash typeHash) 
         // Update schema's isPublic flag
         it->second.isPublic = true;
 
-        std::string logMsg = std::format(
-            "Published schema {}.{} v{}",
-            it->second.appId, it->second.componentName, it->second.schemaVersion);
+        std::string logMsg = std::format("Published schema {}.{} v{}", it->second.appId, it->second.componentName,
+                                         it->second.schemaVersion);
         ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
 
         // Copy callback and schema for invocation outside lock
@@ -267,9 +253,8 @@ Result<void> ComponentSchemaRegistry::unpublishSchema(ComponentTypeHash typeHash
         // Update schema's isPublic flag
         it->second.isPublic = false;
 
-        std::string logMsg = std::format(
-            "Unpublished schema {}.{} v{}",
-            it->second.appId, it->second.componentName, it->second.schemaVersion);
+        std::string logMsg = std::format("Unpublished schema {}.{} v{}", it->second.appId, it->second.componentName,
+                                         it->second.schemaVersion);
         ENTROPY_LOG_INFO_CAT("ComponentSchemaRegistry", logMsg);
 
         // Copy callback for invocation outside lock
@@ -322,5 +307,5 @@ void ComponentSchemaRegistry::setSchemaUnpublishedCallback(SchemaUnpublishedCall
     _schemaUnpublishedCallback = std::move(callback);
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

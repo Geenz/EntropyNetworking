@@ -12,7 +12,8 @@
 #include "../Core/PropertyHash.h"
 #include "entropy.capnp.h"
 
-namespace EntropyEngine::Networking::Wire {
+namespace EntropyEngine::Networking::Wire
+{
 
 /**
  * @brief Convert PropertyHash to Cap'n Proto PropertyHash128 builder
@@ -33,4 +34,4 @@ inline PropertyHash fromCapnp(::PropertyHash128::Reader r) {
     return PropertyHash{r.getHigh(), r.getLow()};
 }
 
-} // namespace EntropyEngine::Networking::Wire
+}  // namespace EntropyEngine::Networking::Wire

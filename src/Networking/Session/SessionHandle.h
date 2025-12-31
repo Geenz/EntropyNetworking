@@ -18,14 +18,17 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "../Transport/ConnectionHandle.h"
-#include "../Core/PropertyRegistry.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
+
 #include <cstdint>
 #include <string>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ErrorCodes.h"
+#include "../Core/PropertyRegistry.h"
+#include "../Transport/ConnectionHandle.h"
+
+namespace EntropyEngine::Networking
+{
 
 // Forward declaration
 class SessionManager;
@@ -62,7 +65,8 @@ class SessionManager;
  * sess.sendEntityCreated(entityId, appId, typeName, parentId);
  * @endcode
  */
-class SessionHandle : public Core::EntropyObject {
+class SessionHandle : public Core::EntropyObject
+{
 private:
     friend class SessionManager;
 
@@ -78,10 +82,8 @@ public:
     // Copy constructor: create a new handle object stamped with the same identity
     SessionHandle(const SessionHandle& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -89,10 +91,8 @@ public:
     SessionHandle& operator=(const SessionHandle& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -103,10 +103,8 @@ public:
     // Move constructor
     SessionHandle(SessionHandle&& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -114,10 +112,8 @@ public:
     SessionHandle& operator=(SessionHandle&& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -137,12 +133,8 @@ public:
      * @param parentId Parent entity ID (0 for root)
      * @return Result indicating success or failure
      */
-    Result<void> sendEntityCreated(
-        uint64_t entityId,
-        const std::string& appId,
-        const std::string& typeName,
-        uint64_t parentId
-    ) const;
+    Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
+                                   uint64_t parentId) const;
 
     /**
      * @brief Sends EntityDestroyed protocol message
@@ -162,11 +154,7 @@ public:
      * @param value Property value
      * @return Result indicating success or failure
      */
-    Result<void> sendPropertyUpdate(
-        PropertyHash hash,
-        PropertyType type,
-        const PropertyValue& value
-    ) const;
+    Result<void> sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value) const;
 
     /**
      * @brief Sends batched property updates
@@ -261,7 +249,9 @@ public:
     bool valid() const;
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "SessionHandle"; }
+    const char* className() const noexcept override {
+        return "SessionHandle";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -269,4 +259,4 @@ private:
     SessionManager* manager() const;
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

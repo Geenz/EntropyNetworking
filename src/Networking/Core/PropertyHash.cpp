@@ -8,33 +8,29 @@
  */
 
 #include "PropertyHash.h"
+
 #include <openssl/sha.h>
-#include <sstream>
+
 #include <iomanip>
+#include <sstream>
 
-namespace EntropyEngine {
-namespace Networking {
-
-PropertyHash computePropertyHash(
-    uint64_t entityId,
-    ComponentTypeHash componentType,
-    const std::string& propertyName)
+namespace EntropyEngine
 {
+namespace Networking
+{
+
+PropertyHash computePropertyHash(uint64_t entityId, ComponentTypeHash componentType, const std::string& propertyName) {
     // Build canonical string: {entityId}:{componentTypeHex}:{propertyName}
     // Format: "12345:1234567890abcdeffedcba0987654321:health"
     std::ostringstream oss;
-    oss << entityId << ":"
-        << std::hex << std::setfill('0')
-        << std::setw(16) << componentType.high
-        << std::setw(16) << componentType.low
-        << ":" << propertyName;
+    oss << entityId << ":" << std::hex << std::setfill('0') << std::setw(16) << componentType.high << std::setw(16)
+        << componentType.low << ":" << propertyName;
 
     std::string canonical = oss.str();
 
     // Hash the UTF-8 bytes
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()),
-           canonical.size(), hash);
+    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()), canonical.size(), hash);
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;
@@ -53,5 +49,5 @@ PropertyHash computePropertyHash(
     return PropertyHash{high, low};
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

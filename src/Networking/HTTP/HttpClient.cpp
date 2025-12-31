@@ -8,25 +8,26 @@
  */
 
 #include "Networking/HTTP/HttpClient.h"
-#include <string>
-#include <algorithm>
-#include <sstream>
-#include <cctype>
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
 
-namespace EntropyEngine::Networking::HTTP {
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <sstream>
+#include <string>
+
+namespace EntropyEngine::Networking::HTTP
+{
 
 // Global libcurl initialization (thread-safe, one-time)
 void HttpClient::initGlobalCurl() {
     static std::once_flag initFlag;
-    std::call_once(initFlag, []() {
-        curl_global_init(CURL_GLOBAL_ALL);
-    });
+    std::call_once(initFlag, []() { curl_global_init(CURL_GLOBAL_ALL); });
 }
 
-namespace {
+namespace
+{
 // libcurl share locking callbacks
 static void curlShareLock(CURL* /*handle*/, curl_lock_data data, curl_lock_access /*access*/, void* userptr) {
     auto* locks = static_cast<std::array<std::mutex, CURL_LOCK_DATA_LAST>*>(userptr);
@@ -36,10 +37,9 @@ static void curlShareUnlock(CURL* /*handle*/, curl_lock_data data, void* userptr
     auto* locks = static_cast<std::array<std::mutex, CURL_LOCK_DATA_LAST>*>(userptr);
     (*locks)[data].unlock();
 }
-}
+}  // namespace
 
-HttpClient::HttpClient()
-    : _connectionShare(nullptr) {
+HttpClient::HttpClient() : _connectionShare(nullptr) {
     initGlobalCurl();
 
     // Default proxy resolver (env + system) - initialized under mutex for thread safety
@@ -101,10 +101,11 @@ size_t HttpClient::writeCallback(char* data, size_t size, size_t nmemb, void* us
 
     if (respData->cap && respData->body.size() + totalSize > respData->cap) {
         respData->abortedByCap = true;
-        return 0; // abort transfer
+        return 0;  // abort transfer
     }
 
-    respData->body.insert(respData->body.end(), reinterpret_cast<uint8_t*>(data), reinterpret_cast<uint8_t*>(data) + totalSize);
+    respData->body.insert(respData->body.end(), reinterpret_cast<uint8_t*>(data),
+                          reinterpret_cast<uint8_t*>(data) + totalSize);
 
     return totalSize;
 }
@@ -132,8 +133,7 @@ size_t HttpClient::headerCallback(char* data, size_t size, size_t nmemb, void* u
         value.erase(value.find_last_not_of(" \t\r\n") + 1);
 
         // Convert name to lowercase for consistent lookups
-        std::transform(name.begin(), name.end(), name.begin(),
-                      [](unsigned char c){ return std::tolower(c); });
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
 
         // Store last-seen value for convenience
         respData->headers[name] = value;
@@ -160,24 +160,33 @@ static void applyProxyIfAny(CURL* curl, ProxyResolver* resolver, const HttpReque
     uint16_t port = (req.scheme == "https") ? 443 : 80;
     auto pos = host.rfind(':');
     if (pos != std::string::npos && host.find(':') == pos) {
-        try { port = static_cast<uint16_t>(std::stoi(host.substr(pos+1))); } catch (...) {}
+        try {
+            port = static_cast<uint16_t>(std::stoi(host.substr(pos + 1)));
+        } catch (...) {
+        }
         host = host.substr(0, pos);
     }
     ProxyResult pr = resolver->resolve(req.scheme, host, port);
     if (pr.type == ProxyResult::Type::Direct) return;
     curl_easy_setopt(curl, CURLOPT_PROXY, pr.url.c_str());
     switch (pr.type) {
-        case ProxyResult::Type::Http:   curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP); break;
-        case ProxyResult::Type::Socks4: curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS4); break;
-        case ProxyResult::Type::Socks5: curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5); break;
-        default: break;
+        case ProxyResult::Type::Http:
+            curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
+            break;
+        case ProxyResult::Type::Socks4:
+            curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS4);
+            break;
+        case ProxyResult::Type::Socks5:
+            curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
+            break;
+        default:
+            break;
     }
     curl_easy_setopt(curl, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
 }
 
-void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
-                                        const RequestOptions& opts, ResponseData& respData,
-                                        struct curl_slist* headers) {
+void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req, const RequestOptions& opts,
+                                     ResponseData& respData, struct curl_slist* headers) {
     // Build full URL from structured fields
     std::string path = req.path.empty() ? "/" : (req.path[0] == '/' ? req.path : std::string("/") + req.path);
     std::string url = req.scheme + "://" + req.host + path;
@@ -303,10 +312,11 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
     // Approximate idle/write timeouts via low-speed options
     long lowSpeedTimeSec = 0;
     if (opts.readIdleTimeout.count() > 0) {
-        lowSpeedTimeSec = std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.readIdleTimeout.count()/1000)));
+        lowSpeedTimeSec =
+            std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.readIdleTimeout.count() / 1000)));
     }
     if (opts.writeTimeout.count() > 0) {
-        lowSpeedTimeSec = std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.writeTimeout.count()/1000)));
+        lowSpeedTimeSec = std::max<long>(lowSpeedTimeSec, std::max<long>(1, (long)(opts.writeTimeout.count() / 1000)));
         // Also limit time waiting for 100-continue handshake when Expect is enabled
 #ifdef CURLOPT_EXPECT_100_TIMEOUT_MS
         if (opts.expect100Continue) {
@@ -315,7 +325,7 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
 #endif
     }
     if (lowSpeedTimeSec > 0) {
-        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L); // bytes/sec
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);  // bytes/sec
         curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, lowSpeedTimeSec);
     }
 
@@ -334,7 +344,9 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
     respData.cap = opts.maxResponseBytes;
 
     // Follow redirects: default ON for safe methods (GET/HEAD/PROPFIND/OPTIONS) unless explicitly disabled
-    auto isSafe = [](HttpMethod m){ return m==HttpMethod::GET || m==HttpMethod::HEAD || m==HttpMethod::PROPFIND || m==HttpMethod::OPTIONS; };
+    auto isSafe = [](HttpMethod m) {
+        return m == HttpMethod::GET || m == HttpMethod::HEAD || m == HttpMethod::PROPFIND || m == HttpMethod::OPTIONS;
+    };
     bool follow = opts.followRedirects || isSafe(req.method);
     if (follow) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -357,7 +369,9 @@ void HttpClient::configureCurlHandle(CURL* curl, const HttpRequest& req,
 }
 
 HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& opts) {
-    auto isIdempotent = [](HttpMethod m){ return m==HttpMethod::GET || m==HttpMethod::HEAD || m==HttpMethod::PROPFIND || m==HttpMethod::OPTIONS; };
+    auto isIdempotent = [](HttpMethod m) {
+        return m == HttpMethod::GET || m == HttpMethod::HEAD || m == HttpMethod::PROPFIND || m == HttpMethod::OPTIONS;
+    };
     int attempts = (opts.enableRetries && isIdempotent(req.method)) ? (opts.maxRetries + 1) : 1;
 
     HttpResponse finalResp;
@@ -412,20 +426,24 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
         }
 
         // Streaming upload support for aggregated execute(): provide read callback when requested
-        struct UploadSource { std::function<size_t(char*, size_t)> read; } uploadSrc;
+        struct UploadSource
+        {
+            std::function<size_t(char*, size_t)> read;
+        } uploadSrc;
         bool useStreamingUpload = static_cast<bool>(opts.uploadRead);
         if (useStreamingUpload && (req.method == HttpMethod::PUT || req.method == HttpMethod::POST)) {
-            uploadSrc.read = opts.uploadRead; // copy function
+            uploadSrc.read = opts.uploadRead;  // copy function
             // Set read callback
-            curl_easy_setopt(curl, CURLOPT_READFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
-                auto* src = static_cast<UploadSource*>(userdata);
-                size_t max = size * nmemb;
-                return src->read ? src->read(ptr, max) : 0; // 0 = EOF
-            });
+            curl_easy_setopt(
+                curl, CURLOPT_READFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
+                    auto* src = static_cast<UploadSource*>(userdata);
+                    size_t max = size * nmemb;
+                    return src->read ? src->read(ptr, max) : 0;  // 0 = EOF
+                });
             curl_easy_setopt(curl, CURLOPT_READDATA, &uploadSrc);
 
             if (req.method == HttpMethod::PUT) {
-                curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L); // PUT upload
+                curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);  // PUT upload
                 // Some servers expect explicit PUT
                 curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
             } else if (req.method == HttpMethod::POST) {
@@ -477,14 +495,18 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
 
         // Optional metrics logging
         if (std::getenv("ENTROPY_HTTP_METRICS")) {
-            long httpVer = 0; curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &httpVer);
-            curl_off_t szUp=0, szDn=0, totalMs=0; long redirects=0;
+            long httpVer = 0;
+            curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &httpVer);
+            curl_off_t szUp = 0, szDn = 0, totalMs = 0;
+            long redirects = 0;
             curl_easy_getinfo(curl, CURLINFO_SIZE_UPLOAD_T, &szUp);
             curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &szDn);
             curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &totalMs);
             curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &redirects);
-            fprintf(stderr, "[EntropyHTTP] method=%d status=%d up=%lld down=%lld totalMs=%lld redirects=%ld httpVer=%ld\n",
-                (int)req.method, response.statusCode, (long long)szUp, (long long)szDn, (long long)totalMs, redirects, httpVer);
+            fprintf(stderr,
+                    "[EntropyHTTP] method=%d status=%d up=%lld down=%lld totalMs=%lld redirects=%ld httpVer=%ld\n",
+                    (int)req.method, response.statusCode, (long long)szUp, (long long)szDn, (long long)totalMs,
+                    redirects, httpVer);
         }
 
         // Cleanup per attempt
@@ -518,7 +540,7 @@ HttpResponse HttpClient::execute(const HttpRequest& req, const RequestOptions& o
         }
         if (delayMs == 0) {
             uint64_t base = (uint64_t)std::max(0, opts.retryBackoffBaseMs);
-            uint64_t cap  = (uint64_t)std::max(0, opts.retryBackoffCapMs);
+            uint64_t cap = (uint64_t)std::max(0, opts.retryBackoffCapMs);
             uint64_t backoff = base * (1u << attempt);
             if (cap > 0 && backoff > cap) backoff = cap;
             // jitter: 50%-100%
@@ -557,14 +579,14 @@ size_t HttpClient::streamWriteCallback(char* data, size_t size, size_t nmemb, vo
         state->failed = true;
         state->failureReason = "response exceeds maximum size";
         state->cv.notify_all();
-        return 0; // abort transfer
+        return 0;  // abort transfer
     }
 
     // Check buffer capacity - pause if full (backpressure)
     if (state->size + totalSize > state->capacity) {
         state->paused = true;
         state->cv.notify_all();
-        return CURL_WRITEFUNC_PAUSE; // pause transfer, will resume when consumer frees space
+        return CURL_WRITEFUNC_PAUSE;  // pause transfer, will resume when consumer frees space
     }
 
     // Write to ring buffer (may wrap around)
@@ -622,8 +644,7 @@ size_t HttpClient::streamHeaderCallback(char* data, size_t size, size_t nmemb, v
         value.erase(value.find_last_not_of(" \t\r\n") + 1);
 
         // Lowercase name
-        std::transform(name.begin(), name.end(), name.begin(),
-                      [](unsigned char c){ return std::tolower(c); });
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
 
         std::lock_guard<std::mutex> lock(state->mutex);
         // Store last-seen value for convenience
@@ -636,7 +657,8 @@ size_t HttpClient::streamHeaderCallback(char* data, size_t size, size_t nmemb, v
 }
 
 // Progress callback used to support cancellation of streaming transfers
-static int xferInfoCallback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
+static int xferInfoCallback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/,
+                            curl_off_t /*ulnow*/) {
     auto* state = static_cast<StreamState*>(clientp);
 
     // Handle cancellation and (if needed) resume on the worker thread
@@ -647,14 +669,14 @@ static int xferInfoCallback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*
         if (state->cancelRequested) {
             state->failed = true;
             if (state->failureReason.empty()) state->failureReason = "cancelled";
-            return 1; // abort transfer
+            return 1;  // abort transfer
         }
         if (state->paused && state->resumeRequested && !state->failed && !state->done && state->easy != nullptr) {
             // Only resume if there is room in the buffer now
             if (state->size < state->capacity) {
                 doResume = true;
                 easyLocal = state->easy;
-                state->resumeRequested = false; // consume the request
+                state->resumeRequested = false;  // consume the request
             }
         }
     }
@@ -665,9 +687,8 @@ static int xferInfoCallback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*
     return 0;
 }
 
-void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
-                                          const StreamOptions& opts, StreamState& state,
-                                          struct curl_slist* headers) {
+void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req, const StreamOptions& opts,
+                                           StreamState& state, struct curl_slist* headers) {
     // Build URL
     std::string path = req.path.empty() ? "/" : (req.path[0] == '/' ? req.path : std::string("/") + req.path);
     std::string url = req.scheme + "://" + req.host + path;
@@ -679,7 +700,7 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
         std::lock_guard<std::mutex> lock(_shareMutex);
         resolver = _proxyResolver.get();
     }
-    RequestOptions proxyOpts; // default (Auto), no explicit proxy
+    RequestOptions proxyOpts;  // default (Auto), no explicit proxy
     applyProxyIfAny(curl, resolver, req, proxyOpts);
 
     // HTTP method (streaming typically GET)
@@ -747,7 +768,7 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
     // Follow redirects by default for streaming GET
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
- 
+
     // Debug
     if (std::getenv("ENTROPY_HTTP_DEBUG")) {
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
@@ -756,7 +777,7 @@ void HttpClient::configureStreamCurlHandle(CURL* curl, const HttpRequest& req,
 
 StreamHandle HttpClient::executeStream(const HttpRequest& req, const StreamOptions& opts) {
     auto state = std::make_shared<StreamState>();
-    state->capacity = std::max<size_t>(opts.bufferBytes, 64 * 1024); // min 64 KB
+    state->capacity = std::max<size_t>(opts.bufferBytes, 64 * 1024);  // min 64 KB
     state->buffer.resize(state->capacity);
     state->maxBodyBytes = opts.maxBodyBytes;
 
@@ -833,9 +854,7 @@ size_t StreamHandle::read(uint8_t* buffer, size_t size) {
     std::unique_lock<std::mutex> lock(_state->mutex);
 
     // Wait for data or completion
-    _state->cv.wait(lock, [this]() {
-        return _state->size > 0 || _state->done || _state->failed;
-    });
+    _state->cv.wait(lock, [this]() { return _state->size > 0 || _state->done || _state->failed; });
 
     if (_state->failed) {
         return 0;
@@ -844,7 +863,7 @@ size_t StreamHandle::read(uint8_t* buffer, size_t size) {
     // Read up to size bytes from ring buffer
     size_t toRead = std::min(size, _state->size);
     if (toRead == 0) {
-        return 0; // No data available and stream done
+        return 0;  // No data available and stream done
     }
 
     // Copy from ring buffer (may wrap)
@@ -866,7 +885,7 @@ size_t StreamHandle::read(uint8_t* buffer, size_t size) {
         _state->resumeRequested = true;
     }
 
-    _state->cv.notify_all(); // Notify writer that space is available
+    _state->cv.notify_all();  // Notify writer that space is available
 
     lock.unlock();
 
@@ -905,9 +924,7 @@ HttpHeaderValuesMap StreamHandle::getHeadersMulti() const {
 
 bool StreamHandle::waitForHeaders(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(_state->mutex);
-    return _state->cv.wait_for(lock, timeout, [this]() {
-        return _state->headersReady || _state->failed;
-    });
+    return _state->cv.wait_for(lock, timeout, [this]() { return _state->headersReady || _state->failed; });
 }
 
 void StreamHandle::cancel() {
@@ -917,4 +934,4 @@ void StreamHandle::cancel() {
     _state->cv.notify_all();
 }
 
-} // namespace EntropyEngine::Networking::HTTP
+}  // namespace EntropyEngine::Networking::HTTP

@@ -8,25 +8,17 @@
  */
 
 #include <gtest/gtest.h>
+
 #include "../src/Networking/Core/ComponentSchema.h"
 
 using namespace EntropyEngine::Networking;
 
 TEST(ComponentSchemaTests, Create_ValidSchema) {
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"rotation", PropertyType::Quat, 12, 16},
-        {"scale", PropertyType::Vec3, 28, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12},
+                                                  {"rotation", PropertyType::Quat, 12, 16},
+                                                  {"scale", PropertyType::Vec3, 28, 12}};
 
-    auto result = ComponentSchema::create(
-        "TestApp",
-        "Transform",
-        1,
-        properties,
-        40,
-        false
-    );
+    auto result = ComponentSchema::create("TestApp", "Transform", 1, properties, 40, false);
 
     ASSERT_TRUE(result.success());
     EXPECT_EQ(result.value.appId, "TestApp");
@@ -42,24 +34,15 @@ TEST(ComponentSchemaTests, Create_ValidSchema) {
 TEST(ComponentSchemaTests, Create_EmptyProperties) {
     std::vector<PropertyDefinition> properties;
 
-    auto result = ComponentSchema::create(
-        "TestApp",
-        "Empty",
-        1,
-        properties,
-        0,
-        false
-    );
+    auto result = ComponentSchema::create("TestApp", "Empty", 1, properties, 0, false);
 
     EXPECT_TRUE(result.failed());
     EXPECT_EQ(result.error, NetworkError::InvalidParameter);
 }
 
 TEST(ComponentSchemaTests, ComputeStructuralHash_Deterministic) {
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12},
+                                                  {"velocity", PropertyType::Vec3, 12, 12}};
 
     auto hash1 = ComponentSchema::computeStructuralHash(properties);
     auto hash2 = ComponentSchema::computeStructuralHash(properties);
@@ -68,15 +51,11 @@ TEST(ComponentSchemaTests, ComputeStructuralHash_Deterministic) {
 }
 
 TEST(ComponentSchemaTests, ComputeStructuralHash_DifferentOrder) {
-    std::vector<PropertyDefinition> properties1 = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}
-    };
+    std::vector<PropertyDefinition> properties1 = {{"position", PropertyType::Vec3, 0, 12},
+                                                   {"velocity", PropertyType::Vec3, 12, 12}};
 
-    std::vector<PropertyDefinition> properties2 = {
-        {"velocity", PropertyType::Vec3, 12, 12},
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties2 = {{"velocity", PropertyType::Vec3, 12, 12},
+                                                   {"position", PropertyType::Vec3, 0, 12}};
 
     auto hash1 = ComponentSchema::computeStructuralHash(properties1);
     auto hash2 = ComponentSchema::computeStructuralHash(properties2);
@@ -87,9 +66,7 @@ TEST(ComponentSchemaTests, ComputeStructuralHash_DifferentOrder) {
 }
 
 TEST(ComponentSchemaTests, ComputeTypeHash_UniquePerVersion) {
-    std::vector<PropertyDefinition> properties = {
-        {"field", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> properties = {{"field", PropertyType::Int32, 0, 4}};
 
     auto structuralHash = ComponentSchema::computeStructuralHash(properties);
 
@@ -101,9 +78,7 @@ TEST(ComponentSchemaTests, ComputeTypeHash_UniquePerVersion) {
 }
 
 TEST(ComponentSchemaTests, StructuralCompatibility_Identical) {
-    std::vector<PropertyDefinition> properties = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto result1 = ComponentSchema::create("App1", "Transform", 1, properties, 12, false);
     auto result2 = ComponentSchema::create("App2", "Transform", 1, properties, 12, false);
@@ -116,9 +91,7 @@ TEST(ComponentSchemaTests, StructuralCompatibility_Identical) {
 }
 
 TEST(ComponentSchemaTests, StructuralCompatibility_Different) {
-    std::vector<PropertyDefinition> properties1 = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> properties1 = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> properties2 = {
         {"position", PropertyType::Vec4, 0, 16}  // Different type
@@ -136,14 +109,10 @@ TEST(ComponentSchemaTests, StructuralCompatibility_Different) {
 
 TEST(ComponentSchemaTests, CanReadFrom_Subset) {
     // Source has more fields than target
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12},
+                                                   {"velocity", PropertyType::Vec3, 12, 12}};
 
-    std::vector<PropertyDefinition> targetProps = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> targetProps = {{"position", PropertyType::Vec3, 0, 12}};
 
     auto source = ComponentSchema::create("App", "Physics", 1, sourceProps, 24, false);
     auto target = ComponentSchema::create("App", "Transform", 1, targetProps, 12, false);
@@ -158,14 +127,10 @@ TEST(ComponentSchemaTests, CanReadFrom_Subset) {
 
 TEST(ComponentSchemaTests, CanReadFrom_Superset) {
     // Target has more fields than source
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12}};
 
-    std::vector<PropertyDefinition> targetProps = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"velocity", PropertyType::Vec3, 12, 12}
-    };
+    std::vector<PropertyDefinition> targetProps = {{"position", PropertyType::Vec3, 0, 12},
+                                                   {"velocity", PropertyType::Vec3, 12, 12}};
 
     auto source = ComponentSchema::create("App", "Transform", 1, sourceProps, 12, false);
     auto target = ComponentSchema::create("App", "Physics", 1, targetProps, 24, false);
@@ -180,9 +145,7 @@ TEST(ComponentSchemaTests, CanReadFrom_Superset) {
 }
 
 TEST(ComponentSchemaTests, CanReadFrom_FieldTypeMismatch) {
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> targetProps = {
         {"position", PropertyType::Vec4, 0, 16}  // Different type
@@ -202,9 +165,7 @@ TEST(ComponentSchemaTests, CanReadFrom_FieldTypeMismatch) {
 }
 
 TEST(ComponentSchemaTests, CanReadFrom_FieldOffsetMismatch) {
-    std::vector<PropertyDefinition> sourceProps = {
-        {"position", PropertyType::Vec3, 0, 12}
-    };
+    std::vector<PropertyDefinition> sourceProps = {{"position", PropertyType::Vec3, 0, 12}};
 
     std::vector<PropertyDefinition> targetProps = {
         {"position", PropertyType::Vec3, 4, 12}  // Different offset
@@ -231,19 +192,10 @@ TEST(ComponentSchemaTests, CanReadFrom_FieldOffsetMismatch) {
 
 TEST(ComponentSchemaTests, TestVector_SimpleTransform) {
     // Test Vector 1: Simple Transform component with position and rotation
-    std::vector<PropertyDefinition> props = {
-        {"position", PropertyType::Vec3, 0, 12},
-        {"rotation", PropertyType::Quat, 12, 16}
-    };
+    std::vector<PropertyDefinition> props = {{"position", PropertyType::Vec3, 0, 12},
+                                             {"rotation", PropertyType::Quat, 12, 16}};
 
-    auto result = ComponentSchema::create(
-        "TestApp",
-        "Transform",
-        1,
-        props,
-        28,
-        false
-    );
+    auto result = ComponentSchema::create("TestApp", "Transform", 1, props, 28, false);
 
     ASSERT_TRUE(result.success());
 
@@ -258,45 +210,28 @@ TEST(ComponentSchemaTests, TestVector_SimpleTransform) {
 
 TEST(ComponentSchemaTests, TestVector_Physics) {
     // Test Vector 2: Physics component with multiple properties
-    std::vector<PropertyDefinition> props = {
-        {"mass", PropertyType::Float32, 0, 4},
-        {"velocity", PropertyType::Vec3, 4, 12},
-        {"acceleration", PropertyType::Vec3, 16, 12}
-    };
+    std::vector<PropertyDefinition> props = {{"mass", PropertyType::Float32, 0, 4},
+                                             {"velocity", PropertyType::Vec3, 4, 12},
+                                             {"acceleration", PropertyType::Vec3, 16, 12}};
 
-    auto result = ComponentSchema::create(
-        "PhysicsEngine",
-        "RigidBody",
-        2,
-        props,
-        28,
-        true  // Public schema
+    auto result = ComponentSchema::create("PhysicsEngine", "RigidBody", 2, props, 28,
+                                          true  // Public schema
     );
 
     ASSERT_TRUE(result.success());
 
     // Verify canonical string (properties sorted alphabetically)
     std::string canonical = result.value.toCanonicalString();
-    EXPECT_EQ(canonical,
-        "PhysicsEngine.RigidBody@2{acceleration:Vec3:16:12,mass:Float32:0:4,velocity:Vec3:4:12}");
+    EXPECT_EQ(canonical, "PhysicsEngine.RigidBody@2{acceleration:Vec3:16:12,mass:Float32:0:4,velocity:Vec3:4:12}");
 
     EXPECT_TRUE(result.value.isPublic);
 }
 
 TEST(ComponentSchemaTests, TestVector_SingleProperty) {
     // Test Vector 3: Minimal component with single property
-    std::vector<PropertyDefinition> props = {
-        {"health", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"health", PropertyType::Int32, 0, 4}};
 
-    auto result = ComponentSchema::create(
-        "GameEngine",
-        "Health",
-        1,
-        props,
-        4,
-        false
-    );
+    auto result = ComponentSchema::create("GameEngine", "Health", 1, props, 4, false);
 
     ASSERT_TRUE(result.success());
 
@@ -307,46 +242,31 @@ TEST(ComponentSchemaTests, TestVector_SingleProperty) {
 TEST(ComponentSchemaTests, TestVector_ComplexSchema) {
     // Test Vector 4: Complex schema with many property types
     std::vector<PropertyDefinition> props = {
-        {"id", PropertyType::Int64, 0, 8},
-        {"name", PropertyType::String, 8, 64},
-        {"position", PropertyType::Vec3, 72, 12},
-        {"rotation", PropertyType::Quat, 84, 16},
-        {"scale", PropertyType::Vec3, 100, 12},
-        {"visible", PropertyType::Bool, 112, 1},
-        {"layer", PropertyType::Int32, 116, 4}
-    };
+        {"id", PropertyType::Int64, 0, 8},        {"name", PropertyType::String, 8, 64},
+        {"position", PropertyType::Vec3, 72, 12}, {"rotation", PropertyType::Quat, 84, 16},
+        {"scale", PropertyType::Vec3, 100, 12},   {"visible", PropertyType::Bool, 112, 1},
+        {"layer", PropertyType::Int32, 116, 4}};
 
-    auto result = ComponentSchema::create(
-        "RenderEngine",
-        "Drawable",
-        3,
-        props,
-        120,
-        true
-    );
+    auto result = ComponentSchema::create("RenderEngine", "Drawable", 3, props, 120, true);
 
     ASSERT_TRUE(result.success());
 
     // Properties should be sorted alphabetically in canonical form
     std::string canonical = result.value.toCanonicalString();
     EXPECT_EQ(canonical,
-        "RenderEngine.Drawable@3{id:Int64:0:8,layer:Int32:116:4,name:String:8:64,"
-        "position:Vec3:72:12,rotation:Quat:84:16,scale:Vec3:100:12,visible:Bool:112:1}");
+              "RenderEngine.Drawable@3{id:Int64:0:8,layer:Int32:116:4,name:String:8:64,"
+              "position:Vec3:72:12,rotation:Quat:84:16,scale:Vec3:100:12,visible:Bool:112:1}");
 }
 
 TEST(ComponentSchemaTests, TestVector_PropertyOrdering) {
     // Test Vector 5: Verify that input order doesn't affect canonical form
-    std::vector<PropertyDefinition> props1 = {
-        {"z_last", PropertyType::Float32, 0, 4},
-        {"a_first", PropertyType::Float32, 4, 4},
-        {"m_middle", PropertyType::Float32, 8, 4}
-    };
+    std::vector<PropertyDefinition> props1 = {{"z_last", PropertyType::Float32, 0, 4},
+                                              {"a_first", PropertyType::Float32, 4, 4},
+                                              {"m_middle", PropertyType::Float32, 8, 4}};
 
-    std::vector<PropertyDefinition> props2 = {
-        {"a_first", PropertyType::Float32, 4, 4},
-        {"m_middle", PropertyType::Float32, 8, 4},
-        {"z_last", PropertyType::Float32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props2 = {{"a_first", PropertyType::Float32, 4, 4},
+                                              {"m_middle", PropertyType::Float32, 8, 4},
+                                              {"z_last", PropertyType::Float32, 0, 4}};
 
     auto result1 = ComponentSchema::create("App", "Test", 1, props1, 12, false);
     auto result2 = ComponentSchema::create("App", "Test", 1, props2, 12, false);
@@ -357,7 +277,7 @@ TEST(ComponentSchemaTests, TestVector_PropertyOrdering) {
     // Both should produce identical canonical strings (alphabetically sorted)
     EXPECT_EQ(result1.value.toCanonicalString(), result2.value.toCanonicalString());
     EXPECT_EQ(result1.value.toCanonicalString(),
-        "App.Test@1{a_first:Float32:4:4,m_middle:Float32:8:4,z_last:Float32:0:4}");
+              "App.Test@1{a_first:Float32:4:4,m_middle:Float32:8:4,z_last:Float32:0:4}");
 
     // And identical hashes
     EXPECT_EQ(result1.value.structuralHash, result2.value.structuralHash);
@@ -366,36 +286,25 @@ TEST(ComponentSchemaTests, TestVector_PropertyOrdering) {
 
 TEST(ComponentSchemaTests, TestVector_ASCIIIdentifiers) {
     // Test Vector 6: Various valid ASCII identifier formats
-    std::vector<PropertyDefinition> props = {
-        {"_private", PropertyType::Int32, 0, 4},
-        {"snake_case", PropertyType::Int32, 4, 4},
-        {"camelCase", PropertyType::Int32, 8, 4},
-        {"PascalCase", PropertyType::Int32, 12, 4},
-        {"with123numbers", PropertyType::Int32, 16, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"_private", PropertyType::Int32, 0, 4},
+                                             {"snake_case", PropertyType::Int32, 4, 4},
+                                             {"camelCase", PropertyType::Int32, 8, 4},
+                                             {"PascalCase", PropertyType::Int32, 12, 4},
+                                             {"with123numbers", PropertyType::Int32, 16, 4}};
 
-    auto result = ComponentSchema::create(
-        "MyApp_v2",
-        "Test_Component",
-        1,
-        props,
-        20,
-        false
-    );
+    auto result = ComponentSchema::create("MyApp_v2", "Test_Component", 1, props, 20, false);
 
     ASSERT_TRUE(result.success());
 
     std::string canonical = result.value.toCanonicalString();
     EXPECT_EQ(canonical,
-        "MyApp_v2.Test_Component@1{PascalCase:Int32:12:4,_private:Int32:0:4,"
-        "camelCase:Int32:8:4,snake_case:Int32:4:4,with123numbers:Int32:16:4}");
+              "MyApp_v2.Test_Component@1{PascalCase:Int32:12:4,_private:Int32:0:4,"
+              "camelCase:Int32:8:4,snake_case:Int32:4:4,with123numbers:Int32:16:4}");
 }
 
 TEST(ComponentSchemaTests, TestVector_VersionDifferentiation) {
     // Test Vector 7: Same structure, different versions produce different type hashes
-    std::vector<PropertyDefinition> props = {
-        {"value", PropertyType::Float32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"value", PropertyType::Float32, 0, 4}};
 
     auto v1 = ComponentSchema::create("App", "Component", 1, props, 4, false);
     auto v2 = ComponentSchema::create("App", "Component", 2, props, 4, false);
@@ -427,9 +336,7 @@ TEST(ComponentSchemaTests, TestVector_VersionDifferentiation) {
 
 TEST(ComponentSchemaTests, PropertyMetadata_DefaultRequired) {
     // Properties are required by default
-    std::vector<PropertyDefinition> props = {
-        {"health", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"health", PropertyType::Int32, 0, 4}};
 
     auto result = ComponentSchema::create("App", "Health", 1, props, 4, false);
     ASSERT_TRUE(result.success());
@@ -440,9 +347,7 @@ TEST(ComponentSchemaTests, PropertyMetadata_DefaultRequired) {
 
 TEST(ComponentSchemaTests, PropertyMetadata_OptionalWithDefault) {
     // Optional property with default value
-    std::vector<PropertyDefinition> props = {
-        {"score", PropertyType::Int32, 0, 4, false, int32_t{0}}
-    };
+    std::vector<PropertyDefinition> props = {{"score", PropertyType::Int32, 0, 4, false, int32_t{0}}};
 
     auto result = ComponentSchema::create("App", "Player", 1, props, 4, false);
     ASSERT_TRUE(result.success());
@@ -470,11 +375,9 @@ TEST(ComponentSchemaTests, PropertyMetadata_DefaultValueTypeMismatch) {
 
 TEST(ComponentSchemaTests, PropertyMetadata_MultipleDefaults) {
     // Multiple properties with different default values
-    std::vector<PropertyDefinition> props = {
-        {"health", PropertyType::Int32, 0, 4, true, int32_t{100}},
-        {"speed", PropertyType::Float32, 4, 4, false, float{5.0f}},
-        {"name", PropertyType::String, 8, 64, false, std::string{"Player"}}
-    };
+    std::vector<PropertyDefinition> props = {{"health", PropertyType::Int32, 0, 4, true, int32_t{100}},
+                                             {"speed", PropertyType::Float32, 4, 4, false, float{5.0f}},
+                                             {"name", PropertyType::String, 8, 64, false, std::string{"Player"}}};
 
     auto result = ComponentSchema::create("App", "Character", 1, props, 72, false);
     ASSERT_TRUE(result.success());
@@ -498,9 +401,7 @@ TEST(ComponentSchemaTests, PropertyMetadata_MultipleDefaults) {
 TEST(ComponentSchemaTests, PropertyMetadata_Vec3Default) {
     // Vector type with default value
     Vec3 defaultPos{0.0f, 0.0f, 0.0f};
-    std::vector<PropertyDefinition> props = {
-        {"position", PropertyType::Vec3, 0, 12, false, defaultPos}
-    };
+    std::vector<PropertyDefinition> props = {{"position", PropertyType::Vec3, 0, 12, false, defaultPos}};
 
     auto result = ComponentSchema::create("App", "Transform", 1, props, 12, false);
     ASSERT_TRUE(result.success());
@@ -555,9 +456,7 @@ TEST(ComponentSchemaTests, PropertyMetadata_OptionalWithoutDefault) {
 TEST(ComponentSchemaTests, PropertyMetadata_ArrayTypeDefault) {
     // Array type with default value
     std::vector<int32_t> defaultArray{1, 2, 3};
-    std::vector<PropertyDefinition> props = {
-        {"values", PropertyType::Int32Array, 0, 24, false, defaultArray}
-    };
+    std::vector<PropertyDefinition> props = {{"values", PropertyType::Int32Array, 0, 24, false, defaultArray}};
 
     auto result = ComponentSchema::create("App", "Data", 1, props, 24, false);
     ASSERT_TRUE(result.success());
@@ -574,9 +473,7 @@ TEST(ComponentSchemaTests, PropertyMetadata_ArrayTypeDefault) {
 
 TEST(ComponentSchemaTests, PropertyMetadata_BoolDefault) {
     // Boolean property with default
-    std::vector<PropertyDefinition> props = {
-        {"enabled", PropertyType::Bool, 0, 1, false, true}
-    };
+    std::vector<PropertyDefinition> props = {{"enabled", PropertyType::Bool, 0, 1, false, true}};
 
     auto result = ComponentSchema::create("App", "Feature", 1, props, 1, false);
     ASSERT_TRUE(result.success());

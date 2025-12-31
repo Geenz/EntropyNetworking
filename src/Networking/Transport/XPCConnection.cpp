@@ -8,13 +8,16 @@
  */
 
 #include "XPCConnection.h"
+
+#include <Logging/Logger.h>
+
 #include <chrono>
 #include <sstream>
-#include <Logging/Logger.h>
 
 #if defined(__APPLE__)
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 // Diagnostic helper for XPC object descriptions
 static std::string xpcDescribe(xpc_object_t obj) {
@@ -27,17 +30,14 @@ static std::string xpcDescribe(xpc_object_t obj) {
 }
 
 // Client-side constructor
-XPCConnection::XPCConnection(std::string serviceName)
-    : _serviceName(std::move(serviceName))
-{
+XPCConnection::XPCConnection(std::string serviceName) : _serviceName(std::move(serviceName)) {
     // Create serial queue for XPC event handling
     _queue = dispatch_queue_create("com.entropyengine.xpc.connection", DISPATCH_QUEUE_SERIAL);
 }
 
 // Client-side constructor with config
 XPCConnection::XPCConnection(std::string serviceName, const ConnectionConfig* cfg)
-    : _serviceName(std::move(serviceName))
-{
+    : _serviceName(std::move(serviceName)) {
     // Apply config if provided
     if (cfg) {
         _maxMessageSize = cfg->xpcMaxMessageSize;
@@ -49,9 +49,7 @@ XPCConnection::XPCConnection(std::string serviceName, const ConnectionConfig* cf
 
 // Server-side constructor
 XPCConnection::XPCConnection(xpc_connection_t connection, std::string peerInfo)
-    : _serviceName(std::move(peerInfo))
-    , _connection(connection)
-{
+    : _serviceName(std::move(peerInfo)), _connection(connection) {
     // Retain the connection
     if (_connection) {
         xpc_retain(_connection);
@@ -81,14 +79,10 @@ XPCConnection::XPCConnection(xpc_connection_t connection, std::string peerInfo)
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 }
 
 XPCConnection::~XPCConnection() {
@@ -120,7 +114,7 @@ Result<void> XPCConnection::connect() {
         if (!_connection) {
             setState(ConnectionState::Failed);
             return Result<void>::err(NetworkError::ConnectionClosed,
-                "Failed to create XPC connection to " + _serviceName);
+                                     "Failed to create XPC connection to " + _serviceName);
         }
 
         // Set up event handler before activation
@@ -141,14 +135,10 @@ Result<void> XPCConnection::connect() {
 
     // Record connection time
     auto now = std::chrono::system_clock::now();
-    _connectTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
-    _lastActivityTime.store(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-        std::memory_order_release
-    );
+    _connectTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                       std::memory_order_release);
+    _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                            std::memory_order_release);
 
     return Result<void>::ok();
 }
@@ -198,10 +188,8 @@ Result<void> XPCConnection::send(const std::vector<uint8_t>& data) {
     _messagesSent.fetch_add(1, std::memory_order_relaxed);
     {
         auto now = std::chrono::system_clock::now();
-        _lastActivityTime.store(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-            std::memory_order_release
-        );
+        _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                                std::memory_order_release);
     }
 
     return Result<void>::ok();
@@ -215,7 +203,8 @@ Result<void> XPCConnection::sendUnreliable(const std::vector<uint8_t>& data) {
 Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint8_t>& data,
                                                           std::chrono::milliseconds timeout) {
 #if !defined(__APPLE__)
-    (void)data; (void)timeout;
+    (void)data;
+    (void)timeout;
     return Result<std::vector<uint8_t>>::err(NetworkError::InvalidParameter, "XPC not supported on this platform");
 #else
     if (!isConnected() || !_connection) {
@@ -235,10 +224,10 @@ Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint
 
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     xpc_connection_send_message_with_reply(_connection, message, _queue, ^(xpc_object_t reply) {
-        replyObj = reply;
-        if (replyObj) xpc_retain(replyObj);
-        replied = true;
-        dispatch_semaphore_signal(sem);
+      replyObj = reply;
+      if (replyObj) xpc_retain(replyObj);
+      replied = true;
+      dispatch_semaphore_signal(sem);
     });
 
     // release the original message
@@ -278,8 +267,7 @@ Result<std::vector<uint8_t>> XPCConnection::sendWithReply(const std::vector<uint
             auto now = std::chrono::system_clock::now();
             _lastActivityTime.store(
                 std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-                std::memory_order_release
-            );
+                std::memory_order_release);
         }
         xpc_release(replyObj);
         return Result<std::vector<uint8_t>>::ok(std::move(out));
@@ -333,20 +321,20 @@ void XPCConnection::setupEventHandler() {
     // 2. xpc_connection_cancel stops event delivery
     // 3. We then release the connection, ensuring no events fire after `this` is destroyed
     xpc_connection_set_event_handler(_connection, ^(xpc_object_t event) {
-        // Early exit if connection is being torn down
-        if (_shouldStop.load(std::memory_order_acquire)) {
-            return;
-        }
+      // Early exit if connection is being torn down
+      if (_shouldStop.load(std::memory_order_acquire)) {
+          return;
+      }
 
-        xpc_type_t type = xpc_get_type(event);
+      xpc_type_t type = xpc_get_type(event);
 
-        if (type == XPC_TYPE_DICTIONARY) {
-            // Incoming message
-            handleMessage(event);
-        } else if (type == XPC_TYPE_ERROR) {
-            // Connection error
-            handleError(event);
-        }
+      if (type == XPC_TYPE_DICTIONARY) {
+          // Incoming message
+          handleMessage(event);
+      } else if (type == XPC_TYPE_ERROR) {
+          // Connection error
+          handleError(event);
+      }
     });
 }
 
@@ -370,18 +358,15 @@ void XPCConnection::handleMessage(xpc_object_t message) {
     }
 
     // Convert to vector
-    std::vector<uint8_t> payload(static_cast<const uint8_t*>(data),
-                                 static_cast<const uint8_t*>(data) + length);
+    std::vector<uint8_t> payload(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + length);
 
     // Update statistics
     _bytesReceived.fetch_add(length, std::memory_order_relaxed);
     _messagesReceived.fetch_add(1, std::memory_order_relaxed);
     {
         auto now = std::chrono::system_clock::now();
-        _lastActivityTime.store(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
-            std::memory_order_release
-        );
+        _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+                                std::memory_order_release);
     }
 
     // Notify callback
@@ -398,15 +383,13 @@ void XPCConnection::handleError(xpc_object_t error) {
 
     if (error == XPC_ERROR_CONNECTION_INVALID) {
         // Connection was cancelled or invalidated
-        ENTROPY_LOG_WARNING(std::string("XPC connection invalid: service=") + _serviceName +
-                            ", pid=" + std::to_string(pid) +
-                            (desc.empty() ? std::string("") : std::string(", detail=") + desc));
+        ENTROPY_LOG_WARNING(std::string("XPC connection invalid: service=") + _serviceName + ", pid=" +
+                            std::to_string(pid) + (desc.empty() ? std::string("") : std::string(", detail=") + desc));
         setState(ConnectionState::Disconnected);
     } else if (error == XPC_ERROR_CONNECTION_INTERRUPTED) {
         // Connection interrupted (peer crashed or was killed)
-        ENTROPY_LOG_WARNING(std::string("XPC connection interrupted: service=") + _serviceName +
-                            ", pid=" + std::to_string(pid) +
-                            (desc.empty() ? std::string("") : std::string(", detail=") + desc));
+        ENTROPY_LOG_WARNING(std::string("XPC connection interrupted: service=") + _serviceName + ", pid=" +
+                            std::to_string(pid) + (desc.empty() ? std::string("") : std::string(", detail=") + desc));
         setState(ConnectionState::Failed);
     } else if (error == XPC_ERROR_TERMINATION_IMMINENT) {
         // Process is about to exit
@@ -415,8 +398,7 @@ void XPCConnection::handleError(xpc_object_t error) {
         setState(ConnectionState::Disconnected);
     } else {
         // Unknown XPC error object
-        ENTROPY_LOG_ERROR(std::string("XPC unknown error: service=") + _serviceName +
-                          ", pid=" + std::to_string(pid) +
+        ENTROPY_LOG_ERROR(std::string("XPC unknown error: service=") + _serviceName + ", pid=" + std::to_string(pid) +
                           (desc.empty() ? std::string("") : std::string(", detail=") + desc));
         setState(ConnectionState::Failed);
     }
@@ -430,21 +412,17 @@ void XPCConnection::setState(ConnectionState newState) {
 }
 
 uint64_t XPCConnection::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<XPCConnection>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<XPCConnection>().id);
     return hash;
 }
 
 std::string XPCConnection::toString() const {
     std::ostringstream oss;
-    oss << className() << "@" << static_cast<const void*>(this)
-        << "(service=" << _serviceName
-        << ", state=" << static_cast<int>(_state.load(std::memory_order_relaxed))
-        << ")";
+    oss << className() << "@" << static_cast<const void*>(this) << "(service=" << _serviceName
+        << ", state=" << static_cast<int>(_state.load(std::memory_order_relaxed)) << ")";
     return oss.str();
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // __APPLE__
+#endif  // __APPLE__

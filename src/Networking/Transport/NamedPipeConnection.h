@@ -18,16 +18,18 @@
 
 #pragma once
 
-#include "NetworkConnection.h"
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <thread>
-#include <mutex>
-#include <atomic>
+
+#include "NetworkConnection.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Windows named pipe implementation for local IPC
@@ -74,7 +76,8 @@ namespace EntropyEngine::Networking {
  * // Connection is already established, ready to send/receive
  * @endcode
  */
-class NamedPipeConnection : public NetworkConnection {
+class NamedPipeConnection : public NetworkConnection
+{
 public:
     /**
      * @brief Constructs client-side connection to named pipe
@@ -112,14 +115,20 @@ public:
     // NetworkConnection interface
     Result<void> connect() override;
     Result<void> disconnect() override;
-    bool isConnected() const override { return _state.load() == ConnectionState::Connected; }
+    bool isConnected() const override {
+        return _state.load() == ConnectionState::Connected;
+    }
 
     Result<void> send(const std::vector<uint8_t>& data) override;
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
     Result<void> trySend(const std::vector<uint8_t>& data) override;
 
-    ConnectionState getState() const override { return _state.load(); }
-    ConnectionType getType() const override { return ConnectionType::Local; }
+    ConnectionState getState() const override {
+        return _state.load();
+    }
+    ConnectionType getType() const override {
+        return ConnectionType::Local;
+    }
     ConnectionStats getStats() const override;
 
 private:
@@ -154,31 +163,31 @@ private:
      */
     std::string normalizePipeName(std::string name) const;
 
-    std::string _pipeName;                                   ///< Pipe name for client connections
+    std::string _pipeName;  ///< Pipe name for client connections
 #ifdef _WIN32
-    HANDLE _pipe{INVALID_HANDLE_VALUE};                      ///< Pipe handle
+    HANDLE _pipe{INVALID_HANDLE_VALUE};  ///< Pipe handle
 #endif
-    std::atomic<ConnectionState> _state{ConnectionState::Disconnected}; ///< Current connection state
+    std::atomic<ConnectionState> _state{ConnectionState::Disconnected};  ///< Current connection state
 
-    std::thread _receiveThread;                              ///< Dedicated receive thread
-    std::atomic<bool> _shouldStop{false};                    ///< Shutdown signal for receive thread
+    std::thread _receiveThread;            ///< Dedicated receive thread
+    std::atomic<bool> _shouldStop{false};  ///< Shutdown signal for receive thread
 
-    mutable std::mutex _sendMutex;                           ///< Serializes send operations
+    mutable std::mutex _sendMutex;  ///< Serializes send operations
 
     // Configurable parameters (initialized from ConnectionConfig or defaults)
-    int _connectTimeoutMs{5000};                             ///< Connect timeout (milliseconds)
-    int _sendPollTimeoutMs{100};                             ///< Per-poll timeout during send (ms)
-    int _sendMaxPolls{20};                                   ///< Max poll iterations before send timeout
-    int _recvIdlePollMs{-1};                                 ///< Receive poll timeout (-1 = blocking)
-    size_t _maxMessageSize{16ull * 1024ull * 1024ull};      ///< Maximum message size (16 MiB)
+    int _connectTimeoutMs{5000};                        ///< Connect timeout (milliseconds)
+    int _sendPollTimeoutMs{100};                        ///< Per-poll timeout during send (ms)
+    int _sendMaxPolls{20};                              ///< Max poll iterations before send timeout
+    int _recvIdlePollMs{-1};                            ///< Receive poll timeout (-1 = blocking)
+    size_t _maxMessageSize{16ull * 1024ull * 1024ull};  ///< Maximum message size (16 MiB)
 
     // Atomic stats to avoid data races between send/receive threads
-    std::atomic<uint64_t> _bytesSent{0};                     ///< Total bytes sent
-    std::atomic<uint64_t> _bytesReceived{0};                 ///< Total bytes received
-    std::atomic<uint64_t> _messagesSent{0};                  ///< Total messages sent
-    std::atomic<uint64_t> _messagesReceived{0};              ///< Total messages received
-    std::atomic<uint64_t> _connectTime{0};                   ///< Connection timestamp (ms since epoch)
-    std::atomic<uint64_t> _lastActivityTime{0};              ///< Last activity timestamp (ms since epoch)
+    std::atomic<uint64_t> _bytesSent{0};         ///< Total bytes sent
+    std::atomic<uint64_t> _bytesReceived{0};     ///< Total bytes received
+    std::atomic<uint64_t> _messagesSent{0};      ///< Total messages sent
+    std::atomic<uint64_t> _messagesReceived{0};  ///< Total messages received
+    std::atomic<uint64_t> _connectTime{0};       ///< Connection timestamp (ms since epoch)
+    std::atomic<uint64_t> _lastActivityTime{0};  ///< Last activity timestamp (ms since epoch)
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

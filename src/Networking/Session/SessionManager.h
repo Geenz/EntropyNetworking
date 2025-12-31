@@ -18,17 +18,20 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "SessionHandle.h"
-#include "NetworkSession.h"
-#include "../Transport/ConnectionManager.h"
-#include "../Transport/ConnectionHandle.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ErrorCodes.h"
+#include "../Transport/ConnectionHandle.h"
+#include "../Transport/ConnectionManager.h"
+#include "NetworkSession.h"
+#include "SessionHandle.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Slot-based session manager for protocol-level operations
@@ -65,15 +68,12 @@ namespace EntropyEngine::Networking {
  * sessMgr.setEntityCreatedCallback(sess, [](auto...) { ... });
  * @endcode
  */
-class SessionManager : public Core::EntropyObject {
+class SessionManager : public Core::EntropyObject
+{
 public:
     // Message type callbacks
-    using EntityCreatedCallback = std::function<void(
-        uint64_t entityId,
-        const std::string& appId,
-        const std::string& typeName,
-        uint64_t parentId
-    )>;
+    using EntityCreatedCallback = std::function<void(uint64_t entityId, const std::string& appId,
+                                                     const std::string& typeName, uint64_t parentId)>;
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
@@ -88,7 +88,7 @@ public:
      * @param schemaRegistry Optional ComponentSchemaRegistry for schema operations (must outlive SessionManager)
      */
     explicit SessionManager(ConnectionManager* connectionManager, size_t capacity,
-                           ComponentSchemaRegistry* schemaRegistry = nullptr);
+                            ComponentSchemaRegistry* schemaRegistry = nullptr);
     ~SessionManager();
 
     // Delete copy operations
@@ -167,13 +167,8 @@ public:
     /**
      * @brief Sends EntityCreated message (called by handle.sendEntityCreated())
      */
-    Result<void> sendEntityCreated(
-        const SessionHandle& handle,
-        uint64_t entityId,
-        const std::string& appId,
-        const std::string& typeName,
-        uint64_t parentId
-    );
+    Result<void> sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
+                                   const std::string& typeName, uint64_t parentId);
 
     /**
      * @brief Sends EntityDestroyed message (called by handle.sendEntityDestroyed())
@@ -183,37 +178,24 @@ public:
     /**
      * @brief Sends PropertyUpdate message (called by handle.sendPropertyUpdate())
      */
-    Result<void> sendPropertyUpdate(
-        const SessionHandle& handle,
-        PropertyHash hash,
-        PropertyType type,
-        const PropertyValue& value
-    );
+    Result<void> sendPropertyUpdate(const SessionHandle& handle, PropertyHash hash, PropertyType type,
+                                    const PropertyValue& value);
 
     /**
      * @brief Sends PropertyUpdateBatch message (called by handle.sendPropertyUpdateBatch())
      */
-    Result<void> sendPropertyUpdateBatch(
-        const SessionHandle& handle,
-        const std::vector<uint8_t>& batchData
-    );
+    Result<void> sendPropertyUpdateBatch(const SessionHandle& handle, const std::vector<uint8_t>& batchData);
 
     /**
      * @brief Sends SceneSnapshot message (called by handle.sendSceneSnapshot())
      */
-    Result<void> sendSceneSnapshot(
-        const SessionHandle& handle,
-        const std::vector<uint8_t>& snapshotData
-    );
+    Result<void> sendSceneSnapshot(const SessionHandle& handle, const std::vector<uint8_t>& snapshotData);
 
     /**
      * @brief Initiates handshake (called by handle.performHandshake())
      */
-    Result<void> performHandshake(
-        const SessionHandle& handle,
-        const std::string& clientType,
-        const std::string& clientId
-    );
+    Result<void> performHandshake(const SessionHandle& handle, const std::string& clientType,
+                                  const std::string& clientId);
 
     /**
      * @brief Checks if connected (called by handle.isConnected())
@@ -262,13 +244,17 @@ public:
      * @brief Gets maximum capacity
      * @return Maximum number of sessions this manager can handle
      */
-    size_t capacity() const noexcept { return _capacity; }
+    size_t capacity() const noexcept {
+        return _capacity;
+    }
 
     /**
      * @brief Get schema registry (if configured)
      * @return ComponentSchemaRegistry pointer or nullptr
      */
-    ComponentSchemaRegistry* getSchemaRegistry() const noexcept { return _schemaRegistry; }
+    ComponentSchemaRegistry* getSchemaRegistry() const noexcept {
+        return _schemaRegistry;
+    }
 
     /**
      * @brief Broadcast schema advertisement to all connected sessions
@@ -304,7 +290,9 @@ public:
     void flushAllPropertyBatches();
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "SessionManager"; }
+    const char* className() const noexcept override {
+        return "SessionManager";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -315,15 +303,16 @@ private:
     /**
      * @brief Internal storage for a session slot
      */
-    struct SessionSlot {
+    struct SessionSlot
+    {
         std::atomic<uint32_t> generation{1};
-        ConnectionHandle connection;                        // Stored connection handle
-        std::unique_ptr<NetworkSession> session;            // Protocol layer
+        ConnectionHandle connection;              // Stored connection handle
+        std::unique_ptr<NetworkSession> session;  // Protocol layer
         std::atomic<uint32_t> nextFree{INVALID_INDEX};
         std::mutex mutex;  // Per-slot mutex for session operations
     };
 
-    ConnectionManager* _connectionManager;  // Not owned
+    ConnectionManager* _connectionManager;     // Not owned
     ComponentSchemaRegistry* _schemaRegistry;  // Not owned, optional
     const size_t _capacity;
     std::vector<SessionSlot> _sessionSlots;
@@ -340,4 +329,4 @@ private:
     friend class SessionHandle;
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
