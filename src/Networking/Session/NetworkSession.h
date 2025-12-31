@@ -48,6 +48,8 @@ public:
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using HandshakeCallback = std::function<void(const std::string& clientType, const std::string& clientId)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
+    using HeartbeatCallback = std::function<void(uint64_t timestamp)>;
+    using HeartbeatResponseCallback = std::function<void(uint64_t clientTimestamp, uint64_t serverTime)>;
 
     // Schema message callbacks
     using RegisterSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
@@ -107,6 +109,11 @@ public:
     Result<void> sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData);
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData);
 
+    // Heartbeat protocol
+    Result<void> sendHeartbeat();
+    Result<void> sendHeartbeatResponse(uint64_t clientTimestamp);
+    std::chrono::steady_clock::time_point getLastHeartbeatReceived() const;
+
     // Send schema protocol messages
     Result<void> sendRegisterSchema(const ComponentSchema& schema);
     Result<void> sendQueryPublicSchemas();
@@ -141,6 +148,8 @@ public:
     void setSceneSnapshotCallback(SceneSnapshotCallback callback);
     void setHandshakeCallback(HandshakeCallback callback);
     void setErrorCallback(ErrorCallback callback);
+    void setHeartbeatCallback(HeartbeatCallback callback);
+    void setHeartbeatResponseCallback(HeartbeatResponseCallback callback);
 
     // Schema message callbacks
     void setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback);
@@ -149,6 +158,13 @@ public:
     void setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback);
     void setSchemaNackCallback(SchemaNackCallback callback);
     void setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback);
+
+    /**
+     * @brief Clears all callbacks to prevent invocation during/after destruction
+     *
+     * Called by SessionManager::destroySession before returning slot to free list.
+     */
+    void clearCallbacks();
 
     // Property registry access (always valid after construction)
     PropertyRegistry& getPropertyRegistry() {
@@ -263,6 +279,11 @@ private:
     UnpublishSchemaResponseCallback _unpublishSchemaResponseCallback;
     SchemaNackCallback _schemaNackCallback;
     SchemaAdvertisementCallback _schemaAdvertisementCallback;
+    HeartbeatCallback _heartbeatCallback;
+    HeartbeatResponseCallback _heartbeatResponseCallback;
+
+    // Heartbeat tracking
+    std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch
 
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
     std::atomic<uint32_t> _nextSendSequence{0};

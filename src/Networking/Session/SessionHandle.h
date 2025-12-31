@@ -174,6 +174,15 @@ public:
      */
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData) const;
 
+    /**
+     * @brief Sends heartbeat message
+     *
+     * Sends a heartbeat to the remote peer. The peer will respond with
+     * a HeartbeatResponse. Used for connection liveness detection.
+     * @return Result indicating success or failure
+     */
+    Result<void> sendHeartbeat() const;
+
     // Handshake operations
 
     /**

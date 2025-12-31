@@ -79,6 +79,7 @@ public:
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using HandshakeCallback = std::function<void(const std::string& clientType, const std::string& clientId)>;
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
+    using HeartbeatCallback = std::function<void(uint64_t timestamp)>;
 
     /**
      * @brief Constructs session manager with specified capacity
@@ -109,6 +110,17 @@ public:
      * @return SessionHandle for operations, or invalid if full or connection invalid
      */
     SessionHandle createSession(ConnectionHandle connection, PropertyRegistry* externalRegistry = nullptr);
+
+    /**
+     * @brief Destroys a session and returns its slot to the free list
+     *
+     * This should be called when a session is no longer needed (e.g., after disconnect).
+     * After this call, the handle becomes invalid.
+     *
+     * @param handle Session handle to destroy
+     * @return Result indicating success or failure
+     */
+    Result<void> destroySession(const SessionHandle& handle);
 
     // Callback configuration
 
@@ -162,6 +174,18 @@ public:
      */
     Result<void> setErrorCallback(const SessionHandle& handle, ErrorCallback callback);
 
+    /**
+     * @brief Sets callback for Heartbeat messages
+     *
+     * Callback is invoked when a heartbeat is received from the peer.
+     * Server-side uses this to track session liveness for timeout detection.
+     *
+     * @param handle Session handle
+     * @param callback Callback function invoked with heartbeat timestamp
+     * @return Result indicating success or failure
+     */
+    Result<void> setHeartbeatCallback(const SessionHandle& handle, HeartbeatCallback callback);
+
     // Internal operations called by SessionHandle
 
     /**
@@ -190,6 +214,11 @@ public:
      * @brief Sends SceneSnapshot message (called by handle.sendSceneSnapshot())
      */
     Result<void> sendSceneSnapshot(const SessionHandle& handle, const std::vector<uint8_t>& snapshotData);
+
+    /**
+     * @brief Sends Heartbeat message (called by handle.sendHeartbeat())
+     */
+    Result<void> sendHeartbeat(const SessionHandle& handle);
 
     /**
      * @brief Initiates handshake (called by handle.performHandshake())

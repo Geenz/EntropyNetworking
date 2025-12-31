@@ -149,6 +149,32 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
     }
 }
 
+Result<void> SessionManager::destroySession(const SessionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    // Clear callbacks in NetworkSession before destroying
+    if (slot.session) {
+        slot.session->clearCallbacks();
+    }
+
+    // Clear connection callbacks in ConnectionManager
+    if (slot.connection.valid()) {
+        _connectionManager->setMessageCallback(slot.connection, nullptr);
+        _connectionManager->setStateCallback(slot.connection, nullptr);
+    }
+
+    // Return slot to free list (increments generation, clears session)
+    returnSlotToFreeList(index);
+
+    ENTROPY_LOG_DEBUG(std::format("SessionManager: Destroyed session at slot {}", index));
+    return Result<void>::ok();
+}
+
 bool SessionManager::validateHandle(const SessionHandle& handle) const noexcept {
     if (handle.handleOwner() != static_cast<const void*>(this)) return false;
 
@@ -271,6 +297,24 @@ Result<void> SessionManager::setErrorCallback(const SessionHandle& handle, Error
     return Result<void>::ok();
 }
 
+Result<void> SessionManager::setHeartbeatCallback(const SessionHandle& handle, HeartbeatCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setHeartbeatCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
 Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                                const std::string& typeName, uint64_t parentId) {
     if (!validateHandle(handle)) {
@@ -357,6 +401,23 @@ Result<void> SessionManager::sendSceneSnapshot(const SessionHandle& handle, cons
     }
 
     return slot.session->sendSceneSnapshot(snapshotData);
+}
+
+Result<void> SessionManager::sendHeartbeat(const SessionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendHeartbeat();
 }
 
 Result<void> SessionManager::performHandshake(const SessionHandle& handle, const std::string& clientType,

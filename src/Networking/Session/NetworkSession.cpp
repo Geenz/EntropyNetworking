@@ -80,6 +80,8 @@ NetworkSession::~NetworkSession() {
     _unpublishSchemaResponseCallback = nullptr;
     _schemaNackCallback = nullptr;
     _schemaAdvertisementCallback = nullptr;
+    _heartbeatCallback = nullptr;
+    _heartbeatResponseCallback = nullptr;
 }
 
 Result<void> NetworkSession::connect() {
@@ -554,6 +556,70 @@ Result<void> NetworkSession::sendSchemaAdvertisement(ComponentTypeHash typeHash,
     }
 }
 
+Result<void> NetworkSession::sendHeartbeat() {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto heartbeat = message.initHeartbeat();
+
+        heartbeat.setTimestamp(getCurrentTimestampMicros());
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Heartbeats go on reliable channel
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendHeartbeatResponse(uint64_t clientTimestamp) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initHeartbeatResponse();
+
+        response.setTimestamp(clientTimestamp);
+        response.setServerTime(getCurrentTimestampMicros());
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Heartbeat responses go on reliable channel
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
+    uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
+    return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
+}
+
 void NetworkSession::setEntityCreatedCallback(EntityCreatedCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;  // Don't set callbacks during shutdown
@@ -648,6 +714,49 @@ void NetworkSession::setSchemaAdvertisementCallback(SchemaAdvertisementCallback 
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _schemaAdvertisementCallback = std::move(callback);
+}
+
+void NetworkSession::setHeartbeatCallback(HeartbeatCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;  // Don't set callbacks during shutdown
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _heartbeatCallback = std::move(callback);
+}
+
+void NetworkSession::setHeartbeatResponseCallback(HeartbeatResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;  // Don't set callbacks during shutdown
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _heartbeatResponseCallback = std::move(callback);
+}
+
+void NetworkSession::clearCallbacks() {
+    // Mark as shutting down to prevent new callbacks
+    _shuttingDown.store(true, std::memory_order_release);
+
+    // Wait for active callbacks to complete
+    while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
+        std::this_thread::yield();
+    }
+
+    // Clear all callbacks
+    std::lock_guard<std::mutex> lock(_mutex);
+    _entityCreatedCallback = nullptr;
+    _entityDestroyedCallback = nullptr;
+    _propertyUpdateCallback = nullptr;
+    _sceneSnapshotCallback = nullptr;
+    _handshakeCallback = nullptr;
+    _errorCallback = nullptr;
+    _heartbeatCallback = nullptr;
+    _heartbeatResponseCallback = nullptr;
+    _registerSchemaResponseCallback = nullptr;
+    _queryPublicSchemasResponseCallback = nullptr;
+    _publishSchemaResponseCallback = nullptr;
+    _unpublishSchemaResponseCallback = nullptr;
+    _schemaNackCallback = nullptr;
+    _schemaAdvertisementCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -1034,6 +1143,43 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     _schemaAdvertisementCallback(typeHash, std::string(advert.getAppId().cStr()),
                                                  std::string(advert.getComponentName().cStr()),
                                                  advert.getSchemaVersion());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::HEARTBEAT:
+            {
+                auto heartbeat = message.getHeartbeat();
+                uint64_t clientTimestamp = heartbeat.getTimestamp();
+
+                // Update last heartbeat received time
+                auto now = std::chrono::steady_clock::now();
+                auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                _lastHeartbeatReceivedMs.store(static_cast<uint64_t>(nowMs), std::memory_order_relaxed);
+
+                // Send heartbeat response back to client
+                sendHeartbeatResponse(clientTimestamp);
+
+                // Invoke callback if set (for server-side tracking)
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _heartbeatCallback) {
+                    _heartbeatCallback(clientTimestamp);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::HEARTBEAT_RESPONSE:
+            {
+                auto response = message.getHeartbeatResponse();
+                uint64_t clientTimestamp = response.getTimestamp();
+                uint64_t serverTime = response.getServerTime();
+
+                // Invoke callback for RTT calculation (client-side)
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _heartbeatResponseCallback) {
+                    _heartbeatResponseCallback(clientTimestamp, serverTime);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
