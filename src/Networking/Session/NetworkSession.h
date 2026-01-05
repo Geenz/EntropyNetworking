@@ -61,6 +61,126 @@ public:
     using SchemaAdvertisementCallback = std::function<void(ComponentTypeHash typeHash, const std::string& appId,
                                                            const std::string& componentName, uint32_t schemaVersion)>;
 
+    // Asset entry data structure (mirrors AssetEntry in entropy.capnp)
+    struct AssetEntryData
+    {
+        std::array<uint8_t, 32> id{};
+        std::string uri;
+        uint8_t contentType = 0;
+        uint64_t sizeBytes = 0;
+        bool encrypted = false;
+        std::array<uint8_t, 32> plaintextHash{};
+        std::string appId;
+        bool persistent = false;
+    };
+
+    // Asset resolve response data structure
+    struct AssetResolveResponseData
+    {
+        bool found = false;
+        AssetEntryData entry;
+        bool hasKey = false;
+        std::array<uint8_t, 32> key{};
+        uint8_t deliveryMethod = 0;
+        uint64_t requestId = 0;  // For response correlation
+    };
+
+    // Asset message callbacks (requestId added for correlation)
+    using AssetAdvertiseCallback =
+        std::function<void(const std::string& appId, const std::vector<AssetEntryData>& entries, uint64_t requestId)>;
+    using AssetAdvertiseResponseCallback =
+        std::function<void(bool success, const std::string& errorMessage, uint64_t requestId)>;
+    using AssetWithdrawCallback =
+        std::function<void(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId)>;
+    using AssetWithdrawResponseCallback =
+        std::function<void(bool success, uint32_t removedCount, const std::string& errorMessage, uint64_t requestId)>;
+    using AssetWithdrawAllCallback = std::function<void(const std::string& appId, uint64_t requestId)>;
+    using AssetWithdrawAllResponseCallback =
+        std::function<void(bool success, uint32_t removedCount, const std::string& errorMessage, uint64_t requestId)>;
+    using AssetResolveCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
+    using AssetResolveResponseCallback =
+        std::function<void(const AssetResolveResponseData& response)>;  // requestId in data struct
+    using AssetResolveBatchCallback =
+        std::function<void(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId)>;
+    using AssetResolveBatchResponseCallback =
+        std::function<void(const std::vector<AssetResolveResponseData>& responses, uint64_t requestId)>;
+    using AssetProvideKeyCallback = std::function<void(const std::array<uint8_t, 32>& assetId,
+                                                       const std::array<uint8_t, 32>& key, uint64_t requestId)>;
+    using AssetProvideKeyResponseCallback =
+        std::function<void(bool success, const std::string& errorMessage, uint64_t requestId)>;
+    using AssetUploadCallback = std::function<void(const std::string& appId, const std::vector<uint8_t>& data,
+                                                   uint8_t contentType, bool persistent, uint64_t requestId)>;
+    using AssetUploadResponseCallback =
+        std::function<void(bool success, const std::array<uint8_t, 32>& assetId, const std::string& uri,
+                           const std::string& errorMessage, uint64_t requestId)>;
+    using AssetFetchCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
+    using AssetFetchResponseCallback = std::function<void(bool found, const std::vector<uint8_t>& data,
+                                                          const std::string& errorMessage, uint64_t requestId)>;
+
+    // Chunked upload data structures
+    struct AssetUploadBeginData
+    {
+        std::string appId;
+        uint64_t totalSize = 0;
+        uint8_t contentType = 0;
+        bool persistent = false;
+        uint32_t chunkSize = 0;
+        bool encrypted = false;
+        std::array<uint8_t, 32> plaintextHash{};
+        uint64_t requestId = 0;  // For response correlation
+    };
+
+    struct AssetUploadBeginResponseData
+    {
+        bool success = false;
+        std::array<uint8_t, 16> uploadId{};
+        uint32_t chunkSize = 0;
+        std::string errorMessage;
+        uint64_t requestId = 0;  // Echo back for correlation
+    };
+
+    struct AssetUploadChunkData
+    {
+        std::array<uint8_t, 16> uploadId{};
+        uint64_t offset = 0;
+        std::vector<uint8_t> data;
+        uint32_t sequence = 0;
+    };
+
+    struct AssetUploadChunkResponseData
+    {
+        bool success = false;
+        std::array<uint8_t, 16> uploadId{};
+        uint64_t bytesReceived = 0;
+        std::string errorMessage;
+    };
+
+    struct AssetUploadCompleteData
+    {
+        std::array<uint8_t, 16> uploadId{};
+        uint32_t totalChunks = 0;
+    };
+
+    struct AssetUploadCompleteResponseData
+    {
+        bool success = false;
+        std::array<uint8_t, 32> assetId{};
+        std::string uri;
+        uint64_t bytesStored = 0;
+        std::string errorMessage;
+        std::array<uint8_t, 16> uploadId{};  // For correlation with pending uploads
+    };
+
+    // Chunked upload callbacks
+    using AssetUploadBeginCallback = std::function<void(const AssetUploadBeginData& data)>;
+    using AssetUploadBeginResponseCallback = std::function<void(const AssetUploadBeginResponseData& data)>;
+    using AssetUploadChunkCallback = std::function<void(const AssetUploadChunkData& data)>;
+    using AssetUploadChunkResponseCallback = std::function<void(const AssetUploadChunkResponseData& data)>;
+    using AssetUploadCompleteCallback = std::function<void(const AssetUploadCompleteData& data)>;
+    using AssetUploadCompleteResponseCallback = std::function<void(const AssetUploadCompleteResponseData& data)>;
+    using AssetUploadCancelCallback = std::function<void(const std::array<uint8_t, 16>& uploadId)>;
+    using AssetUploadCancelResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
@@ -78,6 +198,10 @@ public:
     Result<void> disconnect();
     bool isConnected() const;
     ConnectionState getState() const;
+
+    // Multi-channel support (for WebRTC bulk data isolation)
+    bool supportsMultipleChannels() const;
+    Result<void> openChannel(const std::string& channel);
 
     /**
      * @brief Set up connection callbacks to route messages to this session
@@ -141,6 +265,42 @@ public:
     Result<void> sendSchemaAdvertisement(ComponentTypeHash typeHash, const std::string& appId,
                                          const std::string& componentName, uint32_t schemaVersion);
 
+    // Send asset protocol messages (requestId for correlation)
+    Result<void> sendAssetAdvertise(const std::string& appId, const std::vector<AssetEntryData>& entries,
+                                    uint64_t requestId = 0);
+    Result<void> sendAssetAdvertiseResponse(bool success, const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendAssetWithdraw(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId = 0);
+    Result<void> sendAssetWithdrawResponse(bool success, uint32_t removedCount, const std::string& errorMessage,
+                                           uint64_t requestId = 0);
+    Result<void> sendAssetWithdrawAll(const std::string& appId, uint64_t requestId = 0);
+    Result<void> sendAssetWithdrawAllResponse(bool success, uint32_t removedCount, const std::string& errorMessage,
+                                              uint64_t requestId = 0);
+    Result<void> sendAssetResolve(const std::array<uint8_t, 32>& assetId, uint64_t requestId = 0);
+    Result<void> sendAssetResolveResponse(const AssetResolveResponseData& response);  // requestId in struct
+    Result<void> sendAssetResolveBatch(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId = 0);
+    Result<void> sendAssetResolveBatchResponse(const std::vector<AssetResolveResponseData>& responses,
+                                               uint64_t requestId = 0);
+    Result<void> sendAssetProvideKey(const std::array<uint8_t, 32>& assetId, const std::array<uint8_t, 32>& key,
+                                     uint64_t requestId = 0);
+    Result<void> sendAssetProvideKeyResponse(bool success, const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                                 bool persistent, uint64_t requestId = 0);
+    Result<void> sendAssetUploadResponse(bool success, const std::array<uint8_t, 32>& assetId, const std::string& uri,
+                                         const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId = 0);
+    Result<void> sendAssetFetchResponse(bool found, const std::vector<uint8_t>& data, const std::string& errorMessage,
+                                        uint64_t requestId = 0);
+
+    // Chunked upload send methods
+    Result<void> sendAssetUploadBegin(const AssetUploadBeginData& data);
+    Result<void> sendAssetUploadBeginResponse(const AssetUploadBeginResponseData& data);
+    Result<void> sendAssetUploadChunk(const AssetUploadChunkData& data);
+    Result<void> sendAssetUploadChunkResponse(const AssetUploadChunkResponseData& data);
+    Result<void> sendAssetUploadComplete(const AssetUploadCompleteData& data);
+    Result<void> sendAssetUploadCompleteResponse(const AssetUploadCompleteResponseData& data);
+    Result<void> sendAssetUploadCancel(const std::array<uint8_t, 16>& uploadId);
+    Result<void> sendAssetUploadCancelResponse(bool success, const std::string& errorMessage);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -158,6 +318,34 @@ public:
     void setUnpublishSchemaResponseCallback(UnpublishSchemaResponseCallback callback);
     void setSchemaNackCallback(SchemaNackCallback callback);
     void setSchemaAdvertisementCallback(SchemaAdvertisementCallback callback);
+
+    // Asset message callbacks
+    void setAssetAdvertiseCallback(AssetAdvertiseCallback callback);
+    void setAssetAdvertiseResponseCallback(AssetAdvertiseResponseCallback callback);
+    void setAssetWithdrawCallback(AssetWithdrawCallback callback);
+    void setAssetWithdrawResponseCallback(AssetWithdrawResponseCallback callback);
+    void setAssetWithdrawAllCallback(AssetWithdrawAllCallback callback);
+    void setAssetWithdrawAllResponseCallback(AssetWithdrawAllResponseCallback callback);
+    void setAssetResolveCallback(AssetResolveCallback callback);
+    void setAssetResolveResponseCallback(AssetResolveResponseCallback callback);
+    void setAssetResolveBatchCallback(AssetResolveBatchCallback callback);
+    void setAssetResolveBatchResponseCallback(AssetResolveBatchResponseCallback callback);
+    void setAssetProvideKeyCallback(AssetProvideKeyCallback callback);
+    void setAssetProvideKeyResponseCallback(AssetProvideKeyResponseCallback callback);
+    void setAssetUploadCallback(AssetUploadCallback callback);
+    void setAssetUploadResponseCallback(AssetUploadResponseCallback callback);
+    void setAssetFetchCallback(AssetFetchCallback callback);
+    void setAssetFetchResponseCallback(AssetFetchResponseCallback callback);
+
+    // Chunked upload callbacks
+    void setAssetUploadBeginCallback(AssetUploadBeginCallback callback);
+    void setAssetUploadBeginResponseCallback(AssetUploadBeginResponseCallback callback);
+    void setAssetUploadChunkCallback(AssetUploadChunkCallback callback);
+    void setAssetUploadChunkResponseCallback(AssetUploadChunkResponseCallback callback);
+    void setAssetUploadCompleteCallback(AssetUploadCompleteCallback callback);
+    void setAssetUploadCompleteResponseCallback(AssetUploadCompleteResponseCallback callback);
+    void setAssetUploadCancelCallback(AssetUploadCancelCallback callback);
+    void setAssetUploadCancelResponseCallback(AssetUploadCancelResponseCallback callback);
 
     /**
      * @brief Clears all callbacks to prevent invocation during/after destruction
@@ -281,6 +469,34 @@ private:
     SchemaAdvertisementCallback _schemaAdvertisementCallback;
     HeartbeatCallback _heartbeatCallback;
     HeartbeatResponseCallback _heartbeatResponseCallback;
+
+    // Asset callbacks
+    AssetAdvertiseCallback _assetAdvertiseCallback;
+    AssetAdvertiseResponseCallback _assetAdvertiseResponseCallback;
+    AssetWithdrawCallback _assetWithdrawCallback;
+    AssetWithdrawResponseCallback _assetWithdrawResponseCallback;
+    AssetWithdrawAllCallback _assetWithdrawAllCallback;
+    AssetWithdrawAllResponseCallback _assetWithdrawAllResponseCallback;
+    AssetResolveCallback _assetResolveCallback;
+    AssetResolveResponseCallback _assetResolveResponseCallback;
+    AssetResolveBatchCallback _assetResolveBatchCallback;
+    AssetResolveBatchResponseCallback _assetResolveBatchResponseCallback;
+    AssetProvideKeyCallback _assetProvideKeyCallback;
+    AssetProvideKeyResponseCallback _assetProvideKeyResponseCallback;
+    AssetUploadCallback _assetUploadCallback;
+    AssetUploadResponseCallback _assetUploadResponseCallback;
+    AssetFetchCallback _assetFetchCallback;
+    AssetFetchResponseCallback _assetFetchResponseCallback;
+
+    // Chunked upload callbacks
+    AssetUploadBeginCallback _assetUploadBeginCallback;
+    AssetUploadBeginResponseCallback _assetUploadBeginResponseCallback;
+    AssetUploadChunkCallback _assetUploadChunkCallback;
+    AssetUploadChunkResponseCallback _assetUploadChunkResponseCallback;
+    AssetUploadCompleteCallback _assetUploadCompleteCallback;
+    AssetUploadCompleteResponseCallback _assetUploadCompleteResponseCallback;
+    AssetUploadCancelCallback _assetUploadCancelCallback;
+    AssetUploadCancelResponseCallback _assetUploadCancelResponseCallback;
 
     // Heartbeat tracking
     std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch

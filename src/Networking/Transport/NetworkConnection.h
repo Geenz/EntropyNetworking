@@ -23,7 +23,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "../Core/ConnectionTypes.h"
@@ -54,6 +56,12 @@ class NetworkConnection : public Core::EntropyObject
 public:
     using MessageCallback = std::function<void(const std::vector<uint8_t>&)>;  ///< Callback for received messages
     using StateCallback = std::function<void(ConnectionState)>;                ///< Callback for state changes
+    using ChannelMessageCallback = std::function<void(const std::string& channel, const std::vector<uint8_t>&)>;
+
+    /// Well-known channel names
+    static constexpr const char* CHANNEL_CONTROL = "control";                ///< Default control/protocol channel
+    static constexpr const char* CHANNEL_ASSET_UPLOAD = "asset-upload";      ///< Bulk asset uploads
+    static constexpr const char* CHANNEL_ASSET_DOWNLOAD = "asset-download";  ///< Bulk asset downloads
 
     virtual ~NetworkConnection() = default;
 
@@ -108,6 +116,74 @@ public:
     virtual Result<void> trySend(const std::vector<uint8_t>& data) {
         (void)data;
         return Result<void>::err(NetworkError::InvalidParameter, "trySend not supported by this backend");
+    }
+
+    // =========================================================================
+    // Named Channel Support (for bulk data isolation)
+    // =========================================================================
+
+    /**
+     * @brief Sends data on a named channel
+     *
+     * For backends that support multiple channels (WebRTC), this sends on the
+     * specified channel. For single-channel backends (Unix socket, named pipe),
+     * this falls back to the default channel.
+     *
+     * @param channel Channel name (use CHANNEL_* constants)
+     * @param data Bytes to send
+     * @return Result indicating success or failure
+     */
+    virtual Result<void> sendOnChannel(const std::string& channel, const std::vector<uint8_t>& data) {
+        (void)channel;
+        return send(data);  // Default: fall back to main channel
+    }
+
+    /**
+     * @brief Checks if a named channel is open and ready for data
+     *
+     * @param channel Channel name
+     * @return true if channel is open (or backend doesn't support channels)
+     */
+    virtual bool isChannelOpen(const std::string& channel) const {
+        (void)channel;
+        return isConnected();  // Default: channel is open if connection is open
+    }
+
+    /**
+     * @brief Opens a named channel (creates if needed)
+     *
+     * For WebRTC, this creates a new data channel. For other backends,
+     * this is a no-op since they use a single channel.
+     *
+     * @param channel Channel name
+     * @return Result indicating success or failure
+     */
+    virtual Result<void> openChannel(const std::string& channel) {
+        (void)channel;
+        return Result<void>::ok();  // Default: no-op
+    }
+
+    /**
+     * @brief Sets callback for messages received on a specific channel
+     *
+     * @param channel Channel name
+     * @param callback Function called when messages arrive on this channel
+     */
+    virtual void setChannelMessageCallback(const std::string& channel, MessageCallback callback) {
+        std::lock_guard<std::mutex> lock(_cbMutex);
+        if (callback) {
+            _channelCallbacks[channel] = std::move(callback);
+        } else {
+            _channelCallbacks.erase(channel);
+        }
+    }
+
+    /**
+     * @brief Checks if this backend supports multiple channels
+     * @return true if sendOnChannel uses separate channels
+     */
+    virtual bool supportsMultipleChannels() const {
+        return false;  // Most backends are single-channel
     }
 
     /**
@@ -253,6 +329,45 @@ protected:
     }
 
     /**
+     * @brief Invokes channel-specific message callback with lifetime guards
+     *
+     * Called by derived classes when messages arrive on named channels.
+     * @param channel Channel name the message arrived on
+     * @param data Received message bytes
+     */
+    void onChannelMessageReceived(const std::string& channel, const std::vector<uint8_t>& data) noexcept {
+        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+        struct CallbackGuard
+        {
+            std::atomic<int>& counter;
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
+        } guard{_activeCallbacks};
+
+        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        MessageCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_cbMutex);
+            auto it = _channelCallbacks.find(channel);
+            if (it != _channelCallbacks.end()) {
+                cb = it->second;
+            }
+        }
+
+        if (cb) {
+            cb(data);
+        }
+    }
+
+    /**
      * @brief Shuts down callbacks and waits for in-flight invocations
      *
      * Sets shutdown flag and spin-waits for active callbacks to complete.
@@ -270,11 +385,12 @@ protected:
     }
 
 private:
-    mutable std::mutex _cbMutex;                  ///< Protects callback access
-    MessageCallback _messageCallback;             ///< User message callback
-    StateCallback _stateCallback;                 ///< User state callback
-    std::atomic<int> _activeCallbacks{0};         ///< Count of active callback invocations
-    std::atomic<bool> _callbacksShutdown{false};  ///< Shutdown flag for destructor
+    mutable std::mutex _cbMutex;                                         ///< Protects callback access
+    MessageCallback _messageCallback;                                    ///< User message callback
+    StateCallback _stateCallback;                                        ///< User state callback
+    std::unordered_map<std::string, MessageCallback> _channelCallbacks;  ///< Per-channel callbacks
+    std::atomic<int> _activeCallbacks{0};                                ///< Count of active callback invocations
+    std::atomic<bool> _callbacksShutdown{false};                         ///< Shutdown flag for destructor
 };
 
 }  // namespace EntropyEngine::Networking

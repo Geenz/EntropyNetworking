@@ -409,6 +409,7 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
 
     std::string_view labelView(label);
     std::optional<ConnectionState> pending;
+    bool shouldOpenAssetChannels = false;
 
     {
         std::lock_guard<std::mutex> lock(self->_mutex);
@@ -438,6 +439,9 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
                 self->_lifecycleState = LifecycleState::Established;
                 ENTROPY_LOG_INFO(std::string("Connection established (") +
                                  (wasFirstConnection ? "first" : "reconnected") + ")");
+
+                // First connection - open asset channels for bulk data isolation
+                shouldOpenAssetChannels = wasFirstConnection;
             }
 
             auto now = std::chrono::system_clock::now();
@@ -446,6 +450,13 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
             self->_stats.lastActivityTime.store(timestamp, std::memory_order_relaxed);
             pending = ConnectionState::Connected;
         }
+    }
+
+    // Open asset channels outside the lock to avoid deadlock
+    // These are for bulk data isolation - control messages use the main channel
+    if (shouldOpenAssetChannels && guard.isValid()) {
+        self->openChannel(CHANNEL_ASSET_UPLOAD);
+        self->openChannel(CHANNEL_ASSET_DOWNLOAD);
     }
 
     if (pending && guard.isValid()) {
@@ -1053,6 +1064,167 @@ void WebRTCConnection::setupInternalWebSocket() {
     _webSocket->open(_signalingUrl);
 
     ENTROPY_LOG_INFO(std::format("WebRTC client connecting to signaling server: {}", _signalingUrl));
+}
+
+// =========================================================================
+// Named Channel Support (for bulk data isolation)
+// =========================================================================
+
+void WebRTCConnection::onNamedChannelMessageCallback(int id, const char* message, int size, void* user) {
+    CallbackGuard guard(static_cast<CallbackContext*>(user));
+    if (!guard.isValid()) return;
+    auto* self = guard.getConnection();
+
+    if (size <= 0) return;
+
+    // Get channel label to identify which channel this is
+    char label[256];
+    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+        ENTROPY_LOG_ERROR("Failed to get channel label for message callback");
+        return;
+    }
+
+    std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
+                              reinterpret_cast<const uint8_t*>(message) + size);
+
+    // Update stats
+    self->_stats.bytesReceived.fetch_add(size, std::memory_order_relaxed);
+    self->_stats.messagesReceived.fetch_add(1, std::memory_order_relaxed);
+    self->_stats.lastActivityTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count(),
+        std::memory_order_relaxed);
+
+    // Route to channel-specific callback in base class
+    if (!self->isShuttingDown()) {
+        self->onChannelMessageReceived(std::string(label), data);
+    }
+}
+
+void WebRTCConnection::onNamedChannelOpenCallback(int id, void* user) {
+    CallbackGuard guard(static_cast<CallbackContext*>(user));
+    if (!guard.isValid()) return;
+    auto* self = guard.getConnection();
+
+    char label[256];
+    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+        return;
+    }
+
+    ENTROPY_LOG_INFO(std::format("Named data channel opened: {}, id={}", label, id));
+
+    std::lock_guard<std::mutex> lock(self->_mutex);
+    auto it = self->_namedChannels.find(label);
+    if (it != self->_namedChannels.end()) {
+        it->second.open = true;
+    }
+}
+
+void WebRTCConnection::onNamedChannelClosedCallback(int id, void* user) {
+    CallbackGuard guard(static_cast<CallbackContext*>(user));
+    if (!guard.isValid()) return;
+    auto* self = guard.getConnection();
+
+    char label[256];
+    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+        return;
+    }
+
+    ENTROPY_LOG_INFO(std::format("Named data channel closed: {}, id={}", label, id));
+
+    std::lock_guard<std::mutex> lock(self->_mutex);
+    auto it = self->_namedChannels.find(label);
+    if (it != self->_namedChannels.end()) {
+        it->second.open = false;
+    }
+}
+
+void WebRTCConnection::setupNamedChannelCallbacks(int channelId, const std::string& channelName) {
+    rtcSetUserPointer(channelId, _callbackContext);
+    rtcSetOpenCallback(channelId, onNamedChannelOpenCallback);
+    rtcSetClosedCallback(channelId, onNamedChannelClosedCallback);
+    rtcSetMessageCallback(channelId, onNamedChannelMessageCallback);
+}
+
+Result<void> WebRTCConnection::openChannel(const std::string& channel) {
+    std::lock_guard<std::mutex> lock(_mutex);
+
+    if (_peerConnectionId < 0) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Peer connection not initialized");
+    }
+
+    // Check if channel already exists
+    auto it = _namedChannels.find(channel);
+    if (it != _namedChannels.end() && it->second.id >= 0) {
+        // Channel already exists
+        return Result<void>::ok();
+    }
+
+    ENTROPY_LOG_INFO(std::format("Creating named data channel: {}", channel));
+
+    // Create reliable ordered data channel for bulk transfers
+    int channelId = rtcCreateDataChannel(_peerConnectionId, channel.c_str());
+    if (channelId < 0) {
+        return Result<void>::err(NetworkError::ConnectionClosed,
+                                 std::format("Failed to create data channel: {}", channel));
+    }
+
+    // Store in named channels map
+    _namedChannels[channel] = NamedChannel{channelId, false};
+
+    // Set up callbacks
+    setupNamedChannelCallbacks(channelId, channel);
+
+    return Result<void>::ok();
+}
+
+Result<void> WebRTCConnection::sendOnChannel(const std::string& channel, const std::vector<uint8_t>& data) {
+    if (_state != ConnectionState::Connected) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Connection not established");
+    }
+
+    // Snapshot channel id and open state under lock
+    int id = -1;
+    bool open = false;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto it = _namedChannels.find(channel);
+        if (it != _namedChannels.end()) {
+            id = it->second.id;
+            open = it->second.open;
+        }
+    }
+
+    // Fall back to default reliable channel if named channel not found or not open
+    if (id < 0 || !open) {
+        ENTROPY_LOG_DEBUG(std::format("Named channel '{}' not available, falling back to default channel", channel));
+        return send(data);
+    }
+
+    int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
+    if (result < 0) {
+        ENTROPY_LOG_ERROR(std::format("rtcSendMessage on channel '{}' failed with code {}", channel, result));
+        return Result<void>::err(NetworkError::InvalidMessage, "Failed to send data on channel");
+    }
+
+    // Update stats
+    _stats.bytesSent.fetch_add(data.size(), std::memory_order_relaxed);
+    _stats.messagesSent.fetch_add(1, std::memory_order_relaxed);
+    _stats.lastActivityTime.store(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count(),
+        std::memory_order_relaxed);
+
+    return Result<void>::ok();
+}
+
+bool WebRTCConnection::isChannelOpen(const std::string& channel) const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    auto it = _namedChannels.find(channel);
+    if (it != _namedChannels.end()) {
+        return it->second.open;
+    }
+    return false;
 }
 
 }  // namespace EntropyEngine::Networking

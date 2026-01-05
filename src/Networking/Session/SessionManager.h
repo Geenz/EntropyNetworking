@@ -81,6 +81,53 @@ public:
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
     using HeartbeatCallback = std::function<void(uint64_t timestamp)>;
 
+    // Re-export asset types from NetworkSession for convenience
+    using AssetEntryData = NetworkSession::AssetEntryData;
+    using AssetResolveResponseData = NetworkSession::AssetResolveResponseData;
+
+    // Asset message callbacks (server-side - receiving requests from clients)
+    using AssetAdvertiseCallback =
+        std::function<void(const std::string& appId, const std::vector<AssetEntryData>& entries, uint64_t requestId)>;
+    using AssetWithdrawCallback =
+        std::function<void(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId)>;
+    using AssetWithdrawAllCallback = std::function<void(const std::string& appId, uint64_t requestId)>;
+    using AssetResolveCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
+    using AssetResolveBatchCallback =
+        std::function<void(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId)>;
+    using AssetProvideKeyCallback = std::function<void(const std::array<uint8_t, 32>& assetId,
+                                                       const std::array<uint8_t, 32>& key, uint64_t requestId)>;
+    using AssetUploadCallback = std::function<void(const std::string& appId, const std::vector<uint8_t>& data,
+                                                   uint8_t contentType, bool persistent, uint64_t requestId)>;
+    using AssetFetchCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
+
+    // Asset response callbacks (for clients receiving responses)
+    using AssetAdvertiseResponseCallback =
+        std::function<void(uint64_t requestId, bool success, const std::string& errorMessage)>;
+    using AssetWithdrawResponseCallback =
+        std::function<void(uint64_t requestId, bool success, uint32_t removedCount, const std::string& errorMessage)>;
+    using AssetWithdrawAllResponseCallback =
+        std::function<void(uint64_t requestId, bool success, uint32_t removedCount, const std::string& errorMessage)>;
+    using AssetResolveResponseCallback =
+        std::function<void(uint64_t requestId, const AssetResolveResponseData& response)>;
+    using AssetResolveBatchResponseCallback =
+        std::function<void(uint64_t requestId, const std::vector<AssetResolveResponseData>& responses)>;
+    using AssetProvideKeyResponseCallback =
+        std::function<void(uint64_t requestId, bool success, const std::string& errorMessage)>;
+    using AssetUploadResponseCallback =
+        std::function<void(uint64_t requestId, bool success, const std::array<uint8_t, 32>& assetId,
+                           const std::string& uri, const std::string& errorMessage)>;
+    using AssetFetchResponseCallback = std::function<void(
+        uint64_t requestId, bool found, const std::vector<uint8_t>& data, const std::string& errorMessage)>;
+
+    // Chunked upload callbacks
+    using AssetUploadBeginResponseCallback =
+        std::function<void(const NetworkSession::AssetUploadBeginResponseData& data)>;
+    using AssetUploadChunkResponseCallback =
+        std::function<void(const NetworkSession::AssetUploadChunkResponseData& data)>;
+    using AssetUploadCompleteResponseCallback =
+        std::function<void(const NetworkSession::AssetUploadCompleteResponseData& data)>;
+    using AssetUploadCancelResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
     /**
      * @brief Constructs session manager with specified capacity
      *
@@ -186,6 +233,223 @@ public:
      */
     Result<void> setHeartbeatCallback(const SessionHandle& handle, HeartbeatCallback callback);
 
+    // Asset callback setters
+
+    /**
+     * @brief Sets callback for AssetAdvertise messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetAdvertiseCallback(const SessionHandle& handle, AssetAdvertiseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetWithdraw messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetWithdrawCallback(const SessionHandle& handle, AssetWithdrawCallback callback);
+
+    /**
+     * @brief Sets callback for AssetWithdrawAll messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetWithdrawAllCallback(const SessionHandle& handle, AssetWithdrawAllCallback callback);
+
+    /**
+     * @brief Sets callback for AssetResolve messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetResolveCallback(const SessionHandle& handle, AssetResolveCallback callback);
+
+    /**
+     * @brief Sets callback for AssetResolveBatch messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetResolveBatchCallback(const SessionHandle& handle, AssetResolveBatchCallback callback);
+
+    /**
+     * @brief Sets callback for AssetProvideKey messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetProvideKeyCallback(const SessionHandle& handle, AssetProvideKeyCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUpload messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetUploadCallback(const SessionHandle& handle, AssetUploadCallback callback);
+
+    /**
+     * @brief Sets callback for AssetFetch messages
+     * @param handle Session handle
+     * @param callback Callback function
+     * @return Result indicating success or failure
+     */
+    Result<void> setAssetFetchCallback(const SessionHandle& handle, AssetFetchCallback callback);
+
+    // Asset response callback setters (for clients receiving responses)
+
+    /**
+     * @brief Sets callback for AssetAdvertiseResponse messages
+     */
+    Result<void> setAssetAdvertiseResponseCallback(const SessionHandle& handle,
+                                                   AssetAdvertiseResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetWithdrawResponse messages
+     */
+    Result<void> setAssetWithdrawResponseCallback(const SessionHandle& handle, AssetWithdrawResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetWithdrawAllResponse messages
+     */
+    Result<void> setAssetWithdrawAllResponseCallback(const SessionHandle& handle,
+                                                     AssetWithdrawAllResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetResolveResponse messages
+     */
+    Result<void> setAssetResolveResponseCallback(const SessionHandle& handle, AssetResolveResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetResolveBatchResponse messages
+     */
+    Result<void> setAssetResolveBatchResponseCallback(const SessionHandle& handle,
+                                                      AssetResolveBatchResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetProvideKeyResponse messages
+     */
+    Result<void> setAssetProvideKeyResponseCallback(const SessionHandle& handle,
+                                                    AssetProvideKeyResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUploadResponse messages
+     */
+    Result<void> setAssetUploadResponseCallback(const SessionHandle& handle, AssetUploadResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetFetchResponse messages
+     */
+    Result<void> setAssetFetchResponseCallback(const SessionHandle& handle, AssetFetchResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUploadBeginResponse messages
+     */
+    Result<void> setAssetUploadBeginResponseCallback(const SessionHandle& handle,
+                                                     AssetUploadBeginResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUploadChunkResponse messages
+     */
+    Result<void> setAssetUploadChunkResponseCallback(const SessionHandle& handle,
+                                                     AssetUploadChunkResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUploadCompleteResponse messages
+     */
+    Result<void> setAssetUploadCompleteResponseCallback(const SessionHandle& handle,
+                                                        AssetUploadCompleteResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AssetUploadCancelResponse messages
+     */
+    Result<void> setAssetUploadCancelResponseCallback(const SessionHandle& handle,
+                                                      AssetUploadCancelResponseCallback callback);
+
+    // Asset send methods (for clients sending requests)
+
+    /**
+     * @brief Sends AssetAdvertise request
+     */
+    Result<void> sendAssetAdvertise(const SessionHandle& handle, const std::string& appId,
+                                    const std::vector<NetworkSession::AssetEntryData>& entries, uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetWithdraw request
+     */
+    Result<void> sendAssetWithdraw(const SessionHandle& handle, const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                   uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetWithdrawAll request
+     */
+    Result<void> sendAssetWithdrawAll(const SessionHandle& handle, const std::string& appId, uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetResolve request
+     */
+    Result<void> sendAssetResolve(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                  uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetResolveBatch request
+     */
+    Result<void> sendAssetResolveBatch(const SessionHandle& handle,
+                                       const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetProvideKey request
+     */
+    Result<void> sendAssetProvideKey(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                     const std::array<uint8_t, 32>& key, uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetUpload request
+     */
+    Result<void> sendAssetUpload(const SessionHandle& handle, const std::string& appId,
+                                 const std::vector<uint8_t>& data, uint8_t contentType, bool persistent,
+                                 uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetFetch request
+     */
+    Result<void> sendAssetFetch(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                uint64_t requestId = 0);
+
+    /**
+     * @brief Begins a chunked upload session
+     */
+    Result<void> sendAssetUploadBegin(const SessionHandle& handle, const NetworkSession::AssetUploadBeginData& data);
+
+    /**
+     * @brief Sends a chunk during chunked upload
+     */
+    Result<void> sendAssetUploadChunk(const SessionHandle& handle, const NetworkSession::AssetUploadChunkData& data);
+
+    /**
+     * @brief Completes a chunked upload session
+     */
+    Result<void> sendAssetUploadComplete(const SessionHandle& handle,
+                                         const NetworkSession::AssetUploadCompleteData& data);
+
+    /**
+     * @brief Cancels an in-progress chunked upload
+     */
+    Result<void> sendAssetUploadCancel(const SessionHandle& handle, const std::array<uint8_t, 16>& uploadId);
+
+    /**
+     * @brief Check if session's connection supports multiple data channels
+     */
+    bool supportsMultipleChannels(const SessionHandle& handle);
+
+    /**
+     * @brief Open a named data channel for bulk data transfer
+     */
+    Result<void> openChannel(const SessionHandle& handle, const std::string& channel);
+
     // Internal operations called by SessionHandle
 
     /**
@@ -219,6 +483,27 @@ public:
      * @brief Sends Heartbeat message (called by handle.sendHeartbeat())
      */
     Result<void> sendHeartbeat(const SessionHandle& handle);
+
+    // Asset send methods
+
+    /**
+     * @brief Sends AssetResolveResponse message
+     */
+    Result<void> sendAssetResolveResponse(const SessionHandle& handle, bool found, const AssetEntryData& entry,
+                                          bool hasKey, const std::array<uint8_t, 32>& key, uint8_t deliveryMethod);
+
+    /**
+     * @brief Sends AssetUploadResponse message
+     */
+    Result<void> sendAssetUploadResponse(const SessionHandle& handle, bool success,
+                                         const std::array<uint8_t, 32>& assetId, const std::string& uri,
+                                         const std::string& errorMessage);
+
+    /**
+     * @brief Sends AssetFetchResponse message
+     */
+    Result<void> sendAssetFetchResponse(const SessionHandle& handle, bool found, const std::vector<uint8_t>& data,
+                                        const std::string& errorMessage);
 
     /**
      * @brief Initiates handshake (called by handle.performHandshake())

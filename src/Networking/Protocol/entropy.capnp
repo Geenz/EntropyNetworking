@@ -325,6 +325,194 @@ struct HeartbeatResponse {
 }
 
 # ============================================================================
+# Asset System Messages (Reliable Channel)
+# ============================================================================
+
+# Metadata for a single asset in the catalog
+struct AssetEntry {
+    id @0 :Data;                     # 32-byte AssetId (content-addressed lookup key)
+    uri @1 :Text;                    # Location: file://, http://, https://
+    contentType @2 :UInt8;           # ContentType enum
+    sizeBytes @3 :UInt64;            # Asset size for progress/allocation
+    encrypted @4 :Bool;              # True if AES-256-GCM encrypted
+    plaintextHash @5 :Data;          # 32-byte verification hash (if encrypted)
+    appId @6 :Text;                  # Owning app (empty = canvas-owned)
+    persistent @7 :Bool;             # Survives app disconnect
+}
+
+# App registers assets in the catalog
+struct AssetAdvertiseRequest {
+    appId @0 :Text;
+    entries @1 :List(AssetEntry);
+    requestId @2 :UInt64;            # For response correlation
+}
+
+struct AssetAdvertiseResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+    requestId @2 :UInt64;            # Echo back for correlation
+}
+
+# App removes specific assets from catalog
+struct AssetWithdrawRequest {
+    assetIds @0 :List(Data);         # List of 32-byte AssetIds
+    requestId @1 :UInt64;            # For response correlation
+}
+
+struct AssetWithdrawResponse {
+    success @0 :Bool;
+    removedCount @1 :UInt32;
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;            # Echo back for correlation
+}
+
+# App removes all its transient assets
+struct AssetWithdrawAllRequest {
+    appId @0 :Text;
+    requestId @1 :UInt64;            # For response correlation
+}
+
+struct AssetWithdrawAllResponse {
+    success @0 :Bool;
+    removedCount @1 :UInt32;
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;            # Echo back for correlation
+}
+
+# Portal requests asset resolution
+struct AssetResolveRequest {
+    assetId @0 :Data;                # 32-byte AssetId
+    requestId @1 :UInt64;            # For response correlation
+}
+
+struct AssetResolveResponse {
+    found @0 :Bool;
+    entry @1 :AssetEntry;
+    hasKey @2 :Bool;
+    key @3 :Data;                    # 32-byte AES key (if hasKey)
+    deliveryMethod @4 :UInt8;        # DeliveryMethod enum
+    requestId @5 :UInt64;            # Echo back for correlation
+}
+
+# Portal requests batch resolution
+struct AssetResolveBatchRequest {
+    assetIds @0 :List(Data);         # List of 32-byte AssetIds
+    requestId @1 :UInt64;            # For response correlation
+}
+
+struct AssetResolveBatchResponse {
+    responses @0 :List(AssetResolveResponse);
+    requestId @1 :UInt64;            # Echo back for correlation
+}
+
+# App provides decryption key for encrypted asset
+struct AssetProvideKeyRequest {
+    assetId @0 :Data;                # 32-byte AssetId
+    key @1 :Data;                    # 32-byte AES-256 key
+    requestId @2 :UInt64;            # For response correlation
+}
+
+struct AssetProvideKeyResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+    requestId @2 :UInt64;            # Echo back for correlation
+}
+
+# App uploads asset data to canvas storage
+struct AssetUploadRequest {
+    appId @0 :Text;
+    data @1 :Data;                   # Asset content
+    contentType @2 :UInt8;           # ContentType enum
+    persistent @3 :Bool;
+    requestId @4 :UInt64;            # For response correlation
+}
+
+struct AssetUploadResponse {
+    success @0 :Bool;
+    assetId @1 :Data;                # 32-byte AssetId of stored content
+    uri @2 :Text;                    # Generated URI for the asset
+    errorMessage @3 :Text;
+    requestId @4 :UInt64;            # Echo back for correlation
+}
+
+# Portal fetches asset data over WebRTC data channel
+struct AssetFetchRequest {
+    assetId @0 :Data;                # 32-byte AssetId
+    requestId @1 :UInt64;            # For response correlation
+}
+
+struct AssetFetchResponse {
+    found @0 :Bool;
+    data @1 :Data;                   # Asset content
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;            # Echo back for correlation
+}
+
+# ============================================================================
+# Chunked Asset Upload (for large assets)
+# ============================================================================
+
+# Begin a chunked upload - returns upload ID for subsequent chunks
+struct AssetUploadBeginRequest {
+    appId @0 :Text;
+    totalSize @1 :UInt64;            # Total size in bytes for allocation/progress
+    contentType @2 :UInt8;           # ContentType enum
+    persistent @3 :Bool;
+    chunkSize @4 :UInt32;            # Preferred chunk size (server may adjust)
+    encrypted @5 :Bool;              # Will the final asset be encrypted?
+    plaintextHash @6 :Data;          # 32-byte hash for verification (if encrypted)
+    requestId @7 :UInt64;            # For response correlation
+}
+
+struct AssetUploadBeginResponse {
+    success @0 :Bool;
+    uploadId @1 :Data;               # 16-byte UUID for this upload session
+    chunkSize @2 :UInt32;            # Actual chunk size to use
+    errorMessage @3 :Text;
+    requestId @4 :UInt64;            # Echo back for correlation
+}
+
+# Send a chunk of data
+struct AssetUploadChunkRequest {
+    uploadId @0 :Data;               # 16-byte upload session ID
+    offset @1 :UInt64;               # Byte offset in the complete asset
+    data @2 :Data;                   # Chunk data
+    sequence @3 :UInt32;             # Chunk sequence number (for ordering)
+}
+
+struct AssetUploadChunkResponse {
+    success @0 :Bool;
+    uploadId @1 :Data;               # Echo back for correlation
+    bytesReceived @2 :UInt64;        # Total bytes received so far
+    errorMessage @3 :Text;
+}
+
+# Complete the chunked upload - triggers assembly and hash verification
+struct AssetUploadCompleteRequest {
+    uploadId @0 :Data;               # 16-byte upload session ID
+    totalChunks @1 :UInt32;          # Expected total chunks for verification
+}
+
+struct AssetUploadCompleteResponse {
+    success @0 :Bool;
+    assetId @1 :Data;                # 32-byte AssetId of assembled content
+    uri @2 :Text;                    # Generated URI for the asset
+    bytesStored @3 :UInt64;          # Actual bytes stored
+    errorMessage @4 :Text;
+    uploadId @5 :Data;               # 16-byte upload session ID for correlation
+}
+
+# Cancel an in-progress chunked upload
+struct AssetUploadCancelRequest {
+    uploadId @0 :Data;               # 16-byte upload session ID
+}
+
+struct AssetUploadCancelResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# ============================================================================
 # Top-Level Message Envelope
 # ============================================================================
 
@@ -370,5 +558,33 @@ struct Message {
         unpublishSchemaResponse @24 :UnpublishSchemaResponse;
         schemaNack @25 :SchemaNack;
         schemaAdvertisement @26 :SchemaAdvertisement;
+
+        # Asset system
+        assetAdvertiseRequest @27 :AssetAdvertiseRequest;
+        assetAdvertiseResponse @28 :AssetAdvertiseResponse;
+        assetWithdrawRequest @29 :AssetWithdrawRequest;
+        assetWithdrawResponse @30 :AssetWithdrawResponse;
+        assetWithdrawAllRequest @31 :AssetWithdrawAllRequest;
+        assetWithdrawAllResponse @32 :AssetWithdrawAllResponse;
+        assetResolveRequest @33 :AssetResolveRequest;
+        assetResolveResponse @34 :AssetResolveResponse;
+        assetResolveBatchRequest @35 :AssetResolveBatchRequest;
+        assetResolveBatchResponse @36 :AssetResolveBatchResponse;
+        assetProvideKeyRequest @37 :AssetProvideKeyRequest;
+        assetProvideKeyResponse @38 :AssetProvideKeyResponse;
+        assetUploadRequest @39 :AssetUploadRequest;
+        assetUploadResponse @40 :AssetUploadResponse;
+        assetFetchRequest @41 :AssetFetchRequest;
+        assetFetchResponse @42 :AssetFetchResponse;
+
+        # Chunked upload
+        assetUploadBeginRequest @43 :AssetUploadBeginRequest;
+        assetUploadBeginResponse @44 :AssetUploadBeginResponse;
+        assetUploadChunkRequest @45 :AssetUploadChunkRequest;
+        assetUploadChunkResponse @46 :AssetUploadChunkResponse;
+        assetUploadCompleteRequest @47 :AssetUploadCompleteRequest;
+        assetUploadCompleteResponse @48 :AssetUploadCompleteResponse;
+        assetUploadCancelRequest @49 :AssetUploadCancelRequest;
+        assetUploadCancelResponse @50 :AssetUploadCancelResponse;
     }
 }

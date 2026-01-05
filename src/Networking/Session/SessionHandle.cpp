@@ -69,6 +69,126 @@ Result<void> SessionHandle::sendHeartbeat() const {
     return mgr->sendHeartbeat(*this);
 }
 
+// Asset protocol operations
+
+Result<void> SessionHandle::sendAssetAdvertise(const std::string& appId,
+                                               const std::vector<NetworkSession::AssetEntryData>& entries,
+                                               uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetAdvertise(*this, appId, entries, requestId);
+}
+
+Result<void> SessionHandle::sendAssetWithdraw(const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                              uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetWithdraw(*this, assetIds, requestId);
+}
+
+Result<void> SessionHandle::sendAssetWithdrawAll(const std::string& appId, uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetWithdrawAll(*this, appId, requestId);
+}
+
+Result<void> SessionHandle::sendAssetResolve(const std::array<uint8_t, 32>& assetId, uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetResolve(*this, assetId, requestId);
+}
+
+Result<void> SessionHandle::sendAssetResolveBatch(const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                                  uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetResolveBatch(*this, assetIds, requestId);
+}
+
+Result<void> SessionHandle::sendAssetProvideKey(const std::array<uint8_t, 32>& assetId,
+                                                const std::array<uint8_t, 32>& key, uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetProvideKey(*this, assetId, key, requestId);
+}
+
+Result<void> SessionHandle::sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data,
+                                            uint8_t contentType, bool persistent, uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUpload(*this, appId, data, contentType, persistent, requestId);
+}
+
+Result<void> SessionHandle::sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetFetch(*this, assetId, requestId);
+}
+
+Result<void> SessionHandle::sendAssetUploadBegin(const NetworkSession::AssetUploadBeginData& data) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUploadBegin(*this, data);
+}
+
+Result<void> SessionHandle::sendAssetUploadChunk(const NetworkSession::AssetUploadChunkData& data) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUploadChunk(*this, data);
+}
+
+Result<void> SessionHandle::sendAssetUploadComplete(const NetworkSession::AssetUploadCompleteData& data) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUploadComplete(*this, data);
+}
+
+Result<void> SessionHandle::sendAssetUploadCancel(const std::array<uint8_t, 16>& uploadId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUploadCancel(*this, uploadId);
+}
+
+bool SessionHandle::supportsMultipleChannels() const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return false;
+    }
+    return mgr->supportsMultipleChannels(*this);
+}
+
+Result<void> SessionHandle::openChannel(const std::string& channel) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->openChannel(*this, channel);
+}
+
 Result<void> SessionHandle::performHandshake(const std::string& clientType, const std::string& clientId) const {
     auto* mgr = manager();
     if (!mgr) {

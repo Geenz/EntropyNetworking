@@ -120,6 +120,17 @@ ConnectionState NetworkSession::getState() const {
     return _state;
 }
 
+bool NetworkSession::supportsMultipleChannels() const {
+    return _connection && _connection->supportsMultipleChannels();
+}
+
+Result<void> NetworkSession::openChannel(const std::string& channel) {
+    if (!_connection) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "No connection");
+    }
+    return _connection->openChannel(channel);
+}
+
 Result<void> NetworkSession::performHandshake(const std::string& clientType, const std::string& clientId) {
     _clientType = clientType;
     _clientId = clientId;
@@ -615,6 +626,681 @@ Result<void> NetworkSession::sendHeartbeatResponse(uint64_t clientTimestamp) {
     }
 }
 
+// ============================================================================
+// Asset Protocol Messages
+// ============================================================================
+
+Result<void> NetworkSession::sendAssetAdvertise(const std::string& appId, const std::vector<AssetEntryData>& entries,
+                                                uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetAdvertiseRequest();
+        request.setAppId(appId);
+        request.setRequestId(requestId);
+
+        auto entriesList = request.initEntries(entries.size());
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const auto& entry = entries[i];
+            auto capnpEntry = entriesList[i];
+            capnpEntry.setId(kj::arrayPtr(entry.id.data(), entry.id.size()));
+            capnpEntry.setUri(entry.uri);
+            capnpEntry.setContentType(entry.contentType);
+            capnpEntry.setSizeBytes(entry.sizeBytes);
+            capnpEntry.setEncrypted(entry.encrypted);
+            capnpEntry.setPlaintextHash(kj::arrayPtr(entry.plaintextHash.data(), entry.plaintextHash.size()));
+            capnpEntry.setAppId(entry.appId);
+            capnpEntry.setPersistent(entry.persistent);
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetAdvertiseResponse(bool success, const std::string& errorMessage,
+                                                        uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetAdvertiseResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetWithdraw(const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                               uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetWithdrawRequest();
+        request.setRequestId(requestId);
+        auto list = request.initAssetIds(assetIds.size());
+        for (size_t i = 0; i < assetIds.size(); ++i) {
+            list.set(i, kj::arrayPtr(assetIds[i].data(), 32));
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetWithdrawResponse(bool success, uint32_t removedCount,
+                                                       const std::string& errorMessage, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetWithdrawResponse();
+        response.setSuccess(success);
+        response.setRemovedCount(removedCount);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetWithdrawAll(const std::string& appId, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetWithdrawAllRequest();
+        request.setAppId(appId);
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetWithdrawAllResponse(bool success, uint32_t removedCount,
+                                                          const std::string& errorMessage, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetWithdrawAllResponse();
+        response.setSuccess(success);
+        response.setRemovedCount(removedCount);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetResolve(const std::array<uint8_t, 32>& assetId, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetResolveRequest();
+        request.setAssetId(kj::arrayPtr(assetId.data(), 32));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetResolveResponse(const AssetResolveResponseData& response) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto resp = message.initAssetResolveResponse();
+        resp.setFound(response.found);
+        resp.setRequestId(response.requestId);
+
+        if (response.found) {
+            auto entry = resp.initEntry();
+            entry.setId(kj::arrayPtr(response.entry.id.data(), response.entry.id.size()));
+            entry.setUri(response.entry.uri);
+            entry.setContentType(response.entry.contentType);
+            entry.setSizeBytes(response.entry.sizeBytes);
+            entry.setEncrypted(response.entry.encrypted);
+            entry.setPlaintextHash(
+                kj::arrayPtr(response.entry.plaintextHash.data(), response.entry.plaintextHash.size()));
+            entry.setAppId(response.entry.appId);
+            entry.setPersistent(response.entry.persistent);
+        }
+
+        resp.setHasKey(response.hasKey);
+        if (response.hasKey) {
+            resp.setKey(kj::arrayPtr(response.key.data(), 32));
+        }
+        resp.setDeliveryMethod(response.deliveryMethod);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetResolveBatch(const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                                   uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetResolveBatchRequest();
+        request.setRequestId(requestId);
+        auto list = request.initAssetIds(assetIds.size());
+        for (size_t i = 0; i < assetIds.size(); ++i) {
+            list.set(i, kj::arrayPtr(assetIds[i].data(), 32));
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetResolveBatchResponse(const std::vector<AssetResolveResponseData>& responses,
+                                                           uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto batchResp = message.initAssetResolveBatchResponse();
+        batchResp.setRequestId(requestId);
+        auto responsesList = batchResp.initResponses(responses.size());
+
+        for (size_t i = 0; i < responses.size(); ++i) {
+            const auto& r = responses[i];
+            auto resp = responsesList[i];
+            resp.setFound(r.found);
+
+            if (r.found) {
+                auto entry = resp.initEntry();
+                entry.setId(kj::arrayPtr(r.entry.id.data(), r.entry.id.size()));
+                entry.setUri(r.entry.uri);
+                entry.setContentType(r.entry.contentType);
+                entry.setSizeBytes(r.entry.sizeBytes);
+                entry.setEncrypted(r.entry.encrypted);
+                entry.setPlaintextHash(kj::arrayPtr(r.entry.plaintextHash.data(), r.entry.plaintextHash.size()));
+                entry.setAppId(r.entry.appId);
+                entry.setPersistent(r.entry.persistent);
+            }
+
+            resp.setHasKey(r.hasKey);
+            if (r.hasKey) {
+                resp.setKey(kj::arrayPtr(r.key.data(), 32));
+            }
+            resp.setDeliveryMethod(r.deliveryMethod);
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetProvideKey(const std::array<uint8_t, 32>& assetId,
+                                                 const std::array<uint8_t, 32>& key, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetProvideKeyRequest();
+        request.setAssetId(kj::arrayPtr(assetId.data(), 32));
+        request.setKey(kj::arrayPtr(key.data(), 32));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetProvideKeyResponse(bool success, const std::string& errorMessage,
+                                                         uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetProvideKeyResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data,
+                                             uint8_t contentType, bool persistent, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetUploadRequest();
+        request.setAppId(appId);
+        request.setData(kj::arrayPtr(data.data(), data.size()));
+        request.setContentType(contentType);
+        request.setPersistent(persistent);
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadResponse(bool success, const std::array<uint8_t, 32>& assetId,
+                                                     const std::string& uri, const std::string& errorMessage,
+                                                     uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetUploadResponse();
+        response.setSuccess(success);
+        response.setAssetId(kj::arrayPtr(assetId.data(), 32));
+        response.setUri(uri);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetFetchRequest();
+        request.setAssetId(kj::arrayPtr(assetId.data(), 32));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetFetchResponse(bool found, const std::vector<uint8_t>& data,
+                                                    const std::string& errorMessage, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetFetchResponse();
+        response.setFound(found);
+        response.setData(kj::arrayPtr(data.data(), data.size()));
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Route bulk asset data to dedicated download channel
+        // Falls back to default channel if multi-channel not supported
+        return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+// ============================================================================
+// Chunked Upload Send Methods
+// ============================================================================
+
+Result<void> NetworkSession::sendAssetUploadBegin(const AssetUploadBeginData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetUploadBeginRequest();
+        request.setAppId(data.appId);
+        request.setTotalSize(data.totalSize);
+        request.setContentType(data.contentType);
+        request.setPersistent(data.persistent);
+        request.setChunkSize(data.chunkSize);
+        request.setEncrypted(data.encrypted);
+        request.setPlaintextHash(kj::arrayPtr(data.plaintextHash.data(), data.plaintextHash.size()));
+        request.setRequestId(data.requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadBeginResponse(const AssetUploadBeginResponseData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetUploadBeginResponse();
+        response.setSuccess(data.success);
+        response.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
+        response.setChunkSize(data.chunkSize);
+        response.setErrorMessage(data.errorMessage);
+        response.setRequestId(data.requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadChunk(const AssetUploadChunkData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetUploadChunkRequest();
+        request.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
+        request.setOffset(data.offset);
+        request.setData(kj::arrayPtr(data.data.data(), data.data.size()));
+        request.setSequence(data.sequence);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Route chunk data to dedicated channel to avoid blocking control messages
+        // Falls back to default channel if multi-channel not supported
+        return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_UPLOAD, serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadChunkResponse(const AssetUploadChunkResponseData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetUploadChunkResponse();
+        response.setSuccess(data.success);
+        response.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
+        response.setBytesReceived(data.bytesReceived);
+        response.setErrorMessage(data.errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        // Route on same channel as request for consistency
+        return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_UPLOAD, serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadComplete(const AssetUploadCompleteData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetUploadCompleteRequest();
+        request.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
+        request.setTotalChunks(data.totalChunks);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadCompleteResponse(const AssetUploadCompleteResponseData& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetUploadCompleteResponse();
+        response.setSuccess(data.success);
+        response.setAssetId(kj::arrayPtr(data.assetId.data(), data.assetId.size()));
+        response.setUri(data.uri);
+        response.setBytesStored(data.bytesStored);
+        response.setErrorMessage(data.errorMessage);
+        response.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadCancel(const std::array<uint8_t, 16>& uploadId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto request = message.initAssetUploadCancelRequest();
+        request.setUploadId(kj::arrayPtr(uploadId.data(), uploadId.size()));
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetUploadCancelResponse(bool success, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Message>();
+        auto response = message.initAssetUploadCancelResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
 std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
     uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
     return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
@@ -732,6 +1418,198 @@ void NetworkSession::setHeartbeatResponseCallback(HeartbeatResponseCallback call
     _heartbeatResponseCallback = std::move(callback);
 }
 
+void NetworkSession::setAssetAdvertiseCallback(AssetAdvertiseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetAdvertiseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetAdvertiseResponseCallback(AssetAdvertiseResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetAdvertiseResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetWithdrawCallback(AssetWithdrawCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetWithdrawCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetWithdrawResponseCallback(AssetWithdrawResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetWithdrawResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetWithdrawAllCallback(AssetWithdrawAllCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetWithdrawAllCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetWithdrawAllResponseCallback(AssetWithdrawAllResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetWithdrawAllResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetResolveCallback(AssetResolveCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetResolveCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetResolveResponseCallback(AssetResolveResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetResolveResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetResolveBatchCallback(AssetResolveBatchCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetResolveBatchCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetResolveBatchResponseCallback(AssetResolveBatchResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetResolveBatchResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetProvideKeyCallback(AssetProvideKeyCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetProvideKeyCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetProvideKeyResponseCallback(AssetProvideKeyResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetProvideKeyResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadCallback(AssetUploadCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadResponseCallback(AssetUploadResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetFetchCallback(AssetFetchCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetFetchCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetFetchResponseCallback(AssetFetchResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetFetchResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadBeginCallback(AssetUploadBeginCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadBeginCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadBeginResponseCallback(AssetUploadBeginResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadBeginResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadChunkCallback(AssetUploadChunkCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadChunkCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadChunkResponseCallback(AssetUploadChunkResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadChunkResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadCompleteCallback(AssetUploadCompleteCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadCompleteCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadCompleteResponseCallback(AssetUploadCompleteResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadCompleteResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadCancelCallback(AssetUploadCancelCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadCancelCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetUploadCancelResponseCallback(AssetUploadCancelResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetUploadCancelResponseCallback = std::move(callback);
+}
+
 void NetworkSession::clearCallbacks() {
     // Mark as shutting down to prevent new callbacks
     _shuttingDown.store(true, std::memory_order_release);
@@ -757,6 +1635,34 @@ void NetworkSession::clearCallbacks() {
     _unpublishSchemaResponseCallback = nullptr;
     _schemaNackCallback = nullptr;
     _schemaAdvertisementCallback = nullptr;
+
+    // Asset callbacks
+    _assetAdvertiseCallback = nullptr;
+    _assetAdvertiseResponseCallback = nullptr;
+    _assetWithdrawCallback = nullptr;
+    _assetWithdrawResponseCallback = nullptr;
+    _assetWithdrawAllCallback = nullptr;
+    _assetWithdrawAllResponseCallback = nullptr;
+    _assetResolveCallback = nullptr;
+    _assetResolveResponseCallback = nullptr;
+    _assetResolveBatchCallback = nullptr;
+    _assetResolveBatchResponseCallback = nullptr;
+    _assetProvideKeyCallback = nullptr;
+    _assetProvideKeyResponseCallback = nullptr;
+    _assetUploadCallback = nullptr;
+    _assetUploadResponseCallback = nullptr;
+    _assetFetchCallback = nullptr;
+    _assetFetchResponseCallback = nullptr;
+
+    // Chunked upload callbacks
+    _assetUploadBeginCallback = nullptr;
+    _assetUploadBeginResponseCallback = nullptr;
+    _assetUploadChunkCallback = nullptr;
+    _assetUploadChunkResponseCallback = nullptr;
+    _assetUploadCompleteCallback = nullptr;
+    _assetUploadCompleteResponseCallback = nullptr;
+    _assetUploadCancelCallback = nullptr;
+    _assetUploadCancelResponseCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -1180,6 +2086,533 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _heartbeatResponseCallback) {
                     _heartbeatResponseCallback(clientTimestamp, serverTime);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ========================================================================
+                // Asset System Messages
+                // ========================================================================
+
+            case Message::ASSET_ADVERTISE_REQUEST:
+            {
+                auto req = message.getAssetAdvertiseRequest();
+                std::string appId(req.getAppId().cStr());
+                uint64_t requestId = req.getRequestId();
+                auto entriesReader = req.getEntries();
+
+                std::vector<AssetEntryData> entries;
+                entries.reserve(entriesReader.size());
+                for (auto src : entriesReader) {
+                    AssetEntryData entry;
+                    auto idData = src.getId();
+                    if (idData.size() == 32) {
+                        std::memcpy(entry.id.data(), idData.begin(), 32);
+                    }
+                    entry.uri = std::string(src.getUri().cStr());
+                    entry.contentType = src.getContentType();
+                    entry.sizeBytes = src.getSizeBytes();
+                    entry.encrypted = src.getEncrypted();
+                    auto hashData = src.getPlaintextHash();
+                    if (hashData.size() == 32) {
+                        std::memcpy(entry.plaintextHash.data(), hashData.begin(), 32);
+                    }
+                    entry.appId = std::string(src.getAppId().cStr());
+                    entry.persistent = src.getPersistent();
+                    entries.push_back(std::move(entry));
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetAdvertiseCallback) {
+                    _assetAdvertiseCallback(appId, entries, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_ADVERTISE_RESPONSE:
+            {
+                auto resp = message.getAssetAdvertiseResponse();
+                uint64_t requestId = resp.getRequestId();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetAdvertiseResponseCallback) {
+                    _assetAdvertiseResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()),
+                                                    requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_WITHDRAW_REQUEST:
+            {
+                auto req = message.getAssetWithdrawRequest();
+                uint64_t requestId = req.getRequestId();
+                auto idsReader = req.getAssetIds();
+
+                std::vector<std::array<uint8_t, 32>> assetIds;
+                assetIds.reserve(idsReader.size());
+                for (auto idData : idsReader) {
+                    if (idData.size() == 32) {
+                        std::array<uint8_t, 32> id;
+                        std::memcpy(id.data(), idData.begin(), 32);
+                        assetIds.push_back(id);
+                    }
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetWithdrawCallback) {
+                    _assetWithdrawCallback(assetIds, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_WITHDRAW_RESPONSE:
+            {
+                auto resp = message.getAssetWithdrawResponse();
+                uint64_t requestId = resp.getRequestId();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetWithdrawResponseCallback) {
+                    _assetWithdrawResponseCallback(resp.getSuccess(), resp.getRemovedCount(),
+                                                   std::string(resp.getErrorMessage().cStr()), requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_WITHDRAW_ALL_REQUEST:
+            {
+                auto req = message.getAssetWithdrawAllRequest();
+                std::string appId(req.getAppId().cStr());
+                uint64_t requestId = req.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetWithdrawAllCallback) {
+                    _assetWithdrawAllCallback(appId, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_WITHDRAW_ALL_RESPONSE:
+            {
+                auto resp = message.getAssetWithdrawAllResponse();
+                uint64_t requestId = resp.getRequestId();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetWithdrawAllResponseCallback) {
+                    _assetWithdrawAllResponseCallback(resp.getSuccess(), resp.getRemovedCount(),
+                                                      std::string(resp.getErrorMessage().cStr()), requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_RESOLVE_REQUEST:
+            {
+                auto req = message.getAssetResolveRequest();
+                auto idData = req.getAssetId();
+                uint64_t requestId = req.getRequestId();
+
+                std::array<uint8_t, 32> assetId{};
+                if (idData.size() == 32) {
+                    std::memcpy(assetId.data(), idData.begin(), 32);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetResolveCallback) {
+                    _assetResolveCallback(assetId, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_RESOLVE_RESPONSE:
+            {
+                auto resp = message.getAssetResolveResponse();
+
+                AssetResolveResponseData responseData;
+                responseData.found = resp.getFound();
+                responseData.deliveryMethod = resp.getDeliveryMethod();
+                responseData.requestId = resp.getRequestId();
+
+                if (resp.getFound()) {
+                    auto entry = resp.getEntry();
+                    auto idData = entry.getId();
+                    if (idData.size() == 32) {
+                        std::memcpy(responseData.entry.id.data(), idData.begin(), 32);
+                    }
+                    responseData.entry.uri = std::string(entry.getUri().cStr());
+                    responseData.entry.contentType = entry.getContentType();
+                    responseData.entry.sizeBytes = entry.getSizeBytes();
+                    responseData.entry.encrypted = entry.getEncrypted();
+                    auto hashData = entry.getPlaintextHash();
+                    if (hashData.size() == 32) {
+                        std::memcpy(responseData.entry.plaintextHash.data(), hashData.begin(), 32);
+                    }
+                    responseData.entry.appId = std::string(entry.getAppId().cStr());
+                    responseData.entry.persistent = entry.getPersistent();
+                }
+
+                responseData.hasKey = resp.getHasKey();
+                if (resp.getHasKey()) {
+                    auto keyData = resp.getKey();
+                    if (keyData.size() == 32) {
+                        std::memcpy(responseData.key.data(), keyData.begin(), 32);
+                    }
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetResolveResponseCallback) {
+                    _assetResolveResponseCallback(responseData);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_RESOLVE_BATCH_REQUEST:
+            {
+                auto req = message.getAssetResolveBatchRequest();
+                uint64_t requestId = req.getRequestId();
+                auto idsReader = req.getAssetIds();
+
+                std::vector<std::array<uint8_t, 32>> assetIds;
+                assetIds.reserve(idsReader.size());
+                for (auto idData : idsReader) {
+                    if (idData.size() == 32) {
+                        std::array<uint8_t, 32> id;
+                        std::memcpy(id.data(), idData.begin(), 32);
+                        assetIds.push_back(id);
+                    }
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetResolveBatchCallback) {
+                    _assetResolveBatchCallback(assetIds, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_RESOLVE_BATCH_RESPONSE:
+            {
+                auto resp = message.getAssetResolveBatchResponse();
+                uint64_t requestId = resp.getRequestId();
+                auto responsesReader = resp.getResponses();
+
+                std::vector<AssetResolveResponseData> responses;
+                responses.reserve(responsesReader.size());
+
+                for (auto src : responsesReader) {
+                    AssetResolveResponseData responseData;
+                    responseData.found = src.getFound();
+                    responseData.deliveryMethod = src.getDeliveryMethod();
+
+                    if (src.getFound()) {
+                        auto entry = src.getEntry();
+                        auto idData = entry.getId();
+                        if (idData.size() == 32) {
+                            std::memcpy(responseData.entry.id.data(), idData.begin(), 32);
+                        }
+                        responseData.entry.uri = std::string(entry.getUri().cStr());
+                        responseData.entry.contentType = entry.getContentType();
+                        responseData.entry.sizeBytes = entry.getSizeBytes();
+                        responseData.entry.encrypted = entry.getEncrypted();
+                        auto hashData = entry.getPlaintextHash();
+                        if (hashData.size() == 32) {
+                            std::memcpy(responseData.entry.plaintextHash.data(), hashData.begin(), 32);
+                        }
+                        responseData.entry.appId = std::string(entry.getAppId().cStr());
+                        responseData.entry.persistent = entry.getPersistent();
+                    }
+
+                    responseData.hasKey = src.getHasKey();
+                    if (src.getHasKey()) {
+                        auto keyData = src.getKey();
+                        if (keyData.size() == 32) {
+                            std::memcpy(responseData.key.data(), keyData.begin(), 32);
+                        }
+                    }
+
+                    responses.push_back(std::move(responseData));
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetResolveBatchResponseCallback) {
+                    _assetResolveBatchResponseCallback(responses, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_PROVIDE_KEY_REQUEST:
+            {
+                auto req = message.getAssetProvideKeyRequest();
+                auto idData = req.getAssetId();
+                auto keyData = req.getKey();
+                uint64_t requestId = req.getRequestId();
+
+                std::array<uint8_t, 32> assetId{};
+                std::array<uint8_t, 32> key{};
+
+                if (idData.size() == 32) {
+                    std::memcpy(assetId.data(), idData.begin(), 32);
+                }
+                if (keyData.size() == 32) {
+                    std::memcpy(key.data(), keyData.begin(), 32);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetProvideKeyCallback) {
+                    _assetProvideKeyCallback(assetId, key, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_PROVIDE_KEY_RESPONSE:
+            {
+                auto resp = message.getAssetProvideKeyResponse();
+                uint64_t requestId = resp.getRequestId();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetProvideKeyResponseCallback) {
+                    _assetProvideKeyResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()),
+                                                     requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_REQUEST:
+            {
+                auto req = message.getAssetUploadRequest();
+                std::string appId(req.getAppId().cStr());
+                auto dataReader = req.getData();
+                std::vector<uint8_t> data(dataReader.begin(), dataReader.end());
+                uint8_t contentType = req.getContentType();
+                bool persistent = req.getPersistent();
+                uint64_t requestId = req.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCallback) {
+                    _assetUploadCallback(appId, data, contentType, persistent, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_RESPONSE:
+            {
+                auto resp = message.getAssetUploadResponse();
+                auto idData = resp.getAssetId();
+                uint64_t requestId = resp.getRequestId();
+
+                std::array<uint8_t, 32> assetId{};
+                if (idData.size() == 32) {
+                    std::memcpy(assetId.data(), idData.begin(), 32);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadResponseCallback) {
+                    _assetUploadResponseCallback(resp.getSuccess(), assetId, std::string(resp.getUri().cStr()),
+                                                 std::string(resp.getErrorMessage().cStr()), requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_FETCH_REQUEST:
+            {
+                auto req = message.getAssetFetchRequest();
+                auto idData = req.getAssetId();
+                uint64_t requestId = req.getRequestId();
+
+                std::array<uint8_t, 32> assetId{};
+                if (idData.size() == 32) {
+                    std::memcpy(assetId.data(), idData.begin(), 32);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetFetchCallback) {
+                    _assetFetchCallback(assetId, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_FETCH_RESPONSE:
+            {
+                auto resp = message.getAssetFetchResponse();
+                auto dataReader = resp.getData();
+                std::vector<uint8_t> data(dataReader.begin(), dataReader.end());
+                uint64_t requestId = resp.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetFetchResponseCallback) {
+                    _assetFetchResponseCallback(resp.getFound(), data, std::string(resp.getErrorMessage().cStr()),
+                                                requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ================================================================
+                // Chunked Upload Messages
+                // ================================================================
+
+            case Message::ASSET_UPLOAD_BEGIN_REQUEST:
+            {
+                auto req = message.getAssetUploadBeginRequest();
+                AssetUploadBeginData data;
+                data.appId = std::string(req.getAppId().cStr());
+                data.totalSize = req.getTotalSize();
+                data.contentType = req.getContentType();
+                data.persistent = req.getPersistent();
+                data.chunkSize = req.getChunkSize();
+                data.encrypted = req.getEncrypted();
+                auto hashData = req.getPlaintextHash();
+                if (hashData.size() == 32) {
+                    std::memcpy(data.plaintextHash.data(), hashData.begin(), 32);
+                }
+                data.requestId = req.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadBeginCallback) {
+                    _assetUploadBeginCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_BEGIN_RESPONSE:
+            {
+                auto resp = message.getAssetUploadBeginResponse();
+                AssetUploadBeginResponseData data;
+                data.success = resp.getSuccess();
+                auto uploadIdData = resp.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(data.uploadId.data(), uploadIdData.begin(), 16);
+                }
+                data.chunkSize = resp.getChunkSize();
+                data.errorMessage = std::string(resp.getErrorMessage().cStr());
+                data.requestId = resp.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadBeginResponseCallback) {
+                    _assetUploadBeginResponseCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_CHUNK_REQUEST:
+            {
+                auto req = message.getAssetUploadChunkRequest();
+                AssetUploadChunkData data;
+                auto uploadIdData = req.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(data.uploadId.data(), uploadIdData.begin(), 16);
+                }
+                data.offset = req.getOffset();
+                auto chunkData = req.getData();
+                data.data.assign(chunkData.begin(), chunkData.end());
+                data.sequence = req.getSequence();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadChunkCallback) {
+                    _assetUploadChunkCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_CHUNK_RESPONSE:
+            {
+                auto resp = message.getAssetUploadChunkResponse();
+                AssetUploadChunkResponseData data;
+                data.success = resp.getSuccess();
+                auto uploadIdData = resp.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(data.uploadId.data(), uploadIdData.begin(), 16);
+                }
+                data.bytesReceived = resp.getBytesReceived();
+                data.errorMessage = std::string(resp.getErrorMessage().cStr());
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadChunkResponseCallback) {
+                    _assetUploadChunkResponseCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_COMPLETE_REQUEST:
+            {
+                auto req = message.getAssetUploadCompleteRequest();
+                AssetUploadCompleteData data;
+                auto uploadIdData = req.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(data.uploadId.data(), uploadIdData.begin(), 16);
+                }
+                data.totalChunks = req.getTotalChunks();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCompleteCallback) {
+                    _assetUploadCompleteCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_COMPLETE_RESPONSE:
+            {
+                auto resp = message.getAssetUploadCompleteResponse();
+                AssetUploadCompleteResponseData data;
+                data.success = resp.getSuccess();
+                auto assetIdData = resp.getAssetId();
+                if (assetIdData.size() == 32) {
+                    std::memcpy(data.assetId.data(), assetIdData.begin(), 32);
+                }
+                data.uri = std::string(resp.getUri().cStr());
+                data.bytesStored = resp.getBytesStored();
+                data.errorMessage = std::string(resp.getErrorMessage().cStr());
+                auto uploadIdData = resp.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(data.uploadId.data(), uploadIdData.begin(), 16);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCompleteResponseCallback) {
+                    _assetUploadCompleteResponseCallback(data);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_CANCEL_REQUEST:
+            {
+                auto req = message.getAssetUploadCancelRequest();
+                std::array<uint8_t, 16> uploadId{};
+                auto uploadIdData = req.getUploadId();
+                if (uploadIdData.size() == 16) {
+                    std::memcpy(uploadId.data(), uploadIdData.begin(), 16);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCancelCallback) {
+                    _assetUploadCancelCallback(uploadId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Message::ASSET_UPLOAD_CANCEL_RESPONSE:
+            {
+                auto resp = message.getAssetUploadCancelResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCancelResponseCallback) {
+                    _assetUploadCancelResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;

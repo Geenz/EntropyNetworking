@@ -315,6 +315,686 @@ Result<void> SessionManager::setHeartbeatCallback(const SessionHandle& handle, H
     return Result<void>::ok();
 }
 
+// Asset callback setters
+
+Result<void> SessionManager::setAssetAdvertiseCallback(const SessionHandle& handle, AssetAdvertiseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // Signatures match directly
+    slot.session->setAssetAdvertiseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetWithdrawCallback(const SessionHandle& handle, AssetWithdrawCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // Signatures match directly
+    slot.session->setAssetWithdrawCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetWithdrawAllCallback(const SessionHandle& handle,
+                                                         AssetWithdrawAllCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetWithdrawAllCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetResolveCallback(const SessionHandle& handle, AssetResolveCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetResolveCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetResolveBatchCallback(const SessionHandle& handle,
+                                                          AssetResolveBatchCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetResolveBatchCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetProvideKeyCallback(const SessionHandle& handle, AssetProvideKeyCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // Signatures match directly
+    slot.session->setAssetProvideKeyCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadCallback(const SessionHandle& handle, AssetUploadCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetUploadCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetFetchCallback(const SessionHandle& handle, AssetFetchCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetFetchCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+// Asset response callback setters
+// These create wrapper lambdas to adapt between SessionManager's signature (requestId first)
+// and NetworkSession's signature (requestId last or in struct)
+
+Result<void> SessionManager::setAssetAdvertiseResponseCallback(const SessionHandle& handle,
+                                                               AssetAdvertiseResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, string, uint64_t) -> SessionManager: (uint64_t, bool, string)
+    slot.session->setAssetAdvertiseResponseCallback(
+        [cb = std::move(callback)](bool success, const std::string& errorMessage, uint64_t requestId) {
+            if (cb) cb(requestId, success, errorMessage);
+        });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetWithdrawResponseCallback(const SessionHandle& handle,
+                                                              AssetWithdrawResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, uint32_t, string, uint64_t) -> SessionManager: (uint64_t, bool, uint32_t, string)
+    slot.session->setAssetWithdrawResponseCallback([cb = std::move(callback)](bool success, uint32_t removedCount,
+                                                                              const std::string& errorMessage,
+                                                                              uint64_t requestId) {
+        if (cb) cb(requestId, success, removedCount, errorMessage);
+    });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetWithdrawAllResponseCallback(const SessionHandle& handle,
+                                                                 AssetWithdrawAllResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, uint32_t, string, uint64_t) -> SessionManager: (uint64_t, bool, uint32_t, string)
+    slot.session->setAssetWithdrawAllResponseCallback([cb = std::move(callback)](bool success, uint32_t removedCount,
+                                                                                 const std::string& errorMessage,
+                                                                                 uint64_t requestId) {
+        if (cb) cb(requestId, success, removedCount, errorMessage);
+    });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetResolveResponseCallback(const SessionHandle& handle,
+                                                             AssetResolveResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (AssetResolveResponseData&) with requestId in struct -> SessionManager: (uint64_t,
+    // AssetResolveResponseData&)
+    slot.session->setAssetResolveResponseCallback(
+        [cb = std::move(callback)](const NetworkSession::AssetResolveResponseData& response) {
+            if (cb) cb(response.requestId, response);
+        });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetResolveBatchResponseCallback(const SessionHandle& handle,
+                                                                  AssetResolveBatchResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (vector<AssetResolveResponseData>&, uint64_t) -> SessionManager: (uint64_t,
+    // vector<AssetResolveResponseData>&)
+    slot.session->setAssetResolveBatchResponseCallback(
+        [cb = std::move(callback)](const std::vector<NetworkSession::AssetResolveResponseData>& responses,
+                                   uint64_t requestId) {
+            if (cb) cb(requestId, responses);
+        });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetProvideKeyResponseCallback(const SessionHandle& handle,
+                                                                AssetProvideKeyResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, string, uint64_t) -> SessionManager: (uint64_t, bool, string)
+    slot.session->setAssetProvideKeyResponseCallback(
+        [cb = std::move(callback)](bool success, const std::string& errorMessage, uint64_t requestId) {
+            if (cb) cb(requestId, success, errorMessage);
+        });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadResponseCallback(const SessionHandle& handle,
+                                                            AssetUploadResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, array<32>, string, string, uint64_t) -> SessionManager: (uint64_t, bool, array<32>,
+    // string, string)
+    slot.session->setAssetUploadResponseCallback(
+        [cb = std::move(callback)](bool success, const std::array<uint8_t, 32>& assetId, const std::string& uri,
+                                   const std::string& errorMessage, uint64_t requestId) {
+            if (cb) cb(requestId, success, assetId, uri, errorMessage);
+        });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetFetchResponseCallback(const SessionHandle& handle,
+                                                           AssetFetchResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    // NetworkSession: (bool, vector<uint8_t>&, string, uint64_t) -> SessionManager: (uint64_t, bool, vector<uint8_t>&,
+    // string)
+    slot.session->setAssetFetchResponseCallback([cb = std::move(callback)](bool found, const std::vector<uint8_t>& data,
+                                                                           const std::string& errorMessage,
+                                                                           uint64_t requestId) {
+        if (cb) cb(requestId, found, data, errorMessage);
+    });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadBeginResponseCallback(const SessionHandle& handle,
+                                                                 AssetUploadBeginResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetUploadBeginResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadChunkResponseCallback(const SessionHandle& handle,
+                                                                 AssetUploadChunkResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetUploadChunkResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadCompleteResponseCallback(const SessionHandle& handle,
+                                                                    AssetUploadCompleteResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetUploadCompleteResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetUploadCancelResponseCallback(const SessionHandle& handle,
+                                                                  AssetUploadCancelResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetUploadCancelResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+// Asset send methods (for clients sending requests)
+
+Result<void> SessionManager::sendAssetAdvertise(const SessionHandle& handle, const std::string& appId,
+                                                const std::vector<NetworkSession::AssetEntryData>& entries,
+                                                uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetAdvertise(appId, entries, requestId);
+}
+
+Result<void> SessionManager::sendAssetWithdraw(const SessionHandle& handle,
+                                               const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                               uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetWithdraw(assetIds, requestId);
+}
+
+Result<void> SessionManager::sendAssetWithdrawAll(const SessionHandle& handle, const std::string& appId,
+                                                  uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetWithdrawAll(appId, requestId);
+}
+
+Result<void> SessionManager::sendAssetResolve(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                              uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetResolve(assetId, requestId);
+}
+
+Result<void> SessionManager::sendAssetResolveBatch(const SessionHandle& handle,
+                                                   const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                                   uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetResolveBatch(assetIds, requestId);
+}
+
+Result<void> SessionManager::sendAssetProvideKey(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                                 const std::array<uint8_t, 32>& key, uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetProvideKey(assetId, key, requestId);
+}
+
+Result<void> SessionManager::sendAssetUpload(const SessionHandle& handle, const std::string& appId,
+                                             const std::vector<uint8_t>& data, uint8_t contentType, bool persistent,
+                                             uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUpload(appId, data, contentType, persistent, requestId);
+}
+
+Result<void> SessionManager::sendAssetFetch(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                            uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetFetch(assetId, requestId);
+}
+
+Result<void> SessionManager::sendAssetUploadBegin(const SessionHandle& handle,
+                                                  const NetworkSession::AssetUploadBeginData& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUploadBegin(data);
+}
+
+Result<void> SessionManager::sendAssetUploadChunk(const SessionHandle& handle,
+                                                  const NetworkSession::AssetUploadChunkData& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUploadChunk(data);
+}
+
+Result<void> SessionManager::sendAssetUploadComplete(const SessionHandle& handle,
+                                                     const NetworkSession::AssetUploadCompleteData& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUploadComplete(data);
+}
+
+Result<void> SessionManager::sendAssetUploadCancel(const SessionHandle& handle,
+                                                   const std::array<uint8_t, 16>& uploadId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUploadCancel(uploadId);
+}
+
+bool SessionManager::supportsMultipleChannels(const SessionHandle& handle) {
+    if (!validateHandle(handle)) {
+        return false;
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return false;
+    }
+
+    return slot.session->supportsMultipleChannels();
+}
+
+Result<void> SessionManager::openChannel(const SessionHandle& handle, const std::string& channel) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->openChannel(channel);
+}
+
 Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                                const std::string& typeName, uint64_t parentId) {
     if (!validateHandle(handle)) {
@@ -418,6 +1098,71 @@ Result<void> SessionManager::sendHeartbeat(const SessionHandle& handle) {
     }
 
     return slot.session->sendHeartbeat();
+}
+
+// Asset send methods
+
+Result<void> SessionManager::sendAssetResolveResponse(const SessionHandle& handle, bool found,
+                                                      const AssetEntryData& entry, bool hasKey,
+                                                      const std::array<uint8_t, 32>& key, uint8_t deliveryMethod) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    NetworkSession::AssetResolveResponseData response;
+    response.found = found;
+    response.entry = entry;
+    response.hasKey = hasKey;
+    response.key = key;
+    response.deliveryMethod = deliveryMethod;
+
+    return slot.session->sendAssetResolveResponse(response);
+}
+
+Result<void> SessionManager::sendAssetUploadResponse(const SessionHandle& handle, bool success,
+                                                     const std::array<uint8_t, 32>& assetId, const std::string& uri,
+                                                     const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetUploadResponse(success, assetId, uri, errorMessage);
+}
+
+Result<void> SessionManager::sendAssetFetchResponse(const SessionHandle& handle, bool found,
+                                                    const std::vector<uint8_t>& data, const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetFetchResponse(found, data, errorMessage);
 }
 
 Result<void> SessionManager::performHandshake(const SessionHandle& handle, const std::string& clientType,

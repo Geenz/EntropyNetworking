@@ -19,6 +19,7 @@
 #include <rtc/rtc.hpp>
 #include <rtc/track.hpp>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NetworkConnection.h"
@@ -82,6 +83,14 @@ public:
     Result<void> send(const std::vector<uint8_t>& data) override;
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
     Result<void> trySend(const std::vector<uint8_t>& data) override;
+
+    // Multi-channel support
+    bool supportsMultipleChannels() const override {
+        return true;
+    }
+    Result<void> openChannel(const std::string& channel) override;
+    Result<void> sendOnChannel(const std::string& channel, const std::vector<uint8_t>& data) override;
+    bool isChannelOpen(const std::string& channel) const override;
 
     ConnectionState getState() const override;
     ConnectionType getType() const override {
@@ -160,6 +169,7 @@ private:
     void setupDataChannel();
     void setupUnreliableDataChannel();
     void setupDataChannelCallbacks(int channelId, bool isReliable);
+    void setupNamedChannelCallbacks(int channelId, const std::string& channelName);
     void setupInternalWebSocket();  // Client mode: set up internal WebSocket for signaling
 
     // C API callback adapters (static with user pointer)
@@ -171,6 +181,11 @@ private:
     static void onOpenCallback(int id, void* user);
     static void onClosedCallback(int id, void* user);
     static void onMessageCallback(int id, const char* message, int size, void* user);
+
+    // Named channel callbacks (static with user pointer)
+    static void onNamedChannelOpenCallback(int id, void* user);
+    static void onNamedChannelClosedCallback(int id, void* user);
+    static void onNamedChannelMessageCallback(int id, const char* message, int size, void* user);
 
     // Callback context - deleted after all active callbacks complete
     // libdatachannel may fire callbacks from background threads even after
@@ -195,6 +210,14 @@ private:
     // Cached channel state to avoid rtcIsOpen() race conditions and deadlock
     std::atomic<bool> _dataChannelOpen{false};
     std::atomic<bool> _unreliableDataChannelOpen{false};
+
+    // Named channels for bulk data (asset uploads/downloads)
+    struct NamedChannel
+    {
+        int id = -1;
+        bool open = false;
+    };
+    std::unordered_map<std::string, NamedChannel> _namedChannels;  // Protected by _mutex
 
     std::atomic<ConnectionState> _state{ConnectionState::Disconnected};
 
