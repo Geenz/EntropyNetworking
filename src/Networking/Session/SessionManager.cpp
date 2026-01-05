@@ -1104,7 +1104,8 @@ Result<void> SessionManager::sendHeartbeat(const SessionHandle& handle) {
 
 Result<void> SessionManager::sendAssetResolveResponse(const SessionHandle& handle, bool found,
                                                       const AssetEntryData& entry, bool hasKey,
-                                                      const std::array<uint8_t, 32>& key, uint8_t deliveryMethod) {
+                                                      const std::array<uint8_t, 32>& key, uint8_t deliveryMethod,
+                                                      uint64_t requestId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1124,13 +1125,14 @@ Result<void> SessionManager::sendAssetResolveResponse(const SessionHandle& handl
     response.hasKey = hasKey;
     response.key = key;
     response.deliveryMethod = deliveryMethod;
+    response.requestId = requestId;
 
     return slot.session->sendAssetResolveResponse(response);
 }
 
 Result<void> SessionManager::sendAssetUploadResponse(const SessionHandle& handle, bool success,
                                                      const std::array<uint8_t, 32>& assetId, const std::string& uri,
-                                                     const std::string& errorMessage) {
+                                                     const std::string& errorMessage, uint64_t requestId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1144,11 +1146,12 @@ Result<void> SessionManager::sendAssetUploadResponse(const SessionHandle& handle
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendAssetUploadResponse(success, assetId, uri, errorMessage);
+    return slot.session->sendAssetUploadResponse(success, assetId, uri, errorMessage, requestId);
 }
 
 Result<void> SessionManager::sendAssetFetchResponse(const SessionHandle& handle, bool found,
-                                                    const std::vector<uint8_t>& data, const std::string& errorMessage) {
+                                                    const std::vector<uint8_t>& data, const std::string& errorMessage,
+                                                    uint64_t requestId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1162,7 +1165,7 @@ Result<void> SessionManager::sendAssetFetchResponse(const SessionHandle& handle,
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendAssetFetchResponse(found, data, errorMessage);
+    return slot.session->sendAssetFetchResponse(found, data, errorMessage, requestId);
 }
 
 Result<void> SessionManager::performHandshake(const SessionHandle& handle, const std::string& clientType,

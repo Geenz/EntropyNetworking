@@ -490,20 +490,21 @@ public:
      * @brief Sends AssetResolveResponse message
      */
     Result<void> sendAssetResolveResponse(const SessionHandle& handle, bool found, const AssetEntryData& entry,
-                                          bool hasKey, const std::array<uint8_t, 32>& key, uint8_t deliveryMethod);
+                                          bool hasKey, const std::array<uint8_t, 32>& key, uint8_t deliveryMethod,
+                                          uint64_t requestId = 0);
 
     /**
      * @brief Sends AssetUploadResponse message
      */
     Result<void> sendAssetUploadResponse(const SessionHandle& handle, bool success,
                                          const std::array<uint8_t, 32>& assetId, const std::string& uri,
-                                         const std::string& errorMessage);
+                                         const std::string& errorMessage, uint64_t requestId = 0);
 
     /**
      * @brief Sends AssetFetchResponse message
      */
     Result<void> sendAssetFetchResponse(const SessionHandle& handle, bool found, const std::vector<uint8_t>& data,
-                                        const std::string& errorMessage);
+                                        const std::string& errorMessage, uint64_t requestId = 0);
 
     /**
      * @brief Initiates handshake (called by handle.performHandshake())

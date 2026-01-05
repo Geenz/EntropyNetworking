@@ -11,6 +11,7 @@
 
 #include <EntropyCore.h>
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
