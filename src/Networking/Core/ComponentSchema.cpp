@@ -189,8 +189,8 @@ Result<ComponentSchema> ComponentSchema::create(const std::string& appId, const 
                     "' must be ASCII identifier [a-zA-Z0-9_.], starting with letter or underscore");
         }
 
-        // Check for valid property type (Bytes=10, QuatArray=18)
-        if (static_cast<int>(prop.type) < 0 || static_cast<int>(prop.type) > 18) {
+        // Check for valid property type (Bytes=10, QuatArray=18, AssetId=19)
+        if (static_cast<int>(prop.type) < 0 || static_cast<int>(prop.type) > 19) {
             std::string errorMsg =
                 std::format("Property '{}' has invalid type: {}", prop.name, static_cast<int>(prop.type));
             ENTROPY_LOG_ERROR_CAT("ComponentSchema", errorMsg);

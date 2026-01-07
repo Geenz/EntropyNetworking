@@ -162,6 +162,8 @@ void BatchManager::processBatch() {
                         value.setBool(val);
                     } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
                         value.setBytes(kj::arrayPtr(val.data(), val.size()));
+                    } else if constexpr (std::is_same_v<T, AssetId>) {
+                        value.setAssetId(kj::arrayPtr(val.hash.data(), val.hash.size()));
                     }
                 },
                 pending.value);

@@ -34,6 +34,9 @@ enum PropertyType {
     vec3Array @16;
     vec4Array @17;
     quatArray @18;
+
+    # Asset reference
+    assetId @19;
 }
 
 struct Vec2 {
@@ -74,6 +77,7 @@ struct PropertyValue {
         string @8 :Text;
         bool @9 :Bool;
         bytes @10 :Data;
+        assetId @11 :Data;        # 32-byte SHA-256 asset identifier
     }
 }
 

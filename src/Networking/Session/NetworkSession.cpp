@@ -332,6 +332,8 @@ Result<void> NetworkSession::sendPropertyUpdate(PropertyHash hash, PropertyType 
                     valueBuilder.setBool(v);
                 else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
                     valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+                else if constexpr (std::is_same_v<T, AssetId>)
+                    valueBuilder.setAssetId(kj::arrayPtr(v.hash.data(), v.hash.size()));
             },
             value);
 
@@ -1789,6 +1791,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
             case Message::PROPERTY_UPDATE_BATCH:
             {
+                ENTROPY_LOG_INFO(std::format("NetworkSession: Received PROPERTY_UPDATE_BATCH ({} bytes), callback={}",
+                                             data.size(), _propertyUpdateCallback ? "set" : "null"));
                 auto batch = message.getPropertyUpdateBatch();
                 uint32_t seq = batch.getSequence();
 
@@ -1839,6 +1843,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
             case Message::SCENE_SNAPSHOT_CHUNK:
             {
+                ENTROPY_LOG_INFO(std::format("NetworkSession: Received SCENE_SNAPSHOT_CHUNK ({} bytes), callback={}",
+                                             data.size(), _sceneSnapshotCallback ? "set" : "null"));
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _sceneSnapshotCallback) {
                     _sceneSnapshotCallback(data);
@@ -2727,6 +2733,8 @@ Result<void> NetworkSession::flushPropertyUpdates() {
                         valueBuilder.setBool(v);
                     else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
                         valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
+                    else if constexpr (std::is_same_v<T, AssetId>)
+                        valueBuilder.setAssetId(kj::arrayPtr(v.hash.data(), v.hash.size()));
                 },
                 pending.value);
         }

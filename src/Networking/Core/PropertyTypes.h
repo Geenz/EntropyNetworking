@@ -20,6 +20,7 @@
 #include <variant>
 #include <vector>
 
+#include "AssetId.h"
 #include "NetworkTypes.h"
 
 namespace EntropyEngine
@@ -54,7 +55,10 @@ enum class PropertyType
     Vec2Array,
     Vec3Array,
     Vec4Array,
-    QuatArray
+    QuatArray,
+
+    // Asset reference
+    AssetId
 };
 
 /**
@@ -68,7 +72,10 @@ using PropertyValue = std::variant<int32_t, int64_t, float, double, Vec2, Vec3, 
 
                                    // Array types
                                    std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>,
-                                   std::vector<Vec2>, std::vector<Vec3>, std::vector<Vec4>, std::vector<Quat> >;
+                                   std::vector<Vec2>, std::vector<Vec3>, std::vector<Vec4>, std::vector<Quat>,
+
+                                   // Asset reference
+                                   AssetId>;
 
 /**
  * @brief Validate that a property value matches the expected type

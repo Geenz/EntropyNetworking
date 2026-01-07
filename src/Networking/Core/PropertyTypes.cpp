@@ -43,6 +43,9 @@ PropertyType getPropertyType(const PropertyValue& value) {
     if (std::holds_alternative<std::vector<Vec4>>(value)) return PropertyType::Vec4Array;
     if (std::holds_alternative<std::vector<Quat>>(value)) return PropertyType::QuatArray;
 
+    // Asset reference
+    if (std::holds_alternative<AssetId>(value)) return PropertyType::AssetId;
+
     // Should never reach here
     return PropertyType::Int32;
 }
@@ -87,6 +90,8 @@ const char* propertyTypeToString(PropertyType type) {
             return "Vec4Array";
         case PropertyType::QuatArray:
             return "QuatArray";
+        case PropertyType::AssetId:
+            return "AssetId";
         default:
             return "Unknown";
     }
@@ -134,6 +139,8 @@ uint16_t toCapnpPropertyType(PropertyType type) {
             return static_cast<uint16_t>(::PropertyType::VEC4_ARRAY);
         case PropertyType::QuatArray:
             return static_cast<uint16_t>(::PropertyType::QUAT_ARRAY);
+        case PropertyType::AssetId:
+            return static_cast<uint16_t>(::PropertyType::ASSET_ID);
         default:
             return static_cast<uint16_t>(::PropertyType::INT32);  // Fallback
     }
@@ -182,6 +189,8 @@ PropertyType fromCapnpPropertyType(uint16_t capnpType) {
             return PropertyType::Vec4Array;
         case ::PropertyType::QUAT_ARRAY:
             return PropertyType::QuatArray;
+        case ::PropertyType::ASSET_ID:
+            return PropertyType::AssetId;
         default:
             return PropertyType::Int32;  // Fallback
     }

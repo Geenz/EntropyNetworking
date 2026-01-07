@@ -9,6 +9,8 @@
 
 #include "ComponentSchemaSerializer.h"
 
+#include <cstring>
+
 #include "../Core/PropertyTypes.h"
 
 namespace EntropyEngine
@@ -60,6 +62,9 @@ void serializePropertyValue(const PropertyValue& value, ::PropertyValue::Builder
     } else if (std::holds_alternative<std::vector<uint8_t>>(value)) {
         const auto& bytes = std::get<std::vector<uint8_t>>(value);
         builder.setBytes(kj::ArrayPtr<const uint8_t>(bytes.data(), bytes.size()));
+    } else if (std::holds_alternative<AssetId>(value)) {
+        const auto& assetId = std::get<AssetId>(value);
+        builder.setAssetId(kj::ArrayPtr<const uint8_t>(assetId.hash.data(), assetId.hash.size()));
     }
     // Note: Array types not serialized for default values (not commonly used as defaults)
 }
@@ -103,6 +108,15 @@ PropertyValue deserializePropertyValue(::PropertyValue::Reader reader) {
         {
             auto bytes = reader.getBytes();
             return std::vector<uint8_t>(bytes.begin(), bytes.end());
+        }
+        case ::PropertyValue::ASSET_ID:
+        {
+            auto assetIdBytes = reader.getAssetId();
+            AssetId assetId;
+            if (assetIdBytes.size() == 32) {
+                std::memcpy(assetId.hash.data(), assetIdBytes.begin(), 32);
+            }
+            return assetId;
         }
         default:
             // For unsupported types, return int32(0) as placeholder
