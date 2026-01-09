@@ -739,6 +739,157 @@ Result<void> SessionManager::setAssetUploadCancelResponseCallback(const SessionH
     return Result<void>::ok();
 }
 
+// Scene management callback setters
+
+Result<void> SessionManager::setCreateSceneCallback(const SessionHandle& handle, CreateSceneCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setCreateSceneCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setCreateSceneResponseCallback(const SessionHandle& handle,
+                                                            CreateSceneResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setCreateSceneResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setDestroySceneCallback(const SessionHandle& handle, DestroySceneCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setDestroySceneCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setDestroySceneResponseCallback(const SessionHandle& handle,
+                                                             DestroySceneResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setDestroySceneResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setSetSceneEnabledCallback(const SessionHandle& handle, SetSceneEnabledCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setSetSceneEnabledCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setSetSceneEnabledResponseCallback(const SessionHandle& handle,
+                                                                SetSceneEnabledResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setSetSceneEnabledResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAddEntityToSceneCallback(const SessionHandle& handle,
+                                                         AddEntityToSceneCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAddEntityToSceneCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAddEntityToSceneResponseCallback(const SessionHandle& handle,
+                                                                 AddEntityToSceneResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAddEntityToSceneResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
 // Asset send methods (for clients sending requests)
 
 Result<void> SessionManager::sendAssetAdvertise(const SessionHandle& handle, const std::string& appId,
@@ -996,7 +1147,8 @@ Result<void> SessionManager::openChannel(const SessionHandle& handle, const std:
 }
 
 Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
-                                               const std::string& typeName, uint64_t parentId) {
+                                               const std::string& typeName, uint64_t parentId,
+                                               const std::vector<NetworkSession::ComponentGroupData>& components) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1010,7 +1162,7 @@ Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId);
+    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId, components);
 }
 
 Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, uint64_t entityId) {
@@ -1149,6 +1301,24 @@ Result<void> SessionManager::sendAssetUploadResponse(const SessionHandle& handle
     return slot.session->sendAssetUploadResponse(success, assetId, uri, errorMessage, requestId);
 }
 
+Result<void> SessionManager::sendAssetAdvertiseResponse(const SessionHandle& handle, bool success,
+                                                        const std::string& errorMessage, uint64_t requestId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetAdvertiseResponse(success, errorMessage, requestId);
+}
+
 Result<void> SessionManager::sendAssetFetchResponse(const SessionHandle& handle, bool found,
                                                     const std::vector<uint8_t>& data, const std::string& errorMessage,
                                                     uint64_t requestId) {
@@ -1184,6 +1354,150 @@ Result<void> SessionManager::performHandshake(const SessionHandle& handle, const
     }
 
     return slot.session->performHandshake(clientType, clientId);
+}
+
+// Scene management send methods
+
+Result<void> SessionManager::sendCreateSceneRequest(const SessionHandle& handle, const std::string& sceneName,
+                                                    bool transient) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendCreateSceneRequest(sceneName, transient);
+}
+
+Result<void> SessionManager::sendCreateSceneResponse(const SessionHandle& handle, bool success, uint64_t sceneId,
+                                                     const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendCreateSceneResponse(success, sceneId, errorMessage);
+}
+
+Result<void> SessionManager::sendDestroySceneRequest(const SessionHandle& handle, uint64_t sceneId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendDestroySceneRequest(sceneId);
+}
+
+Result<void> SessionManager::sendDestroySceneResponse(const SessionHandle& handle, bool success,
+                                                      const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendDestroySceneResponse(success, errorMessage);
+}
+
+Result<void> SessionManager::sendSetSceneEnabledRequest(const SessionHandle& handle, uint64_t sceneId, bool enabled) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendSetSceneEnabledRequest(sceneId, enabled);
+}
+
+Result<void> SessionManager::sendSetSceneEnabledResponse(const SessionHandle& handle, bool success,
+                                                         const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendSetSceneEnabledResponse(success, errorMessage);
+}
+
+Result<void> SessionManager::sendAddEntityToSceneRequest(const SessionHandle& handle, uint64_t entityId,
+                                                         uint64_t sceneId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAddEntityToSceneRequest(entityId, sceneId);
+}
+
+Result<void> SessionManager::sendAddEntityToSceneResponse(const SessionHandle& handle, bool success,
+                                                          const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAddEntityToSceneResponse(success, errorMessage);
 }
 
 bool SessionManager::isConnected(const SessionHandle& handle) const {

@@ -14,7 +14,7 @@
 
 #include "../Core/TimeUtils.h"
 #include "../Protocol/ComponentSchemaSerializer.h"
-#include "src/Networking/Protocol/entropy.capnp.h"
+#include "Networking/Protocol/entropy.capnp.h"
 
 namespace EntropyEngine::Networking
 {
@@ -141,7 +141,7 @@ Result<void> NetworkSession::performHandshake(const std::string& clientType, con
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto msg = builder.initRoot<Message>();
+        auto msg = builder.initRoot<Protocol::Message>();
         auto hs = msg.initHandshake();
         hs.setProtocolVersion(1);
         hs.setClientType(clientType);
@@ -165,7 +165,7 @@ Result<void> NetworkSession::performHandshake(const std::string& clientType, con
 }
 
 Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                               uint64_t parentId, const std::vector<PropertyMetadata>& properties) {
+                                               uint64_t parentId, const std::vector<ComponentGroupData>& components) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -176,17 +176,84 @@ Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::str
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto ec = message.initEntityCreated();
         ec.setEntityId(entityId);
         ec.setAppId(appId);
         ec.setTypeName(typeName);
         ec.setParentId(parentId);
 
-        auto list = ec.initProperties(properties.size());
-        for (size_t i = 0; i < properties.size(); ++i) {
-            const auto& pm = properties[i];
-            auto pr = list[i];
+        // Build component groups
+        auto componentList = ec.initComponents(components.size());
+        for (size_t i = 0; i < components.size(); ++i) {
+            const auto& comp = components[i];
+            auto cg = componentList[i];
+
+            // Set component type hash
+            auto th = cg.initTypeHash();
+            th.setHigh(comp.typeHash.high);
+            th.setLow(comp.typeHash.low);
+
+            // Set component name
+            cg.setComponentName(comp.componentName);
+
+            // Build properties within this component
+            auto propList = cg.initProperties(comp.properties.size());
+            for (size_t j = 0; j < comp.properties.size(); ++j) {
+                const auto& pm = comp.properties[j];
+                auto pr = propList[j];
+                auto ph = pr.initPropertyHash();
+                ph.setHigh(pm.hash.high);
+                ph.setLow(pm.hash.low);
+                pr.setEntityId(pm.entityId);
+                auto ct = pr.initComponentType();
+                ct.setHigh(pm.componentType.high);
+                ct.setLow(pm.componentType.low);
+                pr.setPropertyName(pm.propertyName);
+                pr.setType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(pm.type)));
+                pr.setRegisteredAt(pm.registeredAt);
+            }
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendComponentAdded(uint64_t entityId, const ComponentGroupData& component) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto ca = message.initComponentAdded();
+        ca.setEntityId(entityId);
+
+        // Build component group
+        auto cg = ca.initComponent();
+        auto th = cg.initTypeHash();
+        th.setHigh(component.typeHash.high);
+        th.setLow(component.typeHash.low);
+        cg.setComponentName(component.componentName);
+
+        // Build properties
+        auto propList = cg.initProperties(component.properties.size());
+        for (size_t i = 0; i < component.properties.size(); ++i) {
+            const auto& pm = component.properties[i];
+            auto pr = propList[i];
             auto ph = pr.initPropertyHash();
             ph.setHigh(pm.hash.high);
             ph.setLow(pm.hash.low);
@@ -195,9 +262,40 @@ Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::str
             ct.setHigh(pm.componentType.high);
             ct.setLow(pm.componentType.low);
             pr.setPropertyName(pm.propertyName);
-            pr.setType(static_cast<::PropertyType>(toCapnpPropertyType(pm.type)));
+            pr.setType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(pm.type)));
             pr.setRegisteredAt(pm.registeredAt);
         }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->send(serialized.value);
+
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto cr = message.initComponentRemoved();
+        cr.setEntityId(entityId);
+
+        auto th = cr.initTypeHash();
+        th.setHigh(typeHash.high);
+        th.setLow(typeHash.low);
 
         auto serialized = serialize(builder);
         if (serialized.failed()) {
@@ -222,7 +320,7 @@ Result<void> NetworkSession::sendEntityDestroyed(uint64_t entityId) {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto entityDestroyed = message.initEntityDestroyed();
         entityDestroyed.setEntityId(entityId);
 
@@ -279,7 +377,7 @@ Result<void> NetworkSession::sendPropertyUpdate(PropertyHash hash, PropertyType 
     // Batching disabled - send immediately (original behavior)
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto batch = message.initPropertyUpdateBatch();
 
         batch.setTimestamp(getCurrentTimestampMicros());
@@ -291,7 +389,7 @@ Result<void> NetworkSession::sendPropertyUpdate(PropertyHash hash, PropertyType 
         auto ph = update.initPropertyHash();
         ph.setHigh(hash.high);
         ph.setLow(hash.low);
-        update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(type)));
+        update.setExpectedType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(type)));
 
         auto valueBuilder = update.initValue();
         std::visit(
@@ -378,7 +476,7 @@ Result<void> NetworkSession::sendRegisterSchema(const ComponentSchema& schema) {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initRegisterSchemaRequest();
 
         // Serialize the schema using ComponentSchemaSerializer
@@ -409,7 +507,7 @@ Result<void> NetworkSession::sendQueryPublicSchemas() {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         message.initQueryPublicSchemasRequest();
 
         auto serialized = serialize(builder);
@@ -435,7 +533,7 @@ Result<void> NetworkSession::sendPublishSchema(ComponentTypeHash typeHash) {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initPublishSchemaRequest();
 
         auto hashBuilder = request.initTypeHash();
@@ -465,7 +563,7 @@ Result<void> NetworkSession::sendUnpublishSchema(ComponentTypeHash typeHash) {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initUnpublishSchemaRequest();
 
         auto hashBuilder = request.initTypeHash();
@@ -508,7 +606,7 @@ Result<void> NetworkSession::sendSchemaNack(ComponentTypeHash typeHash, const st
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto nack = message.initSchemaNack();
 
         auto hashBuilder = nack.initTypeHash();
@@ -547,7 +645,7 @@ Result<void> NetworkSession::sendSchemaAdvertisement(ComponentTypeHash typeHash,
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto advert = message.initSchemaAdvertisement();
 
         auto hashBuilder = advert.initTypeHash();
@@ -580,7 +678,7 @@ Result<void> NetworkSession::sendHeartbeat() {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto heartbeat = message.initHeartbeat();
 
         heartbeat.setTimestamp(getCurrentTimestampMicros());
@@ -609,7 +707,7 @@ Result<void> NetworkSession::sendHeartbeatResponse(uint64_t clientTimestamp) {
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initHeartbeatResponse();
 
         response.setTimestamp(clientTimestamp);
@@ -643,7 +741,7 @@ Result<void> NetworkSession::sendAssetAdvertise(const std::string& appId, const 
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetAdvertiseRequest();
         request.setAppId(appId);
         request.setRequestId(requestId);
@@ -680,7 +778,7 @@ Result<void> NetworkSession::sendAssetAdvertiseResponse(bool success, const std:
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetAdvertiseResponse();
         response.setSuccess(success);
         response.setErrorMessage(errorMessage);
@@ -707,7 +805,7 @@ Result<void> NetworkSession::sendAssetWithdraw(const std::vector<std::array<uint
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetWithdrawRequest();
         request.setRequestId(requestId);
         auto list = request.initAssetIds(assetIds.size());
@@ -733,7 +831,7 @@ Result<void> NetworkSession::sendAssetWithdrawResponse(bool success, uint32_t re
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetWithdrawResponse();
         response.setSuccess(success);
         response.setRemovedCount(removedCount);
@@ -760,7 +858,7 @@ Result<void> NetworkSession::sendAssetWithdrawAll(const std::string& appId, uint
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetWithdrawAllRequest();
         request.setAppId(appId);
         request.setRequestId(requestId);
@@ -783,7 +881,7 @@ Result<void> NetworkSession::sendAssetWithdrawAllResponse(bool success, uint32_t
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetWithdrawAllResponse();
         response.setSuccess(success);
         response.setRemovedCount(removedCount);
@@ -810,7 +908,7 @@ Result<void> NetworkSession::sendAssetResolve(const std::array<uint8_t, 32>& ass
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetResolveRequest();
         request.setAssetId(kj::arrayPtr(assetId.data(), 32));
         request.setRequestId(requestId);
@@ -832,7 +930,7 @@ Result<void> NetworkSession::sendAssetResolveResponse(const AssetResolveResponse
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto resp = message.initAssetResolveResponse();
         resp.setFound(response.found);
         resp.setRequestId(response.requestId);
@@ -877,7 +975,7 @@ Result<void> NetworkSession::sendAssetResolveBatch(const std::vector<std::array<
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetResolveBatchRequest();
         request.setRequestId(requestId);
         auto list = request.initAssetIds(assetIds.size());
@@ -903,7 +1001,7 @@ Result<void> NetworkSession::sendAssetResolveBatchResponse(const std::vector<Ass
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto batchResp = message.initAssetResolveBatchResponse();
         batchResp.setRequestId(requestId);
         auto responsesList = batchResp.initResponses(responses.size());
@@ -953,7 +1051,7 @@ Result<void> NetworkSession::sendAssetProvideKey(const std::array<uint8_t, 32>& 
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetProvideKeyRequest();
         request.setAssetId(kj::arrayPtr(assetId.data(), 32));
         request.setKey(kj::arrayPtr(key.data(), 32));
@@ -977,7 +1075,7 @@ Result<void> NetworkSession::sendAssetProvideKeyResponse(bool success, const std
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetProvideKeyResponse();
         response.setSuccess(success);
         response.setErrorMessage(errorMessage);
@@ -1004,7 +1102,7 @@ Result<void> NetworkSession::sendAssetUpload(const std::string& appId, const std
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetUploadRequest();
         request.setAppId(appId);
         request.setData(kj::arrayPtr(data.data(), data.size()));
@@ -1031,7 +1129,7 @@ Result<void> NetworkSession::sendAssetUploadResponse(bool success, const std::ar
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetUploadResponse();
         response.setSuccess(success);
         response.setAssetId(kj::arrayPtr(assetId.data(), 32));
@@ -1059,7 +1157,7 @@ Result<void> NetworkSession::sendAssetFetch(const std::array<uint8_t, 32>& asset
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetFetchRequest();
         request.setAssetId(kj::arrayPtr(assetId.data(), 32));
         request.setRequestId(requestId);
@@ -1082,7 +1180,7 @@ Result<void> NetworkSession::sendAssetFetchResponse(bool found, const std::vecto
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetFetchResponse();
         response.setFound(found);
         response.setData(kj::arrayPtr(data.data(), data.size()));
@@ -1113,7 +1211,7 @@ Result<void> NetworkSession::sendAssetUploadBegin(const AssetUploadBeginData& da
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetUploadBeginRequest();
         request.setAppId(data.appId);
         request.setTotalSize(data.totalSize);
@@ -1141,7 +1239,7 @@ Result<void> NetworkSession::sendAssetUploadBeginResponse(const AssetUploadBegin
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetUploadBeginResponse();
         response.setSuccess(data.success);
         response.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
@@ -1166,7 +1264,7 @@ Result<void> NetworkSession::sendAssetUploadChunk(const AssetUploadChunkData& da
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetUploadChunkRequest();
         request.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
         request.setOffset(data.offset);
@@ -1193,7 +1291,7 @@ Result<void> NetworkSession::sendAssetUploadChunkResponse(const AssetUploadChunk
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetUploadChunkResponse();
         response.setSuccess(data.success);
         response.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
@@ -1219,7 +1317,7 @@ Result<void> NetworkSession::sendAssetUploadComplete(const AssetUploadCompleteDa
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetUploadCompleteRequest();
         request.setUploadId(kj::arrayPtr(data.uploadId.data(), data.uploadId.size()));
         request.setTotalChunks(data.totalChunks);
@@ -1241,7 +1339,7 @@ Result<void> NetworkSession::sendAssetUploadCompleteResponse(const AssetUploadCo
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetUploadCompleteResponse();
         response.setSuccess(data.success);
         response.setAssetId(kj::arrayPtr(data.assetId.data(), data.assetId.size()));
@@ -1267,7 +1365,7 @@ Result<void> NetworkSession::sendAssetUploadCancel(const std::array<uint8_t, 16>
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto request = message.initAssetUploadCancelRequest();
         request.setUploadId(kj::arrayPtr(uploadId.data(), uploadId.size()));
 
@@ -1288,8 +1386,188 @@ Result<void> NetworkSession::sendAssetUploadCancelResponse(bool success, const s
 
     try {
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto response = message.initAssetUploadCancelResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+// =============================================================================
+// Scene Management Messages
+// =============================================================================
+
+Result<void> NetworkSession::sendCreateSceneRequest(const std::string& sceneName, bool transient) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initCreateSceneRequest();
+        request.setSceneName(sceneName);
+        request.setTransient(transient);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendCreateSceneResponse(bool success, uint64_t sceneId, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initCreateSceneResponse();
+        response.setSuccess(success);
+        response.setSceneId(sceneId);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendDestroySceneRequest(uint64_t sceneId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initDestroySceneRequest();
+        request.setSceneId(sceneId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendDestroySceneResponse(bool success, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initDestroySceneResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendSetSceneEnabledRequest(uint64_t sceneId, bool enabled) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initSetSceneEnabledRequest();
+        request.setSceneId(sceneId);
+        request.setEnabled(enabled);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendSetSceneEnabledResponse(bool success, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initSetSceneEnabledResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAddEntityToSceneRequest(uint64_t entityId, uint64_t sceneId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initAddEntityToSceneRequest();
+        request.setEntityId(entityId);
+        request.setSceneId(sceneId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAddEntityToSceneResponse(bool success, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initAddEntityToSceneResponse();
         response.setSuccess(success);
         response.setErrorMessage(errorMessage);
 
@@ -1612,6 +1890,71 @@ void NetworkSession::setAssetUploadCancelResponseCallback(AssetUploadCancelRespo
     _assetUploadCancelResponseCallback = std::move(callback);
 }
 
+// Scene management callback setters
+void NetworkSession::setCreateSceneCallback(CreateSceneCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _createSceneCallback = std::move(callback);
+}
+
+void NetworkSession::setCreateSceneResponseCallback(CreateSceneResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _createSceneResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setDestroySceneCallback(DestroySceneCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _destroySceneCallback = std::move(callback);
+}
+
+void NetworkSession::setDestroySceneResponseCallback(DestroySceneResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _destroySceneResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setSetSceneEnabledCallback(SetSceneEnabledCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _setSceneEnabledCallback = std::move(callback);
+}
+
+void NetworkSession::setSetSceneEnabledResponseCallback(SetSceneEnabledResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _setSceneEnabledResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setAddEntityToSceneCallback(AddEntityToSceneCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _addEntityToSceneCallback = std::move(callback);
+}
+
+void NetworkSession::setAddEntityToSceneResponseCallback(AddEntityToSceneResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _addEntityToSceneResponseCallback = std::move(callback);
+}
+
 void NetworkSession::clearCallbacks() {
     // Mark as shutting down to prevent new callbacks
     _shuttingDown.store(true, std::memory_order_release);
@@ -1665,6 +2008,16 @@ void NetworkSession::clearCallbacks() {
     _assetUploadCompleteResponseCallback = nullptr;
     _assetUploadCancelCallback = nullptr;
     _assetUploadCancelResponseCallback = nullptr;
+
+    // Scene management callbacks
+    _createSceneCallback = nullptr;
+    _createSceneResponseCallback = nullptr;
+    _destroySceneCallback = nullptr;
+    _destroySceneResponseCallback = nullptr;
+    _setSceneEnabledCallback = nullptr;
+    _setSceneEnabledResponseCallback = nullptr;
+    _addEntityToSceneCallback = nullptr;
+    _addEntityToSceneResponseCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -1702,8 +2055,6 @@ void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
-    ENTROPY_LOG_DEBUG(
-        std::format("NetworkSession::onMessageReceived: {} bytes for session {}", data.size(), (void*)this));
     handleReceivedMessage(data);
 }
 
@@ -1734,51 +2085,88 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         }
 
         // Read the message
-        kj::ArrayPtr<const ::capnp::word> words(reinterpret_cast<const ::capnp::word*>(deserialized.value.begin()),
-                                                deserialized.value.size());
+        kj::ArrayPtr<const capnp::word> words(reinterpret_cast<const capnp::word*>(deserialized.value.begin()),
+                                              deserialized.value.size());
 
-        ::capnp::FlatArrayMessageReader reader(words);
-        auto message = reader.getRoot<Message>();
-
-        // Debug: log received message type
-        ENTROPY_LOG_DEBUG(std::format("Received message type: {}", static_cast<int>(message.which())));
+        capnp::FlatArrayMessageReader reader(words);
+        auto message = reader.getRoot<Protocol::Message>();
 
         // Dispatch based on message type
         switch (message.which()) {
-            case Message::ENTITY_CREATED:
+            case Protocol::Message::ENTITY_CREATED:
             {
                 auto entityCreated = message.getEntityCreated();
 
-                // Validate all ComponentTypeHash values in properties if schema registry is available
-                if (_schemaRegistry) {
-                    auto properties = entityCreated.getProperties();
-                    for (auto prop : properties) {
-                        if (prop.hasComponentType()) {
-                            auto componentTypeReader = prop.getComponentType();
-                            ComponentTypeHash typeHash{componentTypeReader.getHigh(), componentTypeReader.getLow()};
+                // Extract component groups with their properties
+                std::vector<ComponentGroupData> componentGroups;
+                auto componentsReader = entityCreated.getComponents();
 
-                            // Check if schema is registered
-                            if (!_schemaRegistry->isRegistered(typeHash)) {
-                                // Handle unknown schema: increment metrics, log, and optionally send NACK
-                                handleUnknownSchema(typeHash);
-                            }
+                // Build ComponentGroupData for each component
+                for (auto compGroup : componentsReader) {
+                    ComponentGroupData groupData;
+
+                    // Get component type hash
+                    if (compGroup.hasTypeHash()) {
+                        auto thReader = compGroup.getTypeHash();
+                        groupData.typeHash = ComponentTypeHash{thReader.getHigh(), thReader.getLow()};
+                    }
+
+                    // Get component name
+                    if (compGroup.hasComponentName()) {
+                        groupData.componentName = compGroup.getComponentName().cStr();
+                    }
+
+                    // Validate component schema if registry is available
+                    if (_schemaRegistry && !groupData.typeHash.isNull()) {
+                        if (!_schemaRegistry->isRegistered(groupData.typeHash)) {
+                            handleUnknownSchema(groupData.typeHash);
                         }
                     }
+
+                    // Extract properties from this component group
+                    auto propsReader = compGroup.getProperties();
+                    for (auto prop : propsReader) {
+                        PropertyMetadata metadata;
+
+                        // Extract property hash
+                        if (prop.hasPropertyHash()) {
+                            auto hashReader = prop.getPropertyHash();
+                            metadata.hash = PropertyHash{hashReader.getHigh(), hashReader.getLow()};
+                        }
+
+                        // Extract entity ID
+                        metadata.entityId = prop.getEntityId();
+
+                        // Use component type from the group
+                        metadata.componentType = groupData.typeHash;
+
+                        // Extract property name
+                        if (prop.hasPropertyName()) {
+                            metadata.propertyName = prop.getPropertyName().cStr();
+                        }
+
+                        // Extract property type
+                        metadata.type = static_cast<PropertyType>(prop.getType());
+
+                        groupData.properties.push_back(std::move(metadata));
+                    }
+
+                    componentGroups.push_back(std::move(groupData));
                 }
 
-                // Invoke callback regardless of schema validation
+                // Invoke callback with component groups
                 // Application layer decides how to handle entities with unknown schemas
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _entityCreatedCallback) {
                     _entityCreatedCallback(entityCreated.getEntityId(), std::string(entityCreated.getAppId().cStr()),
-                                           std::string(entityCreated.getTypeName().cStr()),
-                                           entityCreated.getParentId());
+                                           std::string(entityCreated.getTypeName().cStr()), entityCreated.getParentId(),
+                                           componentGroups);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
             }
 
-            case Message::ENTITY_DESTROYED:
+            case Protocol::Message::ENTITY_DESTROYED:
             {
                 auto entityDestroyed = message.getEntityDestroyed();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -1789,7 +2177,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::PROPERTY_UPDATE_BATCH:
+            case Protocol::Message::PROPERTY_UPDATE_BATCH:
             {
                 ENTROPY_LOG_INFO(std::format("NetworkSession: Received PROPERTY_UPDATE_BATCH ({} bytes), callback={}",
                                              data.size(), _propertyUpdateCallback ? "set" : "null"));
@@ -1841,7 +2229,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::SCENE_SNAPSHOT_CHUNK:
+            case Protocol::Message::SCENE_SNAPSHOT_CHUNK:
             {
                 ENTROPY_LOG_INFO(std::format("NetworkSession: Received SCENE_SNAPSHOT_CHUNK ({} bytes), callback={}",
                                              data.size(), _sceneSnapshotCallback ? "set" : "null"));
@@ -1853,7 +2241,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HANDSHAKE:
+            case Protocol::Message::HANDSHAKE:
             {
                 // Server-side handshake handling: automatically respond
                 auto handshake = message.getHandshake();
@@ -1862,7 +2250,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
                 try {
                     capnp::MallocMessageBuilder builder;
-                    auto msg = builder.initRoot<Message>();
+                    auto msg = builder.initRoot<Protocol::Message>();
                     auto response = msg.initHandshakeResponse();
 
                     response.setSuccess(true);
@@ -1930,7 +2318,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HANDSHAKE_RESPONSE:
+            case Protocol::Message::HANDSHAKE_RESPONSE:
             {
                 auto resp = message.getHandshakeResponse();
                 ENTROPY_LOG_DEBUG("Received HANDSHAKE_RESPONSE");
@@ -1970,7 +2358,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::REGISTER_SCHEMA_RESPONSE:
+            case Protocol::Message::REGISTER_SCHEMA_RESPONSE:
             {
                 auto resp = message.getRegisterSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -1981,7 +2369,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::QUERY_PUBLIC_SCHEMAS_RESPONSE:
+            case Protocol::Message::QUERY_PUBLIC_SCHEMAS_RESPONSE:
             {
                 auto resp = message.getQueryPublicSchemasResponse();
                 auto schemasReader = resp.getSchemas();
@@ -2010,7 +2398,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::PUBLISH_SCHEMA_RESPONSE:
+            case Protocol::Message::PUBLISH_SCHEMA_RESPONSE:
             {
                 auto resp = message.getPublishSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -2021,7 +2409,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::UNPUBLISH_SCHEMA_RESPONSE:
+            case Protocol::Message::UNPUBLISH_SCHEMA_RESPONSE:
             {
                 auto resp = message.getUnpublishSchemaResponse();
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -2032,7 +2420,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::SCHEMA_NACK:
+            case Protocol::Message::SCHEMA_NACK:
             {
                 auto nack = message.getSchemaNack();
                 auto typeHashReader = nack.getTypeHash();
@@ -2045,7 +2433,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::SCHEMA_ADVERTISEMENT:
+            case Protocol::Message::SCHEMA_ADVERTISEMENT:
             {
                 auto advert = message.getSchemaAdvertisement();
                 auto typeHashReader = advert.getTypeHash();
@@ -2060,7 +2448,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HEARTBEAT:
+            case Protocol::Message::HEARTBEAT:
             {
                 auto heartbeat = message.getHeartbeat();
                 uint64_t clientTimestamp = heartbeat.getTimestamp();
@@ -2082,7 +2470,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::HEARTBEAT_RESPONSE:
+            case Protocol::Message::HEARTBEAT_RESPONSE:
             {
                 auto response = message.getHeartbeatResponse();
                 uint64_t clientTimestamp = response.getTimestamp();
@@ -2101,7 +2489,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 // Asset System Messages
                 // ========================================================================
 
-            case Message::ASSET_ADVERTISE_REQUEST:
+            case Protocol::Message::ASSET_ADVERTISE_REQUEST:
             {
                 auto req = message.getAssetAdvertiseRequest();
                 std::string appId(req.getAppId().cStr());
@@ -2137,7 +2525,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_ADVERTISE_RESPONSE:
+            case Protocol::Message::ASSET_ADVERTISE_RESPONSE:
             {
                 auto resp = message.getAssetAdvertiseResponse();
                 uint64_t requestId = resp.getRequestId();
@@ -2150,7 +2538,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_WITHDRAW_REQUEST:
+            case Protocol::Message::ASSET_WITHDRAW_REQUEST:
             {
                 auto req = message.getAssetWithdrawRequest();
                 uint64_t requestId = req.getRequestId();
@@ -2174,7 +2562,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_WITHDRAW_RESPONSE:
+            case Protocol::Message::ASSET_WITHDRAW_RESPONSE:
             {
                 auto resp = message.getAssetWithdrawResponse();
                 uint64_t requestId = resp.getRequestId();
@@ -2187,7 +2575,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_WITHDRAW_ALL_REQUEST:
+            case Protocol::Message::ASSET_WITHDRAW_ALL_REQUEST:
             {
                 auto req = message.getAssetWithdrawAllRequest();
                 std::string appId(req.getAppId().cStr());
@@ -2201,7 +2589,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_WITHDRAW_ALL_RESPONSE:
+            case Protocol::Message::ASSET_WITHDRAW_ALL_RESPONSE:
             {
                 auto resp = message.getAssetWithdrawAllResponse();
                 uint64_t requestId = resp.getRequestId();
@@ -2214,7 +2602,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_RESOLVE_REQUEST:
+            case Protocol::Message::ASSET_RESOLVE_REQUEST:
             {
                 auto req = message.getAssetResolveRequest();
                 auto idData = req.getAssetId();
@@ -2233,7 +2621,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_RESOLVE_RESPONSE:
+            case Protocol::Message::ASSET_RESOLVE_RESPONSE:
             {
                 auto resp = message.getAssetResolveResponse();
 
@@ -2276,7 +2664,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_RESOLVE_BATCH_REQUEST:
+            case Protocol::Message::ASSET_RESOLVE_BATCH_REQUEST:
             {
                 auto req = message.getAssetResolveBatchRequest();
                 uint64_t requestId = req.getRequestId();
@@ -2300,7 +2688,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_RESOLVE_BATCH_RESPONSE:
+            case Protocol::Message::ASSET_RESOLVE_BATCH_RESPONSE:
             {
                 auto resp = message.getAssetResolveBatchResponse();
                 uint64_t requestId = resp.getRequestId();
@@ -2351,7 +2739,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_PROVIDE_KEY_REQUEST:
+            case Protocol::Message::ASSET_PROVIDE_KEY_REQUEST:
             {
                 auto req = message.getAssetProvideKeyRequest();
                 auto idData = req.getAssetId();
@@ -2376,7 +2764,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_PROVIDE_KEY_RESPONSE:
+            case Protocol::Message::ASSET_PROVIDE_KEY_RESPONSE:
             {
                 auto resp = message.getAssetProvideKeyResponse();
                 uint64_t requestId = resp.getRequestId();
@@ -2389,7 +2777,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_REQUEST:
+            case Protocol::Message::ASSET_UPLOAD_REQUEST:
             {
                 auto req = message.getAssetUploadRequest();
                 std::string appId(req.getAppId().cStr());
@@ -2407,7 +2795,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_RESPONSE:
+            case Protocol::Message::ASSET_UPLOAD_RESPONSE:
             {
                 auto resp = message.getAssetUploadResponse();
                 auto idData = resp.getAssetId();
@@ -2427,7 +2815,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_FETCH_REQUEST:
+            case Protocol::Message::ASSET_FETCH_REQUEST:
             {
                 auto req = message.getAssetFetchRequest();
                 auto idData = req.getAssetId();
@@ -2446,7 +2834,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_FETCH_RESPONSE:
+            case Protocol::Message::ASSET_FETCH_RESPONSE:
             {
                 auto resp = message.getAssetFetchResponse();
                 auto dataReader = resp.getData();
@@ -2466,7 +2854,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 // Chunked Upload Messages
                 // ================================================================
 
-            case Message::ASSET_UPLOAD_BEGIN_REQUEST:
+            case Protocol::Message::ASSET_UPLOAD_BEGIN_REQUEST:
             {
                 auto req = message.getAssetUploadBeginRequest();
                 AssetUploadBeginData data;
@@ -2490,7 +2878,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_BEGIN_RESPONSE:
+            case Protocol::Message::ASSET_UPLOAD_BEGIN_RESPONSE:
             {
                 auto resp = message.getAssetUploadBeginResponse();
                 AssetUploadBeginResponseData data;
@@ -2511,7 +2899,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_CHUNK_REQUEST:
+            case Protocol::Message::ASSET_UPLOAD_CHUNK_REQUEST:
             {
                 auto req = message.getAssetUploadChunkRequest();
                 AssetUploadChunkData data;
@@ -2532,7 +2920,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_CHUNK_RESPONSE:
+            case Protocol::Message::ASSET_UPLOAD_CHUNK_RESPONSE:
             {
                 auto resp = message.getAssetUploadChunkResponse();
                 AssetUploadChunkResponseData data;
@@ -2552,7 +2940,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_COMPLETE_REQUEST:
+            case Protocol::Message::ASSET_UPLOAD_COMPLETE_REQUEST:
             {
                 auto req = message.getAssetUploadCompleteRequest();
                 AssetUploadCompleteData data;
@@ -2570,7 +2958,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_COMPLETE_RESPONSE:
+            case Protocol::Message::ASSET_UPLOAD_COMPLETE_RESPONSE:
             {
                 auto resp = message.getAssetUploadCompleteResponse();
                 AssetUploadCompleteResponseData data;
@@ -2595,7 +2983,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_CANCEL_REQUEST:
+            case Protocol::Message::ASSET_UPLOAD_CANCEL_REQUEST:
             {
                 auto req = message.getAssetUploadCancelRequest();
                 std::array<uint8_t, 16> uploadId{};
@@ -2612,13 +3000,116 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 break;
             }
 
-            case Message::ASSET_UPLOAD_CANCEL_RESPONSE:
+            case Protocol::Message::ASSET_UPLOAD_CANCEL_RESPONSE:
             {
                 auto resp = message.getAssetUploadCancelResponse();
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCancelResponseCallback) {
                     _assetUploadCancelResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ================================================================
+                // Scene Management Messages
+                // ================================================================
+
+            case Protocol::Message::CREATE_SCENE_REQUEST:
+            {
+                auto req = message.getCreateSceneRequest();
+                std::string sceneName(req.getSceneName().cStr());
+                bool transient = req.getTransient();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _createSceneCallback) {
+                    _createSceneCallback(sceneName, transient);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::CREATE_SCENE_RESPONSE:
+            {
+                auto resp = message.getCreateSceneResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _createSceneResponseCallback) {
+                    _createSceneResponseCallback(resp.getSuccess(), resp.getSceneId(),
+                                                 std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::DESTROY_SCENE_REQUEST:
+            {
+                auto req = message.getDestroySceneRequest();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _destroySceneCallback) {
+                    _destroySceneCallback(req.getSceneId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::DESTROY_SCENE_RESPONSE:
+            {
+                auto resp = message.getDestroySceneResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _destroySceneResponseCallback) {
+                    _destroySceneResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::SET_SCENE_ENABLED_REQUEST:
+            {
+                auto req = message.getSetSceneEnabledRequest();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _setSceneEnabledCallback) {
+                    _setSceneEnabledCallback(req.getSceneId(), req.getEnabled());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::SET_SCENE_ENABLED_RESPONSE:
+            {
+                auto resp = message.getSetSceneEnabledResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _setSceneEnabledResponseCallback) {
+                    _setSceneEnabledResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::ADD_ENTITY_TO_SCENE_REQUEST:
+            {
+                auto req = message.getAddEntityToSceneRequest();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _addEntityToSceneCallback) {
+                    _addEntityToSceneCallback(req.getEntityId(), req.getSceneId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::ADD_ENTITY_TO_SCENE_RESPONSE:
+            {
+                auto resp = message.getAddEntityToSceneResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _addEntityToSceneResponseCallback) {
+                    _addEntityToSceneResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
@@ -2672,7 +3163,7 @@ Result<void> NetworkSession::flushPropertyUpdates() {
     try {
         // Build Cap'n Proto PropertyUpdateBatch
         capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        auto message = builder.initRoot<Protocol::Message>();
         auto batch = message.initPropertyUpdateBatch();
 
         // Set timestamp and sequence
@@ -2691,7 +3182,7 @@ Result<void> NetworkSession::flushPropertyUpdates() {
             ph.setLow(hash.low);
 
             // Set type
-            update.setExpectedType(static_cast<::PropertyType>(toCapnpPropertyType(pending.type)));
+            update.setExpectedType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(pending.type)));
 
             // Set value based on type
             auto valueBuilder = update.initValue();
@@ -2773,5 +3264,128 @@ size_t NetworkSession::getPendingPropertyUpdateCount() const {
     std::lock_guard<std::mutex> lock(_pendingUpdatesMutex);
     return _pendingPropertyUpdates.size();
 }
+
+// ============================================================================
+// EntityBuilder Implementation
+// ============================================================================
+
+NetworkSession::EntityBuilder::EntityBuilder(NetworkSession& session, uint64_t entityId, const std::string& appId,
+                                             const std::string& typeName, uint64_t parentId)
+    : _session(session), _entityId(entityId), _appId(appId), _typeName(typeName), _parentId(parentId) {}
+
+NetworkSession::ComponentHandle NetworkSession::EntityBuilder::attach(const ComponentSchema& schema) {
+    return ComponentHandle(*this, schema);
+}
+
+Result<void> NetworkSession::EntityBuilder::sync() {
+    if (_synced) {
+        return Result<void>::err(NetworkError::AlreadyExists, "Entity already synced");
+    }
+    _synced = true;
+
+    // Group properties by component type
+    std::unordered_map<ComponentTypeHash, ComponentGroupData> componentGroups;
+
+    for (const auto& prop : _properties) {
+        auto& group = componentGroups[prop.componentType];
+        if (group.typeHash.isNull()) {
+            group.typeHash = prop.componentType;
+            // Try to get component name from schema registry
+            if (_session._schemaRegistry) {
+                auto schema = _session._schemaRegistry->getSchema(prop.componentType);
+                if (schema.has_value()) {
+                    group.componentName = schema->componentName;
+                } else {
+                    group.componentName = "Unknown";
+                }
+            } else {
+                group.componentName = "Unknown";
+            }
+        }
+        group.properties.push_back(prop);
+    }
+
+    // Convert to vector
+    std::vector<ComponentGroupData> components;
+    components.reserve(componentGroups.size());
+    for (auto& [hash, group] : componentGroups) {
+        components.push_back(std::move(group));
+    }
+
+    // Send EntityCreated with component groups
+    auto result = _session.sendEntityCreated(_entityId, _appId, _typeName, _parentId, components);
+    if (result.failed()) {
+        return result;
+    }
+
+    // Send pending property updates
+    for (const auto& [hash, type, value] : _pendingUpdates) {
+        auto updateResult = _session.sendPropertyUpdate(hash, type, value);
+        if (updateResult.failed()) {
+            ENTROPY_LOG_WARNING(std::format("Failed to send property update: {}", updateResult.errorMessage));
+        }
+    }
+
+    return Result<void>::ok();
+}
+
+NetworkSession::EntityBuilder NetworkSession::createEntity(const std::string& typeName, const std::string& appId,
+                                                           uint64_t parentId) {
+    return EntityBuilder(*this, nextEntityId(), appId, typeName, parentId);
+}
+
+// ============================================================================
+// ComponentHandle Implementation
+// ============================================================================
+
+NetworkSession::ComponentHandle::ComponentHandle(EntityBuilder& entity, const ComponentSchema& schema)
+    : _entity(entity), _schema(schema) {}
+
+template <typename T>
+NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set(const std::string& propertyName, const T& value) {
+    // Find property in schema
+    for (const auto& propDef : _schema.properties) {
+        if (propDef.name == propertyName) {
+            // Compute property hash
+            auto hash = computePropertyHash(_entity._entityId, _schema.typeHash, propertyName);
+
+            // Create PropertyMetadata for registration
+            PropertyMetadata meta;
+            meta.hash = hash;
+            meta.entityId = _entity._entityId;
+            meta.componentType = _schema.typeHash;
+            meta.propertyName = propertyName;
+            meta.type = propDef.type;
+            meta.registeredAt = std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch())
+                                    .count();
+
+            _entity._properties.push_back(meta);
+
+            // Queue property update
+            _entity._pendingUpdates.emplace_back(hash, propDef.type, PropertyValue(value));
+            return *this;
+        }
+    }
+
+    ENTROPY_LOG_WARNING(std::format("Property '{}' not found in schema '{}'", propertyName, _schema.componentName));
+    return *this;
+}
+
+// Explicit template instantiations for common types
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<int32_t>(const std::string&,
+                                                                                        const int32_t&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<int64_t>(const std::string&,
+                                                                                        const int64_t&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<float>(const std::string&, const float&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<double>(const std::string&,
+                                                                                       const double&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<Vec2>(const std::string&, const Vec2&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<Vec3>(const std::string&, const Vec3&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<Vec4>(const std::string&, const Vec4&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<Quat>(const std::string&, const Quat&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<std::string>(const std::string&,
+                                                                                            const std::string&);
+template NetworkSession::ComponentHandle& NetworkSession::ComponentHandle::set<bool>(const std::string&, const bool&);
 
 }  // namespace EntropyEngine::Networking

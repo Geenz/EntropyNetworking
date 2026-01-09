@@ -21,12 +21,13 @@ SessionManager* SessionHandle::manager() const {
 }
 
 Result<void> SessionHandle::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                              uint64_t parentId) const {
+                                              uint64_t parentId,
+                                              const std::vector<NetworkSession::ComponentGroupData>& components) const {
     auto* mgr = manager();
     if (!mgr) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
-    return mgr->sendEntityCreated(*this, entityId, appId, typeName, parentId);
+    return mgr->sendEntityCreated(*this, entityId, appId, typeName, parentId, components);
 }
 
 Result<void> SessionHandle::sendEntityDestroyed(uint64_t entityId) const {

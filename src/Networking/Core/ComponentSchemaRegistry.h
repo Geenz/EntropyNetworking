@@ -52,7 +52,26 @@ public:
     /// Callback invoked when a schema is unpublished (made private)
     using SchemaUnpublishedCallback = std::function<void(ComponentTypeHash typeHash)>;
 
+    /// Callback for auto-registration during construction
+    using SchemaRegistrationCallback = std::function<void(ComponentSchemaRegistry&)>;
+
     ComponentSchemaRegistry() = default;
+
+    /**
+     * @brief Construct with auto-registration callback
+     *
+     * Allows registering schemas during construction, e.g., for built-in schemas.
+     *
+     * @param initCallback Function called during construction to register schemas
+     *
+     * @code
+     * ComponentSchemaRegistry registry([](ComponentSchemaRegistry& reg) {
+     *     EntropyCanvas::Schema::registerBuiltinSchemas(reg);
+     * });
+     * @endcode
+     */
+    explicit ComponentSchemaRegistry(SchemaRegistrationCallback initCallback);
+
     ~ComponentSchemaRegistry() = default;
 
     // Non-copyable, non-movable

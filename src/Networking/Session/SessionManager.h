@@ -71,9 +71,14 @@ namespace EntropyEngine::Networking
 class SessionManager : public Core::EntropyObject
 {
 public:
+    // Re-export PropertyRegistrationInfo for callback usage
+    using PropertyRegistrationInfo = NetworkSession::PropertyRegistrationInfo;
+
     // Message type callbacks
-    using EntityCreatedCallback = std::function<void(uint64_t entityId, const std::string& appId,
-                                                     const std::string& typeName, uint64_t parentId)>;
+    using ComponentGroupData = NetworkSession::ComponentGroupData;
+    using EntityCreatedCallback =
+        std::function<void(uint64_t entityId, const std::string& appId, const std::string& typeName, uint64_t parentId,
+                           const std::vector<ComponentGroupData>& components)>;
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
@@ -127,6 +132,17 @@ public:
     using AssetUploadCompleteResponseCallback =
         std::function<void(const NetworkSession::AssetUploadCompleteResponseData& data)>;
     using AssetUploadCancelResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
+    // Scene management callbacks (server-side - receiving requests from clients)
+    using CreateSceneCallback = std::function<void(const std::string& sceneName, bool transient)>;
+    using CreateSceneResponseCallback =
+        std::function<void(bool success, uint64_t sceneId, const std::string& errorMessage)>;
+    using DestroySceneCallback = std::function<void(uint64_t sceneId)>;
+    using DestroySceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using SetSceneEnabledCallback = std::function<void(uint64_t sceneId, bool enabled)>;
+    using SetSceneEnabledResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using AddEntityToSceneCallback = std::function<void(uint64_t entityId, uint64_t sceneId)>;
+    using AddEntityToSceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
 
     /**
      * @brief Constructs session manager with specified capacity
@@ -369,6 +385,74 @@ public:
     Result<void> setAssetUploadCancelResponseCallback(const SessionHandle& handle,
                                                       AssetUploadCancelResponseCallback callback);
 
+    // Scene management callback setters
+
+    /**
+     * @brief Sets callback for CreateSceneRequest messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when CreateSceneRequest is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setCreateSceneCallback(const SessionHandle& handle, CreateSceneCallback callback);
+
+    /**
+     * @brief Sets callback for CreateSceneResponse messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when CreateSceneResponse is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setCreateSceneResponseCallback(const SessionHandle& handle, CreateSceneResponseCallback callback);
+
+    /**
+     * @brief Sets callback for DestroySceneRequest messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when DestroySceneRequest is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setDestroySceneCallback(const SessionHandle& handle, DestroySceneCallback callback);
+
+    /**
+     * @brief Sets callback for DestroySceneResponse messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when DestroySceneResponse is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setDestroySceneResponseCallback(const SessionHandle& handle, DestroySceneResponseCallback callback);
+
+    /**
+     * @brief Sets callback for SetSceneEnabledRequest messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when SetSceneEnabledRequest is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setSetSceneEnabledCallback(const SessionHandle& handle, SetSceneEnabledCallback callback);
+
+    /**
+     * @brief Sets callback for SetSceneEnabledResponse messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when SetSceneEnabledResponse is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setSetSceneEnabledResponseCallback(const SessionHandle& handle,
+                                                    SetSceneEnabledResponseCallback callback);
+
+    /**
+     * @brief Sets callback for AddEntityToSceneRequest messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when AddEntityToSceneRequest is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setAddEntityToSceneCallback(const SessionHandle& handle, AddEntityToSceneCallback callback);
+
+    /**
+     * @brief Sets callback for AddEntityToSceneResponse messages
+     * @param handle Session handle
+     * @param callback Callback function invoked when AddEntityToSceneResponse is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setAddEntityToSceneResponseCallback(const SessionHandle& handle,
+                                                     AddEntityToSceneResponseCallback callback);
+
     // Asset send methods (for clients sending requests)
 
     /**
@@ -456,7 +540,8 @@ public:
      * @brief Sends EntityCreated message (called by handle.sendEntityCreated())
      */
     Result<void> sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
-                                   const std::string& typeName, uint64_t parentId);
+                                   const std::string& typeName, uint64_t parentId,
+                                   const std::vector<NetworkSession::ComponentGroupData>& components = {});
 
     /**
      * @brief Sends EntityDestroyed message (called by handle.sendEntityDestroyed())
@@ -501,6 +586,12 @@ public:
                                          const std::string& errorMessage, uint64_t requestId = 0);
 
     /**
+     * @brief Sends AssetAdvertiseResponse message
+     */
+    Result<void> sendAssetAdvertiseResponse(const SessionHandle& handle, bool success, const std::string& errorMessage,
+                                            uint64_t requestId = 0);
+
+    /**
      * @brief Sends AssetFetchResponse message
      */
     Result<void> sendAssetFetchResponse(const SessionHandle& handle, bool found, const std::vector<uint8_t>& data,
@@ -511,6 +602,51 @@ public:
      */
     Result<void> performHandshake(const SessionHandle& handle, const std::string& clientType,
                                   const std::string& clientId);
+
+    // Scene management send methods
+
+    /**
+     * @brief Sends CreateSceneRequest message
+     */
+    Result<void> sendCreateSceneRequest(const SessionHandle& handle, const std::string& sceneName, bool transient);
+
+    /**
+     * @brief Sends CreateSceneResponse message
+     */
+    Result<void> sendCreateSceneResponse(const SessionHandle& handle, bool success, uint64_t sceneId,
+                                         const std::string& errorMessage);
+
+    /**
+     * @brief Sends DestroySceneRequest message
+     */
+    Result<void> sendDestroySceneRequest(const SessionHandle& handle, uint64_t sceneId);
+
+    /**
+     * @brief Sends DestroySceneResponse message
+     */
+    Result<void> sendDestroySceneResponse(const SessionHandle& handle, bool success, const std::string& errorMessage);
+
+    /**
+     * @brief Sends SetSceneEnabledRequest message
+     */
+    Result<void> sendSetSceneEnabledRequest(const SessionHandle& handle, uint64_t sceneId, bool enabled);
+
+    /**
+     * @brief Sends SetSceneEnabledResponse message
+     */
+    Result<void> sendSetSceneEnabledResponse(const SessionHandle& handle, bool success,
+                                             const std::string& errorMessage);
+
+    /**
+     * @brief Sends AddEntityToSceneRequest message
+     */
+    Result<void> sendAddEntityToSceneRequest(const SessionHandle& handle, uint64_t entityId, uint64_t sceneId);
+
+    /**
+     * @brief Sends AddEntityToSceneResponse message
+     */
+    Result<void> sendAddEntityToSceneResponse(const SessionHandle& handle, bool success,
+                                              const std::string& errorMessage);
 
     /**
      * @brief Checks if connected (called by handle.isConnected())

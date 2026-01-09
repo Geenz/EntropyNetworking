@@ -19,6 +19,12 @@ namespace EntropyEngine
 namespace Networking
 {
 
+ComponentSchemaRegistry::ComponentSchemaRegistry(SchemaRegistrationCallback initCallback) {
+    if (initCallback) {
+        initCallback(*this);
+    }
+}
+
 Result<ComponentTypeHash> ComponentSchemaRegistry::registerSchema(const ComponentSchema& schema) {
     // Pre-lock validation
     if (schema.typeHash.isNull()) {

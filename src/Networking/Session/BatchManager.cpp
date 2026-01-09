@@ -11,9 +11,9 @@
 
 #include <capnp/message.h>
 
+#include "Networking/Protocol/entropy.capnp.h"
 #include "SessionHandle.h"
 #include "SessionManager.h"
-#include "src/Networking/Protocol/entropy.capnp.h"
 
 namespace EntropyEngine::Networking
 {
@@ -99,8 +99,8 @@ void BatchManager::processBatch() {
 
     try {
         // Build Cap'n Proto PropertyUpdateBatch
-        ::capnp::MallocMessageBuilder builder;
-        auto message = builder.initRoot<Message>();
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
         auto batch = message.initPropertyUpdateBatch();
 
         // Set timestamp and sequence
@@ -120,7 +120,7 @@ void BatchManager::processBatch() {
             update.getPropertyHash().setLow(hash.low);
 
             // Set type
-            update.setExpectedType(static_cast<::PropertyType>(pending.type));
+            update.setExpectedType(static_cast<Protocol::PropertyType>(pending.type));
 
             // Set value based on type
             auto value = update.initValue();

@@ -21,7 +21,7 @@ namespace Networking
 namespace
 {
 // Helper to serialize PropertyValue to Cap'n Proto
-void serializePropertyValue(const PropertyValue& value, ::PropertyValue::Builder builder) {
+void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Builder builder) {
     if (std::holds_alternative<int32_t>(value)) {
         builder.setInt32(std::get<int32_t>(value));
     } else if (std::holds_alternative<int64_t>(value)) {
@@ -68,48 +68,48 @@ void serializePropertyValue(const PropertyValue& value, ::PropertyValue::Builder
     }
     // Note: Array types not serialized for default values (not commonly used as defaults)
 }
+}  // anonymous namespace
 
-// Helper to deserialize PropertyValue from Cap'n Proto
-PropertyValue deserializePropertyValue(::PropertyValue::Reader reader) {
+PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader) {
     switch (reader.which()) {
-        case ::PropertyValue::INT32:
+        case CapnpPropertyValue::INT32:
             return reader.getInt32();
-        case ::PropertyValue::INT64:
+        case CapnpPropertyValue::INT64:
             return reader.getInt64();
-        case ::PropertyValue::FLOAT32:
+        case CapnpPropertyValue::FLOAT32:
             return reader.getFloat32();
-        case ::PropertyValue::FLOAT64:
+        case CapnpPropertyValue::FLOAT64:
             return reader.getFloat64();
-        case ::PropertyValue::VEC2:
+        case CapnpPropertyValue::VEC2:
         {
             auto vec = reader.getVec2();
             return Vec2{vec.getX(), vec.getY()};
         }
-        case ::PropertyValue::VEC3:
+        case CapnpPropertyValue::VEC3:
         {
             auto vec = reader.getVec3();
             return Vec3{vec.getX(), vec.getY(), vec.getZ()};
         }
-        case ::PropertyValue::VEC4:
+        case CapnpPropertyValue::VEC4:
         {
             auto vec = reader.getVec4();
             return Vec4{vec.getX(), vec.getY(), vec.getZ(), vec.getW()};
         }
-        case ::PropertyValue::QUAT:
+        case CapnpPropertyValue::QUAT:
         {
             auto quat = reader.getQuat();
             return Quat{quat.getX(), quat.getY(), quat.getZ(), quat.getW()};
         }
-        case ::PropertyValue::STRING:
+        case CapnpPropertyValue::STRING:
             return std::string(reader.getString().cStr());
-        case ::PropertyValue::BOOL:
+        case CapnpPropertyValue::BOOL:
             return reader.getBool();
-        case ::PropertyValue::BYTES:
+        case CapnpPropertyValue::BYTES:
         {
             auto bytes = reader.getBytes();
             return std::vector<uint8_t>(bytes.begin(), bytes.end());
         }
-        case ::PropertyValue::ASSET_ID:
+        case CapnpPropertyValue::ASSET_ID:
         {
             auto assetIdBytes = reader.getAssetId();
             AssetId assetId;
@@ -119,15 +119,14 @@ PropertyValue deserializePropertyValue(::PropertyValue::Reader reader) {
             return assetId;
         }
         default:
-            // For unsupported types, return int32(0) as placeholder
             return int32_t{0};
     }
 }
-}  // anonymous namespace
 
-void serializePropertyDefinition(const PropertyDefinition& definition, PropertyDefinitionData::Builder builder) {
+void serializePropertyDefinition(const PropertyDefinition& definition,
+                                 Protocol::PropertyDefinitionData::Builder builder) {
     builder.setName(definition.name);
-    builder.setType(static_cast<::PropertyType>(toCapnpPropertyType(definition.type)));
+    builder.setType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(definition.type)));
     builder.setOffset(definition.offset);
     builder.setSize(definition.size);
     builder.setRequired(definition.required);
@@ -141,7 +140,7 @@ void serializePropertyDefinition(const PropertyDefinition& definition, PropertyD
     }
 }
 
-PropertyDefinition deserializePropertyDefinition(PropertyDefinitionData::Reader reader) {
+PropertyDefinition deserializePropertyDefinition(Protocol::PropertyDefinitionData::Reader reader) {
     PropertyDefinition definition;
     definition.name = reader.getName();
     definition.type = fromCapnpPropertyType(static_cast<uint16_t>(reader.getType()));
@@ -158,7 +157,7 @@ PropertyDefinition deserializePropertyDefinition(PropertyDefinitionData::Reader 
     return definition;
 }
 
-void serializeComponentSchema(const ComponentSchema& schema, ComponentSchemaData::Builder builder) {
+void serializeComponentSchema(const ComponentSchema& schema, Protocol::ComponentSchemaData::Builder builder) {
     // Serialize typeHash
     auto typeHashBuilder = builder.initTypeHash();
     typeHashBuilder.setHigh(schema.typeHash.high);
@@ -184,7 +183,7 @@ void serializeComponentSchema(const ComponentSchema& schema, ComponentSchemaData
     builder.setIsPublic(schema.isPublic);
 }
 
-Result<ComponentSchema> deserializeComponentSchema(ComponentSchemaData::Reader reader) {
+Result<ComponentSchema> deserializeComponentSchema(Protocol::ComponentSchemaData::Reader reader) {
     // Deserialize basic fields
     ComponentSchema schema;
 

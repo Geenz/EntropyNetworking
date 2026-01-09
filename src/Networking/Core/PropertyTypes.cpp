@@ -9,12 +9,16 @@
 
 #include "PropertyTypes.h"
 
-#include "src/Networking/Protocol/entropy.capnp.h"
+#include "Networking/Protocol/entropy.capnp.h"
 
 namespace EntropyEngine
 {
 namespace Networking
 {
+
+// Type alias for Cap'n Proto generated PropertyType to avoid collision
+// with EntropyEngine::Networking::PropertyType
+using CapnpPropertyType = Protocol::PropertyType;
 
 bool validatePropertyType(const PropertyValue& value, PropertyType expectedType) {
     return getPropertyType(value) == expectedType;
@@ -102,94 +106,94 @@ uint16_t toCapnpPropertyType(PropertyType type) {
     // Returns uint16_t (underlying type) to avoid capnp header dependency
     switch (type) {
         case PropertyType::Int32:
-            return static_cast<uint16_t>(::PropertyType::INT32);
+            return static_cast<uint16_t>(CapnpPropertyType::INT32);
         case PropertyType::Int64:
-            return static_cast<uint16_t>(::PropertyType::INT64);
+            return static_cast<uint16_t>(CapnpPropertyType::INT64);
         case PropertyType::Float32:
-            return static_cast<uint16_t>(::PropertyType::FLOAT32);
+            return static_cast<uint16_t>(CapnpPropertyType::FLOAT32);
         case PropertyType::Float64:
-            return static_cast<uint16_t>(::PropertyType::FLOAT64);
+            return static_cast<uint16_t>(CapnpPropertyType::FLOAT64);
         case PropertyType::Vec2:
-            return static_cast<uint16_t>(::PropertyType::VEC2);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC2);
         case PropertyType::Vec3:
-            return static_cast<uint16_t>(::PropertyType::VEC3);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC3);
         case PropertyType::Vec4:
-            return static_cast<uint16_t>(::PropertyType::VEC4);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC4);
         case PropertyType::Quat:
-            return static_cast<uint16_t>(::PropertyType::QUAT);
+            return static_cast<uint16_t>(CapnpPropertyType::QUAT);
         case PropertyType::String:
-            return static_cast<uint16_t>(::PropertyType::STRING);
+            return static_cast<uint16_t>(CapnpPropertyType::STRING);
         case PropertyType::Bool:
-            return static_cast<uint16_t>(::PropertyType::BOOL);
+            return static_cast<uint16_t>(CapnpPropertyType::BOOL);
         case PropertyType::Bytes:
-            return static_cast<uint16_t>(::PropertyType::BYTES);
+            return static_cast<uint16_t>(CapnpPropertyType::BYTES);
         case PropertyType::Int32Array:
-            return static_cast<uint16_t>(::PropertyType::INT32_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::INT32_ARRAY);
         case PropertyType::Int64Array:
-            return static_cast<uint16_t>(::PropertyType::INT64_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::INT64_ARRAY);
         case PropertyType::Float32Array:
-            return static_cast<uint16_t>(::PropertyType::FLOAT32_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::FLOAT32_ARRAY);
         case PropertyType::Float64Array:
-            return static_cast<uint16_t>(::PropertyType::FLOAT64_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::FLOAT64_ARRAY);
         case PropertyType::Vec2Array:
-            return static_cast<uint16_t>(::PropertyType::VEC2_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC2_ARRAY);
         case PropertyType::Vec3Array:
-            return static_cast<uint16_t>(::PropertyType::VEC3_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC3_ARRAY);
         case PropertyType::Vec4Array:
-            return static_cast<uint16_t>(::PropertyType::VEC4_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::VEC4_ARRAY);
         case PropertyType::QuatArray:
-            return static_cast<uint16_t>(::PropertyType::QUAT_ARRAY);
+            return static_cast<uint16_t>(CapnpPropertyType::QUAT_ARRAY);
         case PropertyType::AssetId:
-            return static_cast<uint16_t>(::PropertyType::ASSET_ID);
+            return static_cast<uint16_t>(CapnpPropertyType::ASSET_ID);
         default:
-            return static_cast<uint16_t>(::PropertyType::INT32);  // Fallback
+            return static_cast<uint16_t>(CapnpPropertyType::INT32);  // Fallback
     }
 }
 
 PropertyType fromCapnpPropertyType(uint16_t capnpType) {
     // Explicit mapping ensures safety even if enum ordinals change
     // Accepts uint16_t to avoid capnp header dependency
-    auto type = static_cast<::PropertyType>(capnpType);
+    auto type = static_cast<CapnpPropertyType>(capnpType);
     switch (type) {
-        case ::PropertyType::INT32:
+        case CapnpPropertyType::INT32:
             return PropertyType::Int32;
-        case ::PropertyType::INT64:
+        case CapnpPropertyType::INT64:
             return PropertyType::Int64;
-        case ::PropertyType::FLOAT32:
+        case CapnpPropertyType::FLOAT32:
             return PropertyType::Float32;
-        case ::PropertyType::FLOAT64:
+        case CapnpPropertyType::FLOAT64:
             return PropertyType::Float64;
-        case ::PropertyType::VEC2:
+        case CapnpPropertyType::VEC2:
             return PropertyType::Vec2;
-        case ::PropertyType::VEC3:
+        case CapnpPropertyType::VEC3:
             return PropertyType::Vec3;
-        case ::PropertyType::VEC4:
+        case CapnpPropertyType::VEC4:
             return PropertyType::Vec4;
-        case ::PropertyType::QUAT:
+        case CapnpPropertyType::QUAT:
             return PropertyType::Quat;
-        case ::PropertyType::STRING:
+        case CapnpPropertyType::STRING:
             return PropertyType::String;
-        case ::PropertyType::BOOL:
+        case CapnpPropertyType::BOOL:
             return PropertyType::Bool;
-        case ::PropertyType::BYTES:
+        case CapnpPropertyType::BYTES:
             return PropertyType::Bytes;
-        case ::PropertyType::INT32_ARRAY:
+        case CapnpPropertyType::INT32_ARRAY:
             return PropertyType::Int32Array;
-        case ::PropertyType::INT64_ARRAY:
+        case CapnpPropertyType::INT64_ARRAY:
             return PropertyType::Int64Array;
-        case ::PropertyType::FLOAT32_ARRAY:
+        case CapnpPropertyType::FLOAT32_ARRAY:
             return PropertyType::Float32Array;
-        case ::PropertyType::FLOAT64_ARRAY:
+        case CapnpPropertyType::FLOAT64_ARRAY:
             return PropertyType::Float64Array;
-        case ::PropertyType::VEC2_ARRAY:
+        case CapnpPropertyType::VEC2_ARRAY:
             return PropertyType::Vec2Array;
-        case ::PropertyType::VEC3_ARRAY:
+        case CapnpPropertyType::VEC3_ARRAY:
             return PropertyType::Vec3Array;
-        case ::PropertyType::VEC4_ARRAY:
+        case CapnpPropertyType::VEC4_ARRAY:
             return PropertyType::Vec4Array;
-        case ::PropertyType::QUAT_ARRAY:
+        case CapnpPropertyType::QUAT_ARRAY:
             return PropertyType::QuatArray;
-        case ::PropertyType::ASSET_ID:
+        case CapnpPropertyType::ASSET_ID:
             return PropertyType::AssetId;
         default:
             return PropertyType::Int32;  // Fallback

@@ -41,9 +41,33 @@ class NetworkSession : public Core::EntropyObject
 {
     friend class SessionManager;  // Allow SessionManager to register callbacks via fan-out
 public:
+    /**
+     * Property registration info passed with EntityCreated callback.
+     * Contains all the metadata needed to reconstruct property deltas from hashes.
+     */
+    struct PropertyRegistrationInfo
+    {
+        PropertyHash propertyHash;                // 128-bit hash for this property
+        uint64_t entityId = 0;                    // Entity this property belongs to
+        ComponentTypeHash componentType;          // Component type hash
+        std::string propertyName;                 // Property name (e.g., "position")
+        PropertyType type = PropertyType::Int32;  // Property type (default to Int32)
+    };
+
+    /**
+     * Component group data for wire protocol - groups properties under a component.
+     */
+    struct ComponentGroupData
+    {
+        ComponentTypeHash typeHash;                // ComponentTypeHash
+        std::string componentName;                 // Human-readable name (e.g., "Transform")
+        std::vector<PropertyMetadata> properties;  // Properties within this component
+    };
+
     // Message type callbacks
-    using EntityCreatedCallback = std::function<void(uint64_t entityId, const std::string& appId,
-                                                     const std::string& typeName, uint64_t parentId)>;
+    using EntityCreatedCallback =
+        std::function<void(uint64_t entityId, const std::string& appId, const std::string& typeName, uint64_t parentId,
+                           const std::vector<ComponentGroupData>& components)>;
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
@@ -182,6 +206,17 @@ public:
     using AssetUploadCancelCallback = std::function<void(const std::array<uint8_t, 16>& uploadId)>;
     using AssetUploadCancelResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
 
+    // Scene management callbacks
+    using CreateSceneCallback = std::function<void(const std::string& sceneName, bool transient)>;
+    using CreateSceneResponseCallback =
+        std::function<void(bool success, uint64_t sceneId, const std::string& errorMessage)>;
+    using DestroySceneCallback = std::function<void(uint64_t sceneId)>;
+    using DestroySceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using SetSceneEnabledCallback = std::function<void(uint64_t sceneId, bool enabled)>;
+    using SetSceneEnabledResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+    using AddEntityToSceneCallback = std::function<void(uint64_t entityId, uint64_t sceneId)>;
+    using AddEntityToSceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
@@ -228,11 +263,123 @@ public:
 
     // Send protocol messages
     Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                   uint64_t parentId, const std::vector<PropertyMetadata>& properties = {});
+                                   uint64_t parentId, const std::vector<ComponentGroupData>& components = {});
     Result<void> sendEntityDestroyed(uint64_t entityId);
+    Result<void> sendComponentAdded(uint64_t entityId, const ComponentGroupData& component);
+    Result<void> sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash);
     Result<void> sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value);
     Result<void> sendPropertyUpdateBatch(const std::vector<uint8_t>& batchData);
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData);
+
+    // =========================================================================
+    // ECS-Style Entity API
+    // =========================================================================
+    //
+    // Clean, compositional API for creating entities with components:
+    //
+    //   auto entity = session.createEntity("Mesh");
+    //   entity.attach(transformSchema)
+    //         .set("position", Vec3{0, 1, 0})
+    //         .set("rotation", Quat{1, 0, 0, 0})
+    //         .set("scale", Vec3{1, 1, 1});
+    //   entity.sync();
+    //
+    // Or fluent one-liner:
+    //   session.createEntity("Light")
+    //          .attach(transformSchema).set("position", Vec3{0, 5, 0})
+    //          .sync();
+
+    class EntityBuilder;
+
+    /**
+     * @brief Component attachment on an entity, allows setting property values
+     */
+    class ComponentHandle
+    {
+    public:
+        ComponentHandle(EntityBuilder& entity, const ComponentSchema& schema);
+
+        /**
+         * @brief Set a property value on this component
+         * @param propertyName Name of the property (must exist in schema)
+         * @param value Property value (type must match schema)
+         * @return Reference to this handle for chaining
+         */
+        template <typename T>
+        ComponentHandle& set(const std::string& propertyName, const T& value);
+
+        /**
+         * @brief Return to entity for attaching more components
+         */
+        EntityBuilder& done() {
+            return _entity;
+        }
+
+    private:
+        EntityBuilder& _entity;
+        const ComponentSchema& _schema;
+    };
+
+    /**
+     * @brief Builder for creating entities with components in ECS style
+     */
+    class EntityBuilder
+    {
+        friend class NetworkSession;
+        friend class ComponentHandle;
+
+    public:
+        /**
+         * @brief Attach a component schema to this entity
+         * @param schema Component schema to attach
+         * @return ComponentHandle for setting property values
+         */
+        ComponentHandle attach(const ComponentSchema& schema);
+
+        /**
+         * @brief Get the entity ID
+         */
+        uint64_t id() const {
+            return _entityId;
+        }
+
+        /**
+         * @brief Send entity creation and all pending property updates
+         * @return Result indicating success/failure
+         */
+        Result<void> sync();
+
+    private:
+        EntityBuilder(NetworkSession& session, uint64_t entityId, const std::string& appId, const std::string& typeName,
+                      uint64_t parentId);
+
+        NetworkSession& _session;
+        uint64_t _entityId;
+        std::string _appId;
+        std::string _typeName;
+        uint64_t _parentId;
+        std::vector<PropertyMetadata> _properties;
+        std::vector<std::tuple<PropertyHash, PropertyType, PropertyValue>> _pendingUpdates;
+        bool _synced = false;
+    };
+
+    /**
+     * @brief Create a new entity with ECS-style API
+     * @param typeName Entity type name (e.g., "Mesh", "Light", "Camera")
+     * @param appId Application ID (default: "CanvasEngine")
+     * @param parentId Parent entity ID (default: 0 = root)
+     * @return EntityBuilder for attaching components and setting properties
+     */
+    EntityBuilder createEntity(const std::string& typeName, const std::string& appId = "CanvasEngine",
+                               uint64_t parentId = 0);
+
+    /**
+     * @brief Get the next available entity ID
+     * @return Unique entity ID for this session
+     */
+    uint64_t nextEntityId() {
+        return _nextEntityId++;
+    }
 
     // Heartbeat protocol
     Result<void> sendHeartbeat();
@@ -302,6 +449,16 @@ public:
     Result<void> sendAssetUploadCancel(const std::array<uint8_t, 16>& uploadId);
     Result<void> sendAssetUploadCancelResponse(bool success, const std::string& errorMessage);
 
+    // Scene management messages
+    Result<void> sendCreateSceneRequest(const std::string& sceneName, bool transient);
+    Result<void> sendCreateSceneResponse(bool success, uint64_t sceneId, const std::string& errorMessage);
+    Result<void> sendDestroySceneRequest(uint64_t sceneId);
+    Result<void> sendDestroySceneResponse(bool success, const std::string& errorMessage);
+    Result<void> sendSetSceneEnabledRequest(uint64_t sceneId, bool enabled);
+    Result<void> sendSetSceneEnabledResponse(bool success, const std::string& errorMessage);
+    Result<void> sendAddEntityToSceneRequest(uint64_t entityId, uint64_t sceneId);
+    Result<void> sendAddEntityToSceneResponse(bool success, const std::string& errorMessage);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -347,6 +504,16 @@ public:
     void setAssetUploadCompleteResponseCallback(AssetUploadCompleteResponseCallback callback);
     void setAssetUploadCancelCallback(AssetUploadCancelCallback callback);
     void setAssetUploadCancelResponseCallback(AssetUploadCancelResponseCallback callback);
+
+    // Scene management callbacks
+    void setCreateSceneCallback(CreateSceneCallback callback);
+    void setCreateSceneResponseCallback(CreateSceneResponseCallback callback);
+    void setDestroySceneCallback(DestroySceneCallback callback);
+    void setDestroySceneResponseCallback(DestroySceneResponseCallback callback);
+    void setSetSceneEnabledCallback(SetSceneEnabledCallback callback);
+    void setSetSceneEnabledResponseCallback(SetSceneEnabledResponseCallback callback);
+    void setAddEntityToSceneCallback(AddEntityToSceneCallback callback);
+    void setAddEntityToSceneResponseCallback(AddEntityToSceneResponseCallback callback);
 
     /**
      * @brief Clears all callbacks to prevent invocation during/after destruction
@@ -453,6 +620,9 @@ private:
 
     std::string _sessionId;
 
+    // ECS entity ID generator
+    std::atomic<uint64_t> _nextEntityId{1};
+
     // Callbacks
     EntityCreatedCallback _entityCreatedCallback;
     EntityDestroyedCallback _entityDestroyedCallback;
@@ -498,6 +668,16 @@ private:
     AssetUploadCompleteResponseCallback _assetUploadCompleteResponseCallback;
     AssetUploadCancelCallback _assetUploadCancelCallback;
     AssetUploadCancelResponseCallback _assetUploadCancelResponseCallback;
+
+    // Scene management callbacks
+    CreateSceneCallback _createSceneCallback;
+    CreateSceneResponseCallback _createSceneResponseCallback;
+    DestroySceneCallback _destroySceneCallback;
+    DestroySceneResponseCallback _destroySceneResponseCallback;
+    SetSceneEnabledCallback _setSceneEnabledCallback;
+    SetSceneEnabledResponseCallback _setSceneEnabledResponseCallback;
+    AddEntityToSceneCallback _addEntityToSceneCallback;
+    AddEntityToSceneResponseCallback _addEntityToSceneResponseCallback;
 
     // Heartbeat tracking
     std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch

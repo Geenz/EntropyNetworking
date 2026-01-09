@@ -20,7 +20,7 @@ namespace EntropyEngine::Networking::Wire
  * @param b Cap'n Proto builder
  * @param h PropertyHash to convert
  */
-inline void toCapnp(::PropertyHash128::Builder b, const PropertyHash& h) {
+inline void toCapnp(Protocol::PropertyHash128::Builder b, const PropertyHash& h) {
     b.setHigh(h.high);
     b.setLow(h.low);
 }
@@ -30,7 +30,7 @@ inline void toCapnp(::PropertyHash128::Builder b, const PropertyHash& h) {
  * @param r Cap'n Proto reader
  * @return PropertyHash
  */
-inline PropertyHash fromCapnp(::PropertyHash128::Reader r) {
+inline PropertyHash fromCapnp(Protocol::PropertyHash128::Reader r) {
     return PropertyHash{r.getHigh(), r.getLow()};
 }
 

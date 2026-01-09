@@ -21,6 +21,8 @@
 #include <TypeSystem/Reflection.h>
 
 #include <format>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <type_traits>
 
 #include "ComponentSchema.h"
@@ -122,6 +124,9 @@ struct TypeToPropertyType<Quat>
     static constexpr PropertyType value = PropertyType::Quat;
 };
 
+// Note: Vec2/Vec3/Vec4/Quat are type aliases of glm::vec2/vec3/vec4/quat (see NetworkTypes.h)
+// so the above specializations already cover GLM types.
+
 // Array types
 template <>
 struct TypeToPropertyType<std::vector<uint8_t>>
@@ -197,7 +202,7 @@ inline std::optional<PropertyType> mapTypeIdToPropertyType(TypeID typeId) {
     if (typeId == createTypeId<bool>()) return PropertyType::Bool;
     if (typeId == createTypeId<std::string>()) return PropertyType::String;
 
-    // EntropyNetworking vector types
+    // Vector/quaternion types (Vec2/Vec3/Vec4/Quat are aliases for glm types)
     if (typeId == createTypeId<Vec2>()) return PropertyType::Vec2;
     if (typeId == createTypeId<Vec3>()) return PropertyType::Vec3;
     if (typeId == createTypeId<Vec4>()) return PropertyType::Vec4;
@@ -246,7 +251,7 @@ inline size_t getFieldSize(TypeID typeId) {
     if (typeId == createTypeId<bool>()) return sizeof(bool);
     if (typeId == createTypeId<std::string>()) return sizeof(std::string);
 
-    // EntropyNetworking vector types
+    // Vector/quaternion types (Vec2/Vec3/Vec4/Quat are aliases for glm types)
     if (typeId == createTypeId<Vec2>()) return sizeof(Vec2);
     if (typeId == createTypeId<Vec3>()) return sizeof(Vec3);
     if (typeId == createTypeId<Vec4>()) return sizeof(Vec4);

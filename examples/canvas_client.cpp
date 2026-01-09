@@ -72,15 +72,18 @@ int main() {
         });
 
         // Entity created callback - receive canvas objects from server
-        sessMgr.setEntityCreatedCallback(session, [&entitiesReceived](uint64_t entityId, const string& appId,
-                                                                      const string& typeName, uint64_t parentId) {
-            ENTROPY_LOG_INFO("\n>>> Received Entity Created:");
-            ENTROPY_LOG_INFO(std::format("    Entity ID: {}", entityId));
-            ENTROPY_LOG_INFO(std::format("    App ID: {}", appId));
-            ENTROPY_LOG_INFO(std::format("    Type: {}", typeName));
-            ENTROPY_LOG_INFO(std::format("    Parent: {}", parentId));
-            entitiesReceived++;
-        });
+        sessMgr.setEntityCreatedCallback(
+            session, [&entitiesReceived](
+                         uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId,
+                         const std::vector<EntropyEngine::Networking::NetworkSession::ComponentGroupData>& components) {
+                ENTROPY_LOG_INFO("\n>>> Received Entity Created:");
+                ENTROPY_LOG_INFO(std::format("    Entity ID: {}", entityId));
+                ENTROPY_LOG_INFO(std::format("    App ID: {}", appId));
+                ENTROPY_LOG_INFO(std::format("    Type: {}", typeName));
+                ENTROPY_LOG_INFO(std::format("    Parent: {}", parentId));
+                ENTROPY_LOG_INFO(std::format("    Components: {}", components.size()));
+                entitiesReceived++;
+            });
 
         // Error callback
         sessMgr.setErrorCallback(session, [](NetworkError error, const string& message) {

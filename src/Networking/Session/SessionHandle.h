@@ -132,10 +132,12 @@ public:
      * @param appId Application identifier
      * @param typeName Entity type name
      * @param parentId Parent entity ID (0 for root)
+     * @param components Component groups with their properties
      * @return Result indicating success or failure
      */
     Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                   uint64_t parentId) const;
+                                   uint64_t parentId,
+                                   const std::vector<NetworkSession::ComponentGroupData>& components = {}) const;
 
     /**
      * @brief Sends EntityDestroyed protocol message

@@ -1,5 +1,8 @@
 @0xb5c7a9e2d4f1e8c3;
 
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("EntropyEngine::Networking::Protocol");
+
 # Entropy Network Protocol Schema
 # Defines all message types for Canvas, Portal, and Paint communication
 
@@ -110,12 +113,31 @@ struct PropertyRegistration {
     registeredAt @5 :UInt64;            # Microseconds since Unix epoch (1970-01-01 00:00:00 UTC)
 }
 
+# ComponentGroup - Groups properties under a component
+struct ComponentGroup {
+    typeHash @0 :PropertyHash128;    # ComponentTypeHash
+    componentName @1 :Text;          # Human-readable name (e.g., "Transform")
+    properties @2 :List(PropertyRegistration);  # Properties within this component
+}
+
 struct EntityCreated {
     entityId @0 :UInt64;
     appId @1 :Text;
     typeName @2 :Text;
     parentId @3 :UInt64;             # 0 = root
-    properties @4 :List(PropertyRegistration);
+    components @4 :List(ComponentGroup);  # Properties grouped by component
+}
+
+# ComponentAdded - Sent when a component is added to an existing entity
+struct ComponentAdded {
+    entityId @0 :UInt64;
+    component @1 :ComponentGroup;
+}
+
+# ComponentRemoved - Sent when a component is removed from an entity
+struct ComponentRemoved {
+    entityId @0 :UInt64;
+    typeHash @1 :PropertyHash128;    # Which component was removed
 }
 
 struct EntityDestroyed {
@@ -517,6 +539,54 @@ struct AssetUploadCancelResponse {
 }
 
 # ============================================================================
+# Scene Management
+# ============================================================================
+
+# Create a new scene (optionally transient - deleted when session disconnects)
+struct CreateSceneRequest {
+    sceneName @0 :Text;           # Human-readable scene name
+    transient @1 :Bool;           # If true, scene is deleted when owning session disconnects
+}
+
+struct CreateSceneResponse {
+    success @0 :Bool;
+    sceneId @1 :UInt64;           # Unique scene identifier
+    errorMessage @2 :Text;
+}
+
+# Destroy a scene and all its entities
+struct DestroySceneRequest {
+    sceneId @0 :UInt64;
+}
+
+struct DestroySceneResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# Enable or disable a scene (disabled scenes don't render/process but can receive updates)
+struct SetSceneEnabledRequest {
+    sceneId @0 :UInt64;
+    enabled @1 :Bool;
+}
+
+struct SetSceneEnabledResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# Add an entity to a scene
+struct AddEntityToSceneRequest {
+    entityId @0 :UInt64;
+    sceneId @1 :UInt64;
+}
+
+struct AddEntityToSceneResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+}
+
+# ============================================================================
 # Top-Level Message Envelope
 # ============================================================================
 
@@ -590,5 +660,19 @@ struct Message {
         assetUploadCompleteResponse @48 :AssetUploadCompleteResponse;
         assetUploadCancelRequest @49 :AssetUploadCancelRequest;
         assetUploadCancelResponse @50 :AssetUploadCancelResponse;
+
+        # Scene management
+        createSceneRequest @51 :CreateSceneRequest;
+        createSceneResponse @52 :CreateSceneResponse;
+        destroySceneRequest @53 :DestroySceneRequest;
+        destroySceneResponse @54 :DestroySceneResponse;
+        setSceneEnabledRequest @55 :SetSceneEnabledRequest;
+        setSceneEnabledResponse @56 :SetSceneEnabledResponse;
+        addEntityToSceneRequest @57 :AddEntityToSceneRequest;
+        addEntityToSceneResponse @58 :AddEntityToSceneResponse;
+
+        # Component lifecycle
+        componentAdded @59 :ComponentAdded;
+        componentRemoved @60 :ComponentRemoved;
     }
 }

@@ -143,10 +143,13 @@ if(APPLE)
 endif()
 
 # Include directories
+# NOTE: ${CMAKE_CURRENT_BINARY_DIR}/src is required because capnp_generate_cpp places
+# generated headers at ${CMAKE_CURRENT_BINARY_DIR}/src/Networking/Protocol/entropy.capnp.h
+# and includes use <Networking/Protocol/entropy.capnp.h> format
 target_include_directories(EntropyNetworking
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src>
         $<INSTALL_INTERFACE:include>
 )
 
