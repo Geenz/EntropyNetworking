@@ -180,12 +180,12 @@ TEST_F(NetworkSessionHandshakeTests, MessagesAllowedAfterHandshake) {
     std::atomic<uint64_t> receivedEntityId{0};
 
     // Set up server callback for EntityCreated
-    serverSession->setEntityCreatedCallback([&](uint64_t entityId, const std::string& appId,
-                                                const std::string& typeName, uint64_t parentId,
-                                                const std::vector<NetworkSession::ComponentGroupData>& /*components*/) {
-        receivedEntityId = entityId;
-        receivedEntity = true;
-    });
+    serverSession->setEntityCreatedCallback(
+        [&](uint64_t entityId, const std::string& appId, const std::string& typeName, uint64_t parentId,
+            const std::vector<NetworkSession::ComponentGroupData>& /*components*/, uint64_t /*targetSceneId*/) {
+            receivedEntityId = entityId;
+            receivedEntity = true;
+        });
 
     // Perform handshake
     auto handshakeResult = clientSession->performHandshake("TestClient", "client-001");
@@ -221,13 +221,13 @@ TEST_F(NetworkSessionHandshakeTests, BidirectionalEntityMessagesAfterHandshake) 
 
     // Set up callbacks
     serverSession->setEntityCreatedCallback([&](uint64_t entityId, const std::string&, const std::string&, uint64_t,
-                                                const std::vector<NetworkSession::ComponentGroupData>&) {
+                                                const std::vector<NetworkSession::ComponentGroupData>&, uint64_t) {
         serverEntityId = entityId;
         serverReceivedEntity = true;
     });
 
     clientSession->setEntityCreatedCallback([&](uint64_t entityId, const std::string&, const std::string&, uint64_t,
-                                                const std::vector<NetworkSession::ComponentGroupData>&) {
+                                                const std::vector<NetworkSession::ComponentGroupData>&, uint64_t) {
         clientEntityId = entityId;
         clientReceivedEntity = true;
     });
