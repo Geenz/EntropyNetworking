@@ -165,7 +165,8 @@ Result<void> NetworkSession::performHandshake(const std::string& clientType, con
 }
 
 Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                               uint64_t parentId, const std::vector<ComponentGroupData>& components) {
+                                               uint64_t parentId, const std::vector<ComponentGroupData>& components,
+                                               uint64_t targetSceneId) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -182,6 +183,7 @@ Result<void> NetworkSession::sendEntityCreated(uint64_t entityId, const std::str
         ec.setAppId(appId);
         ec.setTypeName(typeName);
         ec.setParentId(parentId);
+        ec.setTargetSceneId(targetSceneId);
 
         // Build component groups
         auto componentList = ec.initComponents(components.size());
@@ -2160,7 +2162,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 if (!_shuttingDown.load(std::memory_order_acquire) && _entityCreatedCallback) {
                     _entityCreatedCallback(entityCreated.getEntityId(), std::string(entityCreated.getAppId().cStr()),
                                            std::string(entityCreated.getTypeName().cStr()), entityCreated.getParentId(),
-                                           componentGroups);
+                                           componentGroups, entityCreated.getTargetSceneId());
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;

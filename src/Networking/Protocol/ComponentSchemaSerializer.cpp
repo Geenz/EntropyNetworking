@@ -21,6 +21,9 @@ namespace Networking
 namespace
 {
 // Helper to serialize PropertyValue to Cap'n Proto
+// (Was here, now exposed in header)
+}  // anonymous namespace
+
 void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Builder builder) {
     if (std::holds_alternative<int32_t>(value)) {
         builder.setInt32(std::get<int32_t>(value));
@@ -68,7 +71,6 @@ void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Buil
     }
     // Note: Array types not serialized for default values (not commonly used as defaults)
 }
-}  // anonymous namespace
 
 PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader) {
     switch (reader.which()) {
@@ -98,7 +100,8 @@ PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader) {
         case CapnpPropertyValue::QUAT:
         {
             auto quat = reader.getQuat();
-            return Quat{quat.getX(), quat.getY(), quat.getZ(), quat.getW()};
+            // glm::quat brace init order is {w, x, y, z} (not {x, y, z, w})
+            return Quat{quat.getW(), quat.getX(), quat.getY(), quat.getZ()};
         }
         case CapnpPropertyValue::STRING:
             return std::string(reader.getString().cStr());

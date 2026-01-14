@@ -76,9 +76,7 @@ public:
 
     // Message type callbacks
     using ComponentGroupData = NetworkSession::ComponentGroupData;
-    using EntityCreatedCallback =
-        std::function<void(uint64_t entityId, const std::string& appId, const std::string& typeName, uint64_t parentId,
-                           const std::vector<ComponentGroupData>& components)>;
+    using EntityCreatedCallback = NetworkSession::EntityCreatedCallback;
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
@@ -541,12 +539,24 @@ public:
      */
     Result<void> sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                    const std::string& typeName, uint64_t parentId,
-                                   const std::vector<NetworkSession::ComponentGroupData>& components = {});
+                                   const std::vector<NetworkSession::ComponentGroupData>& components = {},
+                                   uint64_t targetSceneId = 0);
 
     /**
      * @brief Sends EntityDestroyed message (called by handle.sendEntityDestroyed())
      */
     Result<void> sendEntityDestroyed(const SessionHandle& handle, uint64_t entityId);
+
+    /**
+     * @brief Sends ComponentAdded message (called by handle.sendComponentAdded())
+     */
+    Result<void> sendComponentAdded(const SessionHandle& handle, uint64_t entityId,
+                                    const NetworkSession::ComponentGroupData& component);
+
+    /**
+     * @brief Sends ComponentRemoved message (called by handle.sendComponentRemoved())
+     */
+    Result<void> sendComponentRemoved(const SessionHandle& handle, uint64_t entityId, ComponentTypeHash typeHash);
 
     /**
      * @brief Sends PropertyUpdate message (called by handle.sendPropertyUpdate())

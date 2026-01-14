@@ -38,6 +38,14 @@ using CapnpPropertyValue = Protocol::PropertyValue;
 PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader);
 
 /**
+ * @brief Serialize a PropertyValue to Cap'n Proto
+ *
+ * @param value The C++ PropertyValue to serialize
+ * @param builder Cap'n Proto builder for PropertyValue
+ */
+void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Builder builder);
+
+/**
  * @brief Serialize a PropertyDefinition to Cap'n Proto
  *
  * @param definition The C++ PropertyDefinition to serialize

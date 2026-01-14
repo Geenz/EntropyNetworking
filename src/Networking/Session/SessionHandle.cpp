@@ -22,12 +22,13 @@ SessionManager* SessionHandle::manager() const {
 
 Result<void> SessionHandle::sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
                                               uint64_t parentId,
-                                              const std::vector<NetworkSession::ComponentGroupData>& components) const {
+                                              const std::vector<NetworkSession::ComponentGroupData>& components,
+                                              uint64_t targetSceneId) const {
     auto* mgr = manager();
     if (!mgr) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
-    return mgr->sendEntityCreated(*this, entityId, appId, typeName, parentId, components);
+    return mgr->sendEntityCreated(*this, entityId, appId, typeName, parentId, components, targetSceneId);
 }
 
 Result<void> SessionHandle::sendEntityDestroyed(uint64_t entityId) const {
@@ -36,6 +37,23 @@ Result<void> SessionHandle::sendEntityDestroyed(uint64_t entityId) const {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
     return mgr->sendEntityDestroyed(*this, entityId);
+}
+
+Result<void> SessionHandle::sendComponentAdded(uint64_t entityId,
+                                               const NetworkSession::ComponentGroupData& component) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendComponentAdded(*this, entityId, component);
+}
+
+Result<void> SessionHandle::sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendComponentRemoved(*this, entityId, typeHash);
 }
 
 Result<void> SessionHandle::sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value) const {

@@ -67,7 +67,7 @@ public:
     // Message type callbacks
     using EntityCreatedCallback =
         std::function<void(uint64_t entityId, const std::string& appId, const std::string& typeName, uint64_t parentId,
-                           const std::vector<ComponentGroupData>& components)>;
+                           const std::vector<ComponentGroupData>& components, uint64_t targetSceneId)>;
     using EntityDestroyedCallback = std::function<void(uint64_t entityId)>;
     using PropertyUpdateCallback = std::function<void(const std::vector<uint8_t>& data)>;
     using SceneSnapshotCallback = std::function<void(const std::vector<uint8_t>& data)>;
@@ -263,7 +263,8 @@ public:
 
     // Send protocol messages
     Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
-                                   uint64_t parentId, const std::vector<ComponentGroupData>& components = {});
+                                   uint64_t parentId, const std::vector<ComponentGroupData>& components = {},
+                                   uint64_t targetSceneId = 0);
     Result<void> sendEntityDestroyed(uint64_t entityId);
     Result<void> sendComponentAdded(uint64_t entityId, const ComponentGroupData& component);
     Result<void> sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash);

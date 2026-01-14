@@ -1148,7 +1148,8 @@ Result<void> SessionManager::openChannel(const SessionHandle& handle, const std:
 
 Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                                const std::string& typeName, uint64_t parentId,
-                                               const std::vector<NetworkSession::ComponentGroupData>& components) {
+                                               const std::vector<NetworkSession::ComponentGroupData>& components,
+                                               uint64_t targetSceneId) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1162,7 +1163,7 @@ Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId, components);
+    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId, components, targetSceneId);
 }
 
 Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, uint64_t entityId) {
@@ -1180,6 +1181,42 @@ Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, ui
     }
 
     return slot.session->sendEntityDestroyed(entityId);
+}
+
+Result<void> SessionManager::sendComponentAdded(const SessionHandle& handle, uint64_t entityId,
+                                                const NetworkSession::ComponentGroupData& component) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendComponentAdded(entityId, component);
+}
+
+Result<void> SessionManager::sendComponentRemoved(const SessionHandle& handle, uint64_t entityId,
+                                                  ComponentTypeHash typeHash) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendComponentRemoved(entityId, typeHash);
 }
 
 Result<void> SessionManager::sendPropertyUpdate(const SessionHandle& handle, PropertyHash hash, PropertyType type,

@@ -126,6 +126,7 @@ struct EntityCreated {
     typeName @2 :Text;
     parentId @3 :UInt64;             # 0 = root
     components @4 :List(ComponentGroup);  # Properties grouped by component
+    targetSceneId @5 :UInt64;        # Scene to add entity to (0 = use default)
 }
 
 # ComponentAdded - Sent when a component is added to an existing entity

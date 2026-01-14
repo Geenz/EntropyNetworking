@@ -133,11 +133,13 @@ public:
      * @param typeName Entity type name
      * @param parentId Parent entity ID (0 for root)
      * @param components Component groups with their properties
+     * @param targetSceneId Scene to add entity to (0 = use session's default scene)
      * @return Result indicating success or failure
      */
     Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
                                    uint64_t parentId,
-                                   const std::vector<NetworkSession::ComponentGroupData>& components = {}) const;
+                                   const std::vector<NetworkSession::ComponentGroupData>& components = {},
+                                   uint64_t targetSceneId = 0) const;
 
     /**
      * @brief Sends EntityDestroyed protocol message
@@ -147,6 +149,26 @@ public:
      * @return Result indicating success or failure
      */
     Result<void> sendEntityDestroyed(uint64_t entityId) const;
+
+    /**
+     * @brief Sends ComponentAdded protocol message
+     *
+     * Notifies remote peer that a component was added to an entity.
+     * @param entityId Entity that received the component
+     * @param component Component data including type hash and properties
+     * @return Result indicating success or failure
+     */
+    Result<void> sendComponentAdded(uint64_t entityId, const NetworkSession::ComponentGroupData& component) const;
+
+    /**
+     * @brief Sends ComponentRemoved protocol message
+     *
+     * Notifies remote peer that a component was removed from an entity.
+     * @param entityId Entity that lost the component
+     * @param typeHash Type hash of the removed component
+     * @return Result indicating success or failure
+     */
+    Result<void> sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash) const;
 
     /**
      * @brief Sends single property update
