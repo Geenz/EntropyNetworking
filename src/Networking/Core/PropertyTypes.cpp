@@ -101,6 +101,52 @@ const char* propertyTypeToString(PropertyType type) {
     }
 }
 
+size_t getPropertySize(PropertyType type) {
+    switch (type) {
+        case PropertyType::Bool:
+            return sizeof(bool);
+        case PropertyType::Int32:
+            return sizeof(int32_t);
+        case PropertyType::Int64:
+            return sizeof(int64_t);
+        case PropertyType::Float32:
+            return sizeof(float);
+        case PropertyType::Float64:
+            return sizeof(double);
+        case PropertyType::Vec2:
+            return sizeof(Vec2);
+        case PropertyType::Vec3:
+            return sizeof(Vec3);
+        case PropertyType::Vec4:
+            return sizeof(Vec4);
+        case PropertyType::Quat:
+            return sizeof(Quat);
+        case PropertyType::AssetId:
+            return sizeof(EntropyEngine::Networking::AssetId);
+        case PropertyType::String:
+            return sizeof(std::string);
+        case PropertyType::Bytes:
+            return sizeof(std::vector<uint8_t>);
+        case PropertyType::Int32Array:
+            return sizeof(std::vector<int32_t>);
+        case PropertyType::Int64Array:
+            return sizeof(std::vector<int64_t>);
+        case PropertyType::Float32Array:
+            return sizeof(std::vector<float>);
+        case PropertyType::Float64Array:
+            return sizeof(std::vector<double>);
+        case PropertyType::Vec2Array:
+            return sizeof(std::vector<Vec2>);
+        case PropertyType::Vec3Array:
+            return sizeof(std::vector<Vec3>);
+        case PropertyType::Vec4Array:
+            return sizeof(std::vector<Vec4>);
+        case PropertyType::QuatArray:
+            return sizeof(std::vector<Quat>);
+    }
+    return 0;
+}
+
 uint16_t toCapnpPropertyType(PropertyType type) {
     // Explicit mapping ensures safety even if enum ordinals change
     // Returns uint16_t (underlying type) to avoid capnp header dependency

@@ -115,6 +115,17 @@ PropertyType getPropertyType(const PropertyValue& value);
 const char* propertyTypeToString(PropertyType type);
 
 /**
+ * @brief Get the minimum required size in bytes for a property type
+ *
+ * Used for safety checks to ensure schema definitions provide enough space
+ * for the data type.
+ *
+ * @param type The property type
+ * @return Size in bytes
+ */
+size_t getPropertySize(PropertyType type);
+
+/**
  * @brief Convert C++ PropertyType to Cap'n Proto PropertyType enum
  *
  * Provides explicit, safe conversion between C++ and Cap'n Proto enum types

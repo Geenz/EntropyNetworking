@@ -200,8 +200,9 @@ TEST(ComponentSchemaTests, TestVector_SimpleTransform) {
     ASSERT_TRUE(result.success());
 
     // Verify canonical string format
+    // NOTE: appId is NOT included in canonical string (metadata only, not part of type identity)
     std::string canonical = result.value.toCanonicalString();
-    EXPECT_EQ(canonical, "TestApp.Transform@1{position:Vec3:0:12,rotation:Quat:12:16}");
+    EXPECT_EQ(canonical, "Transform@1{position:Vec3:0:12,rotation:Quat:12:16}");
 
     // Document the computed hashes (these are reference values)
     EXPECT_FALSE(result.value.structuralHash.isNull());
@@ -222,7 +223,7 @@ TEST(ComponentSchemaTests, TestVector_Physics) {
 
     // Verify canonical string (properties sorted alphabetically)
     std::string canonical = result.value.toCanonicalString();
-    EXPECT_EQ(canonical, "PhysicsEngine.RigidBody@2{acceleration:Vec3:16:12,mass:Float32:0:4,velocity:Vec3:4:12}");
+    EXPECT_EQ(canonical, "RigidBody@2{acceleration:Vec3:16:12,mass:Float32:0:4,velocity:Vec3:4:12}");
 
     EXPECT_TRUE(result.value.isPublic);
 }
@@ -236,7 +237,7 @@ TEST(ComponentSchemaTests, TestVector_SingleProperty) {
     ASSERT_TRUE(result.success());
 
     std::string canonical = result.value.toCanonicalString();
-    EXPECT_EQ(canonical, "GameEngine.Health@1{health:Int32:0:4}");
+    EXPECT_EQ(canonical, "Health@1{health:Int32:0:4}");
 }
 
 TEST(ComponentSchemaTests, TestVector_ComplexSchema) {
@@ -254,7 +255,7 @@ TEST(ComponentSchemaTests, TestVector_ComplexSchema) {
     // Properties should be sorted alphabetically in canonical form
     std::string canonical = result.value.toCanonicalString();
     EXPECT_EQ(canonical,
-              "RenderEngine.Drawable@3{id:Int64:0:8,layer:Int32:116:4,name:String:8:64,"
+              "Drawable@3{id:Int64:0:8,layer:Int32:116:4,name:String:8:64,"
               "position:Vec3:72:12,rotation:Quat:84:16,scale:Vec3:100:12,visible:Bool:112:1}");
 }
 
@@ -276,8 +277,7 @@ TEST(ComponentSchemaTests, TestVector_PropertyOrdering) {
 
     // Both should produce identical canonical strings (alphabetically sorted)
     EXPECT_EQ(result1.value.toCanonicalString(), result2.value.toCanonicalString());
-    EXPECT_EQ(result1.value.toCanonicalString(),
-              "App.Test@1{a_first:Float32:4:4,m_middle:Float32:8:4,z_last:Float32:0:4}");
+    EXPECT_EQ(result1.value.toCanonicalString(), "Test@1{a_first:Float32:4:4,m_middle:Float32:8:4,z_last:Float32:0:4}");
 
     // And identical hashes
     EXPECT_EQ(result1.value.structuralHash, result2.value.structuralHash);
@@ -298,7 +298,7 @@ TEST(ComponentSchemaTests, TestVector_ASCIIIdentifiers) {
 
     std::string canonical = result.value.toCanonicalString();
     EXPECT_EQ(canonical,
-              "MyApp_v2.Test_Component@1{PascalCase:Int32:12:4,_private:Int32:0:4,"
+              "Test_Component@1{PascalCase:Int32:12:4,_private:Int32:0:4,"
               "camelCase:Int32:8:4,snake_case:Int32:4:4,with123numbers:Int32:16:4}");
 }
 
@@ -324,9 +324,9 @@ TEST(ComponentSchemaTests, TestVector_VersionDifferentiation) {
     EXPECT_NE(v1.value.typeHash, v3.value.typeHash);
 
     // Canonical strings differ by version number
-    EXPECT_EQ(v1.value.toCanonicalString(), "App.Component@1{value:Float32:0:4}");
-    EXPECT_EQ(v2.value.toCanonicalString(), "App.Component@2{value:Float32:0:4}");
-    EXPECT_EQ(v3.value.toCanonicalString(), "App.Component@3{value:Float32:0:4}");
+    EXPECT_EQ(v1.value.toCanonicalString(), "Component@1{value:Float32:0:4}");
+    EXPECT_EQ(v2.value.toCanonicalString(), "Component@2{value:Float32:0:4}");
+    EXPECT_EQ(v3.value.toCanonicalString(), "Component@3{value:Float32:0:4}");
 }
 
 // ============================================================================

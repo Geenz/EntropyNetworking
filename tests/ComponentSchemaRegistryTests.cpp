@@ -200,19 +200,23 @@ TEST(ComponentSchemaRegistryTests, AreCompatible_True) {
 
     std::vector<PropertyDefinition> properties = {{"position", PropertyType::Vec3, 0, 12}};
 
+    // Two apps with identical schema structure produce the SAME type hash
+    // (appId is metadata only, not part of type identity)
     auto schema1Result = ComponentSchema::create("App1", "Transform", 1, properties, 12, false);
     auto schema2Result = ComponentSchema::create("App2", "Transform", 1, properties, 12, false);
 
     ASSERT_TRUE(schema1Result.success());
     ASSERT_TRUE(schema2Result.success());
 
+    // Verify they produce the same type hash (appId excluded from hash)
+    EXPECT_EQ(schema1Result.value.typeHash, schema2Result.value.typeHash);
+
+    // Register once - both apps share this type
     auto hash1Result = registry.registerSchema(schema1Result.value);
-    auto hash2Result = registry.registerSchema(schema2Result.value);
-
     ASSERT_TRUE(hash1Result.success());
-    ASSERT_TRUE(hash2Result.success());
 
-    EXPECT_TRUE(registry.areCompatible(hash1Result.value, hash2Result.value));
+    // A type is always compatible with itself
+    EXPECT_TRUE(registry.areCompatible(hash1Result.value, hash1Result.value));
 }
 
 TEST(ComponentSchemaRegistryTests, AreCompatible_False) {
