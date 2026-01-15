@@ -205,6 +205,19 @@ public:
     virtual ConnectionStats getStats() const = 0;
 
     /**
+     * @brief Starts the receive thread for adopted connections
+     *
+     * For connections created via accept(), the receive thread must NOT start
+     * in the constructor. Instead, ConnectionManager calls this after setting
+     * up callbacks to avoid race conditions where messages arrive before
+     * handlers are registered.
+     *
+     * For client-side connections (via connect()), receive thread starts
+     * automatically in connect() - this method is a no-op.
+     */
+    virtual void startReceiving() {}
+
+    /**
      * @brief Sets callback for incoming messages
      *
      * Thread-safe: Can be called from any thread.

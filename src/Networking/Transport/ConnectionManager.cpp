@@ -94,6 +94,12 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
     std::atomic_store(&slot.userMessageCb, std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>>());
     std::atomic_store(&slot.userStateCb, std::shared_ptr<std::function<void(ConnectionState)>>());
 
+    // Clear pending message queue
+    {
+        std::lock_guard<std::mutex> lock(slot.pendingMsgMutex);
+        slot.pendingMessages.clear();
+    }
+
     // Clear backend callbacks to break captures into this manager
     if (slot.connection) {
         slot.connection->setStateCallback(nullptr);
@@ -299,7 +305,7 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
         }
     });
 
-    // Manager-owned message callback: increment metrics and fan out to user callback
+    // Manager-owned message callback: queue if no user callback, else fan out
     slot.connection->setMessageCallback([this, index, gen = generation](const std::vector<uint8_t>& data) noexcept {
         // Generation guard: ignore callbacks for recycled slots
         if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
@@ -307,9 +313,16 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
         }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
+
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
         if (cbptr && *cbptr) {
+            // Hot path: callback set, invoke directly
             (*cbptr)(data);
+        } else {
+            // Cold path: no callback yet, queue for later drain
+            // TODO(future): Add optional message type filter here for memory efficiency
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].pendingMsgMutex);
+            _connectionSlots[index].pendingMessages.push_back(data);
         }
     });
 
@@ -322,6 +335,10 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
             (*cbptr2)(st);
         }
     }
+
+    // Start receive thread - messages will queue until callback is registered
+    // This is safe now because the message callback above queues early messages
+    slot.connection->startReceiving();
 
     return ConnectionHandle(this, index, generation);
 }
@@ -381,9 +398,16 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
         }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
+
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
         if (cbptr && *cbptr) {
+            // Hot path: callback set, invoke directly
             (*cbptr)(data);
+        } else {
+            // Cold path: no callback yet, queue for later drain
+            // TODO(future): Add optional message type filter here for memory efficiency
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].pendingMsgMutex);
+            _connectionSlots[index].pendingMessages.push_back(data);
         }
     });
 
@@ -542,9 +566,27 @@ void ConnectionManager::setMessageCallback(const ConnectionHandle& handle,
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
-    // Store user callback; backend remains bound to manager-owned fan-out
+    // Drain pending messages BEFORE setting callback to ensure ordering
+    // This implements the late-subscriber pattern: new callbacks receive buffered history
+    std::vector<std::vector<uint8_t>> toDeliver;
+    {
+        std::lock_guard<std::mutex> lock(slot.pendingMsgMutex);
+        toDeliver = std::move(slot.pendingMessages);
+        slot.pendingMessages.clear();
+    }
+
+    // Set the callback
     auto sp = std::make_shared<std::function<void(const std::vector<uint8_t>&)>>(std::move(callback));
     std::atomic_store(&slot.userMessageCb, std::move(sp));
+
+    // Now deliver queued messages (callback is set, so new messages go direct)
+    // TODO(future): For event sourcing, also persist toDeliver to replay log
+    auto cbptr = std::atomic_load(&slot.userMessageCb);
+    if (cbptr && *cbptr) {
+        for (const auto& msg : toDeliver) {
+            (*cbptr)(msg);
+        }
+    }
 }
 
 void ConnectionManager::setStateCallback(const ConnectionHandle& handle,

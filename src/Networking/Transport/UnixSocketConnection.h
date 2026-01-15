@@ -127,6 +127,14 @@ public:
     }
     ConnectionStats getStats() const override;
 
+    /**
+     * @brief Starts the receive thread for adopted connections
+     *
+     * Called by ConnectionManager::adoptConnection() AFTER callbacks are set.
+     * For connections created via connect(), receive thread starts in connect().
+     */
+    void startReceiving() override;
+
 private:
     /**
      * @brief Receive thread main loop

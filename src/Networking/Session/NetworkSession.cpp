@@ -46,11 +46,18 @@ NetworkSession::NetworkSession(NetworkConnection* connection, PropertyRegistry* 
         // Note: Callbacks are NOT set here. SessionManager will register our callbacks
         // with ConnectionManager's fan-out system after construction.
     }
+
+    // Start the message worker thread - this decouples receiving from processing
+    // so slow callbacks don't block the receive path
+    startMessageWorker();
 }
 
 NetworkSession::~NetworkSession() {
-    // Set shutdown flag to prevent new callback invocations
+    // Set shutdown flag to prevent new callback invocations and new messages from being queued
     _shuttingDown.store(true, std::memory_order_release);
+
+    // Stop the message worker thread - this will drain remaining messages
+    stopMessageWorker();
 
     // Clear connection callbacks FIRST to prevent new invocations
     if (_connection) {
@@ -1700,6 +1707,14 @@ void NetworkSession::setHeartbeatResponseCallback(HeartbeatResponseCallback call
     _heartbeatResponseCallback = std::move(callback);
 }
 
+void NetworkSession::setDisconnectCallback(DisconnectCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;  // Don't set callbacks during shutdown
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _disconnectCallback = std::move(callback);
+}
+
 void NetworkSession::setAssetAdvertiseCallback(AssetAdvertiseCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
@@ -2052,12 +2067,98 @@ ConnectionStats NetworkSession::getStats() const {
     return _connection->getStats();
 }
 
+// ============================================================================
+// Async Message Queue Implementation
+// ============================================================================
+// Decouples the receive thread from message processing. This ensures:
+// 1. Slow callbacks don't block the receive thread
+// 2. Heartbeat detection works correctly even when app is busy
+// 3. Connection can detect broken pipes immediately
+// ============================================================================
+
+void NetworkSession::startMessageWorker() {
+    bool expected = false;
+    if (!_messageWorkerRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        // Already running
+        return;
+    }
+
+    _messageWorkerThread = std::thread([this]() { messageWorkerLoop(); });
+
+    ENTROPY_LOG_DEBUG(std::format("NetworkSession {}: Message worker thread started", _sessionId));
+}
+
+void NetworkSession::stopMessageWorker() {
+    bool expected = true;
+    if (!_messageWorkerRunning.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
+        // Not running or already stopping
+        return;
+    }
+
+    // Wake up the worker thread
+    {
+        std::lock_guard<std::mutex> lock(_messageQueueMutex);
+        _messageQueueCV.notify_one();
+    }
+
+    // Wait for worker to finish
+    if (_messageWorkerThread.joinable()) {
+        _messageWorkerThread.join();
+    }
+
+    // Drain any remaining messages (discard since we're shutting down)
+    {
+        std::lock_guard<std::mutex> lock(_messageQueueMutex);
+        _messageQueue.clear();
+    }
+
+    ENTROPY_LOG_DEBUG(std::format("NetworkSession {}: Message worker thread stopped", _sessionId));
+}
+
+void NetworkSession::messageWorkerLoop() {
+    while (_messageWorkerRunning.load(std::memory_order_acquire)) {
+        std::vector<uint8_t> message;
+
+        {
+            std::unique_lock<std::mutex> lock(_messageQueueMutex);
+
+            // Wait for messages or shutdown signal
+            _messageQueueCV.wait(lock, [this]() {
+                return !_messageQueue.empty() || !_messageWorkerRunning.load(std::memory_order_acquire);
+            });
+
+            // Check if we should exit
+            if (!_messageWorkerRunning.load(std::memory_order_acquire) && _messageQueue.empty()) {
+                break;
+            }
+
+            // Pop message from queue
+            if (!_messageQueue.empty()) {
+                message = std::move(_messageQueue.front());
+                _messageQueue.pop_front();
+            }
+        }
+
+        // Process the message outside the lock
+        if (!message.empty()) {
+            handleReceivedMessage(message);
+        }
+    }
+}
+
 void NetworkSession::onMessageReceived(const std::vector<uint8_t>& data) {
     // Check shutdown flag to prevent further processing during destruction
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
-    handleReceivedMessage(data);
+
+    // Queue the message for the worker thread to process
+    // This keeps the receive thread responsive for immediate disconnect detection
+    {
+        std::lock_guard<std::mutex> lock(_messageQueueMutex);
+        _messageQueue.push_back(data);
+    }
+    _messageQueueCV.notify_one();
 }
 
 void NetworkSession::onConnectionStateChanged(ConnectionState state) {
@@ -2065,7 +2166,24 @@ void NetworkSession::onConnectionStateChanged(ConnectionState state) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
     }
+
+    ConnectionState prevState = _state;
     _state = state;
+
+    // Invoke disconnect callback immediately when connection dies
+    // This enables immediate session cleanup for local IPC instead of waiting for heartbeat timeout
+    if ((state == ConnectionState::Disconnected || state == ConnectionState::Failed) &&
+        prevState != ConnectionState::Disconnected && prevState != ConnectionState::Failed) {
+        DisconnectCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            cb = _disconnectCallback;
+        }
+        if (cb) {
+            std::string reason = (state == ConnectionState::Failed) ? "Connection failed" : "Connection closed";
+            cb(state, reason);
+        }
+    }
 }
 
 void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {

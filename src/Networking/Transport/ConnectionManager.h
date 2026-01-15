@@ -303,6 +303,11 @@ private:
         std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>> userMessageCb;  ///< User message callback
         std::shared_ptr<std::function<void(ConnectionState)>> userStateCb;                ///< User state callback
 
+        // Message queue for late-subscriber pattern and race condition prevention
+        // TODO(future): Evolve to event sourcing - persist queue for scene replay
+        std::vector<std::vector<uint8_t>> pendingMessages;  ///< Messages received before callback was registered
+        std::mutex pendingMsgMutex;                         ///< Protects pendingMessages queue
+
         std::mutex mutex;  ///< Per-slot mutex for connection operations
     };
 

@@ -69,8 +69,9 @@ NamedPipeConnection::NamedPipeConnection(HANDLE connectedPipe, std::string /*pee
     _lastActivityTime.store(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
                             std::memory_order_release);
 
-    _shouldStop = false;
-    _receiveThread = std::thread([this]() { receiveLoop(); });
+    // NOTE: Receive thread NOT started here!
+    // ConnectionManager::adoptConnection() will call startReceiving() AFTER setting callbacks.
+    // This prevents race conditions where messages arrive before handlers are registered.
 }
 
 NamedPipeConnection::~NamedPipeConnection() {
@@ -179,6 +180,16 @@ Result<void> NamedPipeConnection::disconnect() {
     _state = ConnectionState::Disconnected;
     onStateChanged(ConnectionState::Disconnected);
     return Result<void>::ok();
+}
+
+void NamedPipeConnection::startReceiving() {
+    // Only start if not already running and we're connected
+    if (_receiveThread.joinable() || _state != ConnectionState::Connected) {
+        return;
+    }
+
+    _shouldStop = false;
+    _receiveThread = std::thread([this]() { receiveLoop(); });
 }
 
 Result<void> NamedPipeConnection::send(const std::vector<uint8_t>& data) {

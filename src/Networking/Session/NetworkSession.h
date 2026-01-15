@@ -13,9 +13,12 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "../Core/ComponentSchemaRegistry.h"
 #include "../Core/ErrorCodes.h"
@@ -75,6 +78,7 @@ public:
     using ErrorCallback = std::function<void(NetworkError error, const std::string& message)>;
     using HeartbeatCallback = std::function<void(uint64_t timestamp)>;
     using HeartbeatResponseCallback = std::function<void(uint64_t clientTimestamp, uint64_t serverTime)>;
+    using DisconnectCallback = std::function<void(ConnectionState state, const std::string& reason)>;
 
     // Schema message callbacks
     using RegisterSchemaResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
@@ -469,6 +473,7 @@ public:
     void setErrorCallback(ErrorCallback callback);
     void setHeartbeatCallback(HeartbeatCallback callback);
     void setHeartbeatResponseCallback(HeartbeatResponseCallback callback);
+    void setDisconnectCallback(DisconnectCallback callback);
 
     // Schema message callbacks
     void setRegisterSchemaResponseCallback(RegisterSchemaResponseCallback callback);
@@ -641,6 +646,7 @@ private:
     SchemaAdvertisementCallback _schemaAdvertisementCallback;
     HeartbeatCallback _heartbeatCallback;
     HeartbeatResponseCallback _heartbeatResponseCallback;
+    DisconnectCallback _disconnectCallback;
 
     // Asset callbacks
     AssetAdvertiseCallback _assetAdvertiseCallback;
@@ -721,6 +727,22 @@ private:
     PropertyBatchStats _batchStats;
 
     mutable std::mutex _mutex;
+
+    // ========================================================================
+    // Async Message Queue (decouples receive thread from callback processing)
+    // ========================================================================
+    // Receive thread pushes messages to queue, worker thread processes them.
+    // This prevents slow callbacks from blocking the receive path and allows
+    // heartbeat detection to work correctly even when app is busy.
+    std::deque<std::vector<uint8_t>> _messageQueue;
+    std::mutex _messageQueueMutex;
+    std::condition_variable _messageQueueCV;
+    std::thread _messageWorkerThread;
+    std::atomic<bool> _messageWorkerRunning{false};
+
+    void messageWorkerLoop();
+    void startMessageWorker();
+    void stopMessageWorker();
 };
 
 }  // namespace EntropyEngine::Networking

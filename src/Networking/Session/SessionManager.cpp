@@ -315,6 +315,25 @@ Result<void> SessionManager::setHeartbeatCallback(const SessionHandle& handle, H
     return Result<void>::ok();
 }
 
+Result<void> SessionManager::setDisconnectCallback(const SessionHandle& handle,
+                                                   NetworkSession::DisconnectCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setDisconnectCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
 // Asset callback setters
 
 Result<void> SessionManager::setAssetAdvertiseCallback(const SessionHandle& handle, AssetAdvertiseCallback callback) {

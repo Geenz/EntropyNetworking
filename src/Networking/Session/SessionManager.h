@@ -247,6 +247,17 @@ public:
      */
     Result<void> setHeartbeatCallback(const SessionHandle& handle, HeartbeatCallback callback);
 
+    /**
+     * @brief Sets callback for connection disconnect/failure
+     *
+     * Called immediately when connection dies (broken pipe, EOF, etc).
+     * Enables immediate session cleanup for local IPC instead of waiting for heartbeat timeout.
+     * @param handle Session handle
+     * @param callback Callback function invoked with state and reason
+     * @return Result indicating success or failure
+     */
+    Result<void> setDisconnectCallback(const SessionHandle& handle, NetworkSession::DisconnectCallback callback);
+
     // Asset callback setters
 
     /**
