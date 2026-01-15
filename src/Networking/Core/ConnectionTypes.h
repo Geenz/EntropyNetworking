@@ -26,9 +26,10 @@ namespace EntropyEngine::Networking
 {
 
 // Default configuration constants
-static constexpr size_t DEFAULT_MAX_MESSAGE_SIZE = 16ull * 1024ull * 1024ull;      // 16 MiB
-static constexpr size_t DEFAULT_XPC_MAX_MESSAGE_SIZE = 64ull * 1024ull * 1024ull;  // 64 MiB
-static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;                 // 256 KiB
+static constexpr size_t DEFAULT_MAX_MESSAGE_SIZE = 16ull * 1024ull * 1024ull;          // 16 MiB
+static constexpr size_t DEFAULT_XPC_MAX_MESSAGE_SIZE = 64ull * 1024ull * 1024ull;      // 64 MiB
+static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;                     // 256 KiB
+static constexpr size_t DEFAULT_SHARED_MEMORY_REGION_SIZE = 4ull * 1024ull * 1024ull;  // 4 MiB
 
 /**
  * @brief High-level connection type abstraction
@@ -51,11 +52,12 @@ enum class ConnectionType
  */
 enum class ConnectionBackend
 {
-    Auto,        ///< Automatic selection based on platform
-    UnixSocket,  ///< Force Unix domain socket (Linux/macOS)
-    NamedPipe,   ///< Force named pipe (Windows)
-    XPC,         ///< Force XPC connection (macOS)
-    WebRTC       ///< Force WebRTC data channel (all platforms)
+    Auto,         ///< Automatic selection based on platform
+    UnixSocket,   ///< Force Unix domain socket (Linux/macOS)
+    NamedPipe,    ///< Force named pipe (Windows)
+    XPC,          ///< Force XPC connection (macOS)
+    WebRTC,       ///< Force WebRTC data channel (all platforms)
+    SharedMemory  ///< Force shared memory transport (all platforms, local only)
 };
 
 /**
@@ -172,6 +174,12 @@ struct ConnectionConfig
     // XPC-specific (Apple)
     size_t xpcMaxMessageSize = DEFAULT_XPC_MAX_MESSAGE_SIZE;  ///< Max allowed XPC payload size
     int xpcReplyTimeoutMs = 5000;                             ///< Default reply timeout for XPC sendWithReply
+
+    // Shared memory-specific
+    size_t sharedMemoryRegionSize =
+        DEFAULT_SHARED_MEMORY_REGION_SIZE;    ///< Size of shared memory region (default 4 MiB)
+    int sharedMemoryConnectTimeoutMs = 5000;  ///< Timeout for shared memory connection handshake
+    int sharedMemoryWaitTimeoutMs = 100;      ///< Timeout for wake/wait operations
 
     // Platform-specific options
     std::optional<std::string> xpcServiceName;  ///< macOS XPC service identifier

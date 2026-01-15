@@ -54,7 +54,13 @@ enum class NetworkError
     SchemaAlreadyExists,     ///< Schema already registered with different content
     SchemaIncompatible,      ///< Schemas are structurally incompatible
     SchemaValidationFailed,  ///< Schema field validation failed
-    SchemaNotPublic          ///< Schema is not published for discovery
+    SchemaNotPublic,         ///< Schema is not published for discovery
+
+    // Shared memory errors
+    SharedMemoryNotAvailable,  ///< Shared memory not available on this platform
+    SharedMemoryPermission,    ///< Permission denied for shared memory operation
+    SharedMemorySizeMismatch,  ///< Shared memory region size mismatch
+    SharedMemoryCorrupted      ///< Shared memory control block corrupted (magic/version mismatch)
 };
 
 /**
@@ -110,6 +116,14 @@ inline const char* errorToString(NetworkError error) {
             return "Schema validation failed";
         case NetworkError::SchemaNotPublic:
             return "Schema not public";
+        case NetworkError::SharedMemoryNotAvailable:
+            return "Shared memory not available";
+        case NetworkError::SharedMemoryPermission:
+            return "Shared memory permission denied";
+        case NetworkError::SharedMemorySizeMismatch:
+            return "Shared memory size mismatch";
+        case NetworkError::SharedMemoryCorrupted:
+            return "Shared memory corrupted";
         default:
             return "Unknown error";
     }

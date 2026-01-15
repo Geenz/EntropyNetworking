@@ -115,6 +115,25 @@ if(UNIX OR APPLE)
     )
 endif()
 
+# Cross-platform shared memory transport
+list(APPEND NETWORKING_SOURCES
+    src/Networking/Transport/SharedMemoryConnection.cpp
+    src/Networking/Transport/SharedMemoryServer.cpp
+)
+
+# Platform-specific shared memory implementations
+if(UNIX OR APPLE)
+    list(APPEND NETWORKING_SOURCES
+        src/Networking/Transport/SharedMemoryPlatformUnix.cpp
+    )
+endif()
+
+if(WIN32)
+    list(APPEND NETWORKING_SOURCES
+        src/Networking/Transport/SharedMemoryPlatformWin32.cpp
+    )
+endif()
+
 # Windows local IPC (Named Pipes)
 if(WIN32)
     list(APPEND NETWORKING_SOURCES
