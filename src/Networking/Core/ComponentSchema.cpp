@@ -98,10 +98,13 @@ PropertyHash ComponentSchema::computeStructuralHash(const std::vector<PropertyDe
 
 ComponentTypeHash ComponentSchema::computeTypeHash(const std::string& appId, const std::string& componentName,
                                                    uint32_t schemaVersion, const PropertyHash& structuralHash) {
-    // Build canonical string: {appId}.{componentName}@{version}{structuralHashHex}
+    // Build canonical string: {componentName}@{version}{structuralHashHex}
+    // NOTE: appId is intentionally NOT included - it's metadata only, not part of type identity.
+    // This ensures the same component type gets the same hash regardless of which app compiles it.
+    (void)appId;  // Unused but kept in signature for API compatibility
     std::ostringstream oss;
-    oss << appId << "." << componentName << "@" << schemaVersion << "{" << std::hex << std::setfill('0')
-        << std::setw(16) << structuralHash.high << std::setw(16) << structuralHash.low << "}";
+    oss << componentName << "@" << schemaVersion << "{" << std::hex << std::setfill('0') << std::setw(16)
+        << structuralHash.high << std::setw(16) << structuralHash.low << "}";
 
     std::string canonical = oss.str();
 
@@ -321,9 +324,10 @@ std::string ComponentSchema::toCanonicalString() const {
     std::sort(sortedProps.begin(), sortedProps.end(),
               [](const PropertyDefinition& a, const PropertyDefinition& b) { return a.name < b.name; });
 
-    // Build canonical string: {appId}.{componentName}@{version}{prop:type:offset:size,...}
+    // Build canonical string: {componentName}@{version}{prop:type:offset:size,...}
+    // NOTE: appId is NOT included for consistency with computeTypeHash()
     std::ostringstream oss;
-    oss << appId << "." << componentName << "@" << schemaVersion << "{";
+    oss << componentName << "@" << schemaVersion << "{";
 
     for (size_t i = 0; i < sortedProps.size(); ++i) {
         if (i > 0) {
