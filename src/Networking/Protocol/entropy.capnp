@@ -127,6 +127,7 @@ struct EntityCreated {
     parentId @3 :UInt64;             # 0 = root
     components @4 :List(ComponentGroup);  # Properties grouped by component
     targetSceneId @5 :UInt64;        # Scene to add entity to (0 = use default)
+    entityName @6 :Text;             # Flecs entity name for client-side identification
 }
 
 # ComponentAdded - Sent when a component is added to an existing entity

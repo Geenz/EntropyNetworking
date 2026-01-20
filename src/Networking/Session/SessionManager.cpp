@@ -1168,7 +1168,7 @@ Result<void> SessionManager::openChannel(const SessionHandle& handle, const std:
 Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                                const std::string& typeName, uint64_t parentId,
                                                const std::vector<NetworkSession::ComponentGroupData>& components,
-                                               uint64_t targetSceneId) {
+                                               uint64_t targetSceneId, const std::string& entityName) {
     if (!validateHandle(handle)) {
         return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
     }
@@ -1182,7 +1182,7 @@ Result<void> SessionManager::sendEntityCreated(const SessionHandle& handle, uint
         return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
     }
 
-    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId, components, targetSceneId);
+    return slot.session->sendEntityCreated(entityId, appId, typeName, parentId, components, targetSceneId, entityName);
 }
 
 Result<void> SessionManager::sendEntityDestroyed(const SessionHandle& handle, uint64_t entityId) {

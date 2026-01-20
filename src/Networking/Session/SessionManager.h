@@ -551,7 +551,7 @@ public:
     Result<void> sendEntityCreated(const SessionHandle& handle, uint64_t entityId, const std::string& appId,
                                    const std::string& typeName, uint64_t parentId,
                                    const std::vector<NetworkSession::ComponentGroupData>& components = {},
-                                   uint64_t targetSceneId = 0);
+                                   uint64_t targetSceneId = 0, const std::string& entityName = "");
 
     /**
      * @brief Sends EntityDestroyed message (called by handle.sendEntityDestroyed())
