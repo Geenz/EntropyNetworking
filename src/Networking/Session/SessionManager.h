@@ -99,8 +99,9 @@ public:
         std::function<void(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId)>;
     using AssetProvideKeyCallback = std::function<void(const std::array<uint8_t, 32>& assetId,
                                                        const std::array<uint8_t, 32>& key, uint64_t requestId)>;
-    using AssetUploadCallback = std::function<void(const std::string& appId, const std::vector<uint8_t>& data,
-                                                   uint8_t contentType, bool persistent, uint64_t requestId)>;
+    using AssetUploadCallback =
+        std::function<void(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                           bool persistent, uint64_t requestId, const NetworkSession::AssetMetadataData& metadata)>;
     using AssetFetchCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
 
     // Asset response callbacks (for clients receiving responses)
@@ -141,6 +142,26 @@ public:
     using SetSceneEnabledResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
     using AddEntityToSceneCallback = std::function<void(uint64_t entityId, uint64_t sceneId)>;
     using AddEntityToSceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
+    // Re-export material types from NetworkSession
+    using MaterialPropertyData = NetworkSession::MaterialPropertyData;
+    using MaterialAssetData = NetworkSession::MaterialAssetData;
+
+    // Material system callbacks (server-side - receiving requests from clients)
+    using CreateMaterialCallback = NetworkSession::CreateMaterialCallback;
+    using CreateMaterialResponseCallback = NetworkSession::CreateMaterialResponseCallback;
+    using UpdateMaterialPropertyCallback = NetworkSession::UpdateMaterialPropertyCallback;
+    using UpdateMaterialPropertyResponseCallback = NetworkSession::UpdateMaterialPropertyResponseCallback;
+    using UpdateMaterialPropertiesBatchCallback = NetworkSession::UpdateMaterialPropertiesBatchCallback;
+    using UpdateMaterialPropertiesBatchResponseCallback = NetworkSession::UpdateMaterialPropertiesBatchResponseCallback;
+    using MaterialPropertyUpdateCallback = NetworkSession::MaterialPropertyUpdateCallback;
+    using MaterialSubscribeCallback = NetworkSession::MaterialSubscribeCallback;
+    using MaterialSubscribeResponseCallback = NetworkSession::MaterialSubscribeResponseCallback;
+    using MaterialUnsubscribeCallback = NetworkSession::MaterialUnsubscribeCallback;
+    using MaterialUnsubscribeResponseCallback = NetworkSession::MaterialUnsubscribeResponseCallback;
+    using GetMaterialCallback = NetworkSession::GetMaterialCallback;
+    using GetMaterialResponseCallback = NetworkSession::GetMaterialResponseCallback;
+    using MaterialResolvedCallback = NetworkSession::MaterialResolvedCallback;
 
     /**
      * @brief Constructs session manager with specified capacity
@@ -370,6 +391,19 @@ public:
      */
     Result<void> setAssetFetchResponseCallback(const SessionHandle& handle, AssetFetchResponseCallback callback);
 
+    // Asset metadata callback setters
+
+    /**
+     * @brief Sets callback for AssetMetadataRequest messages
+     */
+    Result<void> setAssetMetadataCallback(const SessionHandle& handle, NetworkSession::AssetMetadataCallback callback);
+
+    /**
+     * @brief Sets callback for AssetMetadataResponse messages
+     */
+    Result<void> setAssetMetadataResponseCallback(const SessionHandle& handle,
+                                                  NetworkSession::AssetMetadataResponseCallback callback);
+
     /**
      * @brief Sets callback for AssetUploadBeginResponse messages
      */
@@ -462,6 +496,122 @@ public:
     Result<void> setAddEntityToSceneResponseCallback(const SessionHandle& handle,
                                                      AddEntityToSceneResponseCallback callback);
 
+    // Material system callback setters
+
+    /**
+     * @brief Sets callback for CreateMaterial requests
+     * @param handle Session handle
+     * @param callback Callback function invoked when CreateMaterialRequest is received
+     * @return Result indicating success or failure
+     */
+    Result<void> setCreateMaterialCallback(const SessionHandle& handle, CreateMaterialCallback callback);
+
+    /**
+     * @brief Sets callback for CreateMaterial responses
+     */
+    Result<void> setCreateMaterialResponseCallback(const SessionHandle& handle,
+                                                   CreateMaterialResponseCallback callback);
+
+    /**
+     * @brief Sets callback for UpdateMaterialProperty requests
+     */
+    Result<void> setUpdateMaterialPropertyCallback(const SessionHandle& handle,
+                                                   UpdateMaterialPropertyCallback callback);
+
+    /**
+     * @brief Sets callback for UpdateMaterialProperty responses
+     */
+    Result<void> setUpdateMaterialPropertyResponseCallback(const SessionHandle& handle,
+                                                           UpdateMaterialPropertyResponseCallback callback);
+
+    /**
+     * @brief Sets callback for UpdateMaterialPropertiesBatch requests
+     */
+    Result<void> setUpdateMaterialPropertiesBatchCallback(const SessionHandle& handle,
+                                                          UpdateMaterialPropertiesBatchCallback callback);
+
+    /**
+     * @brief Sets callback for UpdateMaterialPropertiesBatch responses
+     */
+    Result<void> setUpdateMaterialPropertiesBatchResponseCallback(
+        const SessionHandle& handle, UpdateMaterialPropertiesBatchResponseCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialPropertyUpdate broadcasts (from other clients)
+     */
+    Result<void> setMaterialPropertyUpdateCallback(const SessionHandle& handle,
+                                                   MaterialPropertyUpdateCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialSubscribe requests
+     */
+    Result<void> setMaterialSubscribeCallback(const SessionHandle& handle, MaterialSubscribeCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialSubscribe responses
+     */
+    Result<void> setMaterialSubscribeResponseCallback(const SessionHandle& handle,
+                                                      MaterialSubscribeResponseCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialUnsubscribe requests
+     */
+    Result<void> setMaterialUnsubscribeCallback(const SessionHandle& handle, MaterialUnsubscribeCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialUnsubscribe responses
+     */
+    Result<void> setMaterialUnsubscribeResponseCallback(const SessionHandle& handle,
+                                                        MaterialUnsubscribeResponseCallback callback);
+
+    /**
+     * @brief Sets callback for GetMaterial requests
+     */
+    Result<void> setGetMaterialCallback(const SessionHandle& handle, GetMaterialCallback callback);
+
+    /**
+     * @brief Sets callback for GetMaterial responses
+     */
+    Result<void> setGetMaterialResponseCallback(const SessionHandle& handle, GetMaterialResponseCallback callback);
+
+    /**
+     * @brief Sets callback for MaterialResolved notifications (server push of material data)
+     */
+    Result<void> setMaterialResolvedCallback(const SessionHandle& handle, MaterialResolvedCallback callback);
+
+    /**
+     * @brief Sets callback for MeshMaterialBinding requests (server receives binding requests)
+     */
+    Result<void> setMeshMaterialBindingCallback(const SessionHandle& handle,
+                                                NetworkSession::MeshMaterialBindingCallback callback);
+
+    /**
+     * @brief Sets callback for MeshMaterialBinding responses (client receives results)
+     */
+    Result<void> setMeshMaterialBindingResponseCallback(const SessionHandle& handle,
+                                                        NetworkSession::MeshMaterialBindingResponseCallback callback);
+
+    /**
+     * @brief Sets callback for MeshMaterialBinding updates (clients receive broadcast)
+     */
+    Result<void> setMeshMaterialBindingUpdateCallback(const SessionHandle& handle,
+                                                      NetworkSession::MeshMaterialBindingUpdateCallback callback);
+
+    // =========================================================================
+    // Shader Callbacks
+    // =========================================================================
+
+    /**
+     * @brief Sets callback for GetShader requests (server receives shader queries)
+     */
+    Result<void> setGetShaderCallback(const SessionHandle& handle, NetworkSession::GetShaderCallback callback);
+
+    /**
+     * @brief Sets callback for GetShader responses (client receives shader data)
+     */
+    Result<void> setGetShaderResponseCallback(const SessionHandle& handle,
+                                              NetworkSession::GetShaderResponseCallback callback);
+
     // Asset send methods (for clients sending requests)
 
     /**
@@ -505,6 +655,14 @@ public:
     Result<void> sendAssetUpload(const SessionHandle& handle, const std::string& appId,
                                  const std::vector<uint8_t>& data, uint8_t contentType, bool persistent,
                                  uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetUpload request with metadata
+     * @param metadata Type-specific metadata (shader, texture, etc.)
+     */
+    Result<void> sendAssetUpload(const SessionHandle& handle, const std::string& appId,
+                                 const std::vector<uint8_t>& data, uint8_t contentType, bool persistent,
+                                 uint64_t requestId, const NetworkSession::AssetMetadataData& metadata);
 
     /**
      * @brief Sends AssetFetch request
@@ -619,6 +777,18 @@ public:
                                         const std::string& errorMessage, uint64_t requestId = 0);
 
     /**
+     * @brief Sends AssetMetadataRequest message
+     */
+    Result<void> sendAssetMetadataRequest(const SessionHandle& handle, const std::array<uint8_t, 32>& assetId,
+                                          uint64_t requestId = 0);
+
+    /**
+     * @brief Sends AssetMetadataResponse message
+     */
+    Result<void> sendAssetMetadataResponse(const SessionHandle& handle, bool found,
+                                           const NetworkSession::AssetMetadataData& metadata, uint64_t requestId = 0);
+
+    /**
      * @brief Initiates handshake (called by handle.performHandshake())
      */
     Result<void> performHandshake(const SessionHandle& handle, const std::string& clientType,
@@ -668,6 +838,135 @@ public:
      */
     Result<void> sendAddEntityToSceneResponse(const SessionHandle& handle, bool success,
                                               const std::string& errorMessage);
+
+    // Material system send methods
+
+    /**
+     * @brief Sends CreateMaterialRequest message
+     */
+    Result<void> sendCreateMaterialRequest(const SessionHandle& handle, const MaterialAssetData& material,
+                                           uint64_t requestId = 0);
+
+    /**
+     * @brief Sends CreateMaterialResponse message
+     */
+    Result<void> sendCreateMaterialResponse(const SessionHandle& handle, bool success,
+                                            const std::array<uint8_t, 32>& materialId, const std::string& errorMessage,
+                                            uint64_t requestId = 0);
+
+    /**
+     * @brief Sends UpdateMaterialPropertyRequest message
+     */
+    Result<void> sendUpdateMaterialPropertyRequest(const SessionHandle& handle,
+                                                   const std::array<uint8_t, 32>& materialId,
+                                                   const std::string& propertyName, const PropertyValue& value,
+                                                   uint64_t requestId = 0);
+
+    /**
+     * @brief Sends UpdateMaterialPropertyResponse message
+     */
+    Result<void> sendUpdateMaterialPropertyResponse(const SessionHandle& handle, bool success, uint64_t newVersion,
+                                                    const std::string& errorMessage);
+
+    /**
+     * @brief Sends UpdateMaterialPropertiesBatchRequest message
+     */
+    Result<void> sendUpdateMaterialPropertiesBatchRequest(const SessionHandle& handle,
+                                                          const std::array<uint8_t, 32>& materialId,
+                                                          const std::vector<MaterialPropertyData>& properties,
+                                                          uint64_t requestId = 0);
+
+    /**
+     * @brief Sends UpdateMaterialPropertiesBatchResponse message
+     */
+    Result<void> sendUpdateMaterialPropertiesBatchResponse(const SessionHandle& handle, bool success,
+                                                           uint64_t newVersion, const std::string& errorMessage);
+
+    /**
+     * @brief Sends MaterialPropertyUpdate broadcast message
+     */
+    Result<void> sendMaterialPropertyUpdate(const SessionHandle& handle, const std::array<uint8_t, 32>& materialId,
+                                            const std::string& propertyName, const PropertyValue& value,
+                                            uint64_t newVersion, uint64_t originSessionId);
+
+    /**
+     * @brief Sends MaterialSubscribeRequest message
+     */
+    Result<void> sendMaterialSubscribeRequest(const SessionHandle& handle, const std::array<uint8_t, 32>& materialId,
+                                              uint64_t requestId = 0);
+
+    /**
+     * @brief Sends MaterialSubscribeResponse message
+     */
+    Result<void> sendMaterialSubscribeResponse(const SessionHandle& handle, bool success,
+                                               const MaterialAssetData& material, const std::string& errorMessage,
+                                               uint64_t requestId = 0);
+
+    /**
+     * @brief Sends MaterialUnsubscribeRequest message
+     */
+    Result<void> sendMaterialUnsubscribeRequest(const SessionHandle& handle, const std::array<uint8_t, 32>& materialId,
+                                                uint64_t requestId = 0);
+
+    /**
+     * @brief Sends MaterialUnsubscribeResponse message
+     */
+    Result<void> sendMaterialUnsubscribeResponse(const SessionHandle& handle, bool success,
+                                                 const std::string& errorMessage);
+
+    /**
+     * @brief Sends GetMaterialRequest message
+     */
+    Result<void> sendGetMaterialRequest(const SessionHandle& handle, const std::array<uint8_t, 32>& materialId,
+                                        uint64_t requestId = 0);
+
+    /**
+     * @brief Sends GetMaterialResponse message
+     */
+    Result<void> sendGetMaterialResponse(const SessionHandle& handle, bool success, const MaterialAssetData& material,
+                                         const std::string& errorMessage);
+
+    /**
+     * @brief Sends MaterialResolved notification
+     */
+    Result<void> sendMaterialResolved(const SessionHandle& handle, const std::array<uint8_t, 32>& materialId,
+                                      const MaterialAssetData& material);
+
+    /**
+     * @brief Sends MeshMaterialBindingRequest
+     */
+    Result<void> sendMeshMaterialBindingRequest(const SessionHandle& handle, uint64_t entityId,
+                                                const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                                uint64_t requestId = 0);
+
+    /**
+     * @brief Sends MeshMaterialBindingResponse
+     */
+    Result<void> sendMeshMaterialBindingResponse(const SessionHandle& handle, bool success,
+                                                 const std::string& errorMessage, uint64_t requestId = 0);
+
+    /**
+     * @brief Sends MeshMaterialBindingUpdate (broadcast)
+     */
+    Result<void> sendMeshMaterialBindingUpdate(const SessionHandle& handle, uint64_t entityId,
+                                               const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                               uint64_t originSessionId);
+
+    // =========================================================================
+    // Shader Send Methods
+    // =========================================================================
+
+    /**
+     * @brief Sends GetShaderRequest (client requests shader info)
+     */
+    Result<void> sendGetShaderRequest(const SessionHandle& handle, const std::array<uint8_t, 32>& shaderAssetId,
+                                      uint64_t requestId = 0);
+
+    /**
+     * @brief Sends GetShaderResponse (server responds with shader data)
+     */
+    Result<void> sendGetShaderResponse(const SessionHandle& handle,
+                                       const NetworkSession::GetShaderResponseData& response, uint64_t requestId = 0);
 
     /**
      * @brief Checks if connected (called by handle.isConnected())
@@ -760,6 +1059,23 @@ public:
      * Continues flushing even if individual sessions fail.
      */
     void flushAllPropertyBatches();
+
+    /**
+     * @brief Broadcast material property update to all subscribed sessions except origin
+     *
+     * Used by servers to fan-out material property changes to all clients that have
+     * subscribed to the material, excluding the session that originated the change.
+     *
+     * @param materialId The material AssetId that was updated
+     * @param propertyName Name of the property that changed
+     * @param value New property value
+     * @param newVersion New material version after this update
+     * @param originSessionId Session that made the change (will be excluded from broadcast)
+     * @param subscribedSessionIds List of session IDs subscribed to this material
+     */
+    void broadcastMaterialPropertyUpdate(const std::array<uint8_t, 32>& materialId, const std::string& propertyName,
+                                         const PropertyValue& value, uint64_t newVersion, uint64_t originSessionId,
+                                         const std::vector<uint64_t>& subscribedSessionIds);
 
     // EntropyObject interface
     const char* className() const noexcept override {

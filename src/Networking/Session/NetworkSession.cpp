@@ -442,6 +442,12 @@ Result<void> NetworkSession::sendPropertyUpdate(PropertyHash hash, PropertyType 
                     valueBuilder.setBytes(kj::arrayPtr(v.data(), v.size()));
                 else if constexpr (std::is_same_v<T, AssetId>)
                     valueBuilder.setAssetId(kj::arrayPtr(v.hash.data(), v.hash.size()));
+                else if constexpr (std::is_same_v<T, std::vector<AssetId>>) {
+                    auto arr = valueBuilder.initAssetIdArray(v.size());
+                    for (size_t i = 0; i < v.size(); ++i) {
+                        arr.set(i, kj::arrayPtr(v[i].hash.data(), v[i].hash.size()));
+                    }
+                }
             },
             value);
 
@@ -1101,8 +1107,101 @@ Result<void> NetworkSession::sendAssetProvideKeyResponse(bool success, const std
     }
 }
 
+namespace
+{
+// Helper to serialize a PropertyValue into a Cap'n Proto PropertyValue builder
+// (Duplicated here because the main serializePropertyValue is defined later in the file)
+void serializePropertyValueForMetadata(Protocol::PropertyValue::Builder& builder, const PropertyValue& value) {
+    std::visit(
+        [&builder](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, int32_t>)
+                builder.setInt32(v);
+            else if constexpr (std::is_same_v<T, int64_t>)
+                builder.setInt64(v);
+            else if constexpr (std::is_same_v<T, float>)
+                builder.setFloat32(v);
+            else if constexpr (std::is_same_v<T, double>)
+                builder.setFloat64(v);
+            else if constexpr (std::is_same_v<T, Vec2>) {
+                auto b = builder.initVec2();
+                b.setX(v.x);
+                b.setY(v.y);
+            } else if constexpr (std::is_same_v<T, Vec3>) {
+                auto b = builder.initVec3();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+            } else if constexpr (std::is_same_v<T, Vec4>) {
+                auto b = builder.initVec4();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+                b.setW(v.w);
+            } else if constexpr (std::is_same_v<T, Quat>) {
+                auto b = builder.initQuat();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+                b.setW(v.w);
+            } else if constexpr (std::is_same_v<T, std::string>)
+                builder.setString(v);
+            else if constexpr (std::is_same_v<T, bool>)
+                builder.setBool(v);
+            else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+                builder.setBytes(kj::arrayPtr(v.data(), v.size()));
+            else if constexpr (std::is_same_v<T, AssetId>)
+                builder.setAssetId(kj::arrayPtr(v.hash.data(), v.hash.size()));
+            else if constexpr (std::is_same_v<T, Mat3>) {
+                auto b = builder.initMat3();
+                auto col0 = b.initCol0();
+                col0.setX(v[0].x);
+                col0.setY(v[0].y);
+                col0.setZ(v[0].z);
+                auto col1 = b.initCol1();
+                col1.setX(v[1].x);
+                col1.setY(v[1].y);
+                col1.setZ(v[1].z);
+                auto col2 = b.initCol2();
+                col2.setX(v[2].x);
+                col2.setY(v[2].y);
+                col2.setZ(v[2].z);
+            } else if constexpr (std::is_same_v<T, Mat4>) {
+                auto b = builder.initMat4();
+                auto col0 = b.initCol0();
+                col0.setX(v[0].x);
+                col0.setY(v[0].y);
+                col0.setZ(v[0].z);
+                col0.setW(v[0].w);
+                auto col1 = b.initCol1();
+                col1.setX(v[1].x);
+                col1.setY(v[1].y);
+                col1.setZ(v[1].z);
+                col1.setW(v[1].w);
+                auto col2 = b.initCol2();
+                col2.setX(v[2].x);
+                col2.setY(v[2].y);
+                col2.setZ(v[2].z);
+                col2.setW(v[2].w);
+                auto col3 = b.initCol3();
+                col3.setX(v[3].x);
+                col3.setY(v[3].y);
+                col3.setZ(v[3].z);
+                col3.setW(v[3].w);
+            }
+        },
+        value);
+}
+}  // namespace
+
 Result<void> NetworkSession::sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data,
                                              uint8_t contentType, bool persistent, uint64_t requestId) {
+    return sendAssetUpload(appId, data, contentType, persistent, requestId, AssetMetadataData{});
+}
+
+Result<void> NetworkSession::sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data,
+                                             uint8_t contentType, bool persistent, uint64_t requestId,
+                                             const AssetMetadataData& metadata) {
     if (!_connection || !_connection->isConnected()) {
         return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
     }
@@ -1119,6 +1218,58 @@ Result<void> NetworkSession::sendAssetUpload(const std::string& appId, const std
         request.setContentType(contentType);
         request.setPersistent(persistent);
         request.setRequestId(requestId);
+
+        // Serialize metadata if present
+        auto metaBuilder = request.initMetadata();
+        if (metadata.type == AssetMetadataType::Shader && metadata.shaderMetadata) {
+            auto shader = metaBuilder.initShader();
+            const auto& sm = *metadata.shaderMetadata;
+            shader.setName(sm.name);
+            shader.setDescription(sm.description);
+            shader.setRenderQueue(sm.renderQueue);
+            shader.setCastsShadows(sm.castsShadows);
+            shader.setTransparent(sm.transparent);
+            shader.setAuthor(sm.author);
+
+            auto keywordsBuilder = shader.initKeywords(sm.keywords.size());
+            for (size_t i = 0; i < sm.keywords.size(); ++i) {
+                keywordsBuilder.set(i, sm.keywords[i]);
+            }
+
+            auto paramsBuilder = shader.initParameters(sm.parameters.size());
+            for (size_t i = 0; i < sm.parameters.size(); ++i) {
+                auto& param = sm.parameters[i];
+                auto paramBuilder = paramsBuilder[i];
+                paramBuilder.setName(param.name);
+                paramBuilder.setDisplayName(param.displayName);
+                paramBuilder.setType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(param.type)));
+                if (param.defaultValue) {
+                    auto valueBuilder = paramBuilder.initDefaultValue();
+                    serializePropertyValueForMetadata(valueBuilder, *param.defaultValue);
+                }
+                auto attrsBuilder = paramBuilder.initAttributes(param.attributes.size());
+                size_t j = 0;
+                for (const auto& [key, val] : param.attributes) {
+                    attrsBuilder[j].setKey(key);
+                    attrsBuilder[j].setValue(val);
+                    ++j;
+                }
+            }
+        } else if (metadata.type == AssetMetadataType::Texture && metadata.textureMetadata) {
+            auto tex = metaBuilder.initTexture();
+            const auto& tm = *metadata.textureMetadata;
+            tex.setWidth(tm.width);
+            tex.setHeight(tm.height);
+            tex.setDepth(tm.depth);
+            tex.setMipLevels(tm.mipLevels);
+            tex.setArrayLayers(tm.arrayLayers);
+            tex.setTextureType(tm.textureType);
+            tex.setFormat(tm.format);
+            tex.setColorSpace(tm.colorSpace);
+            tex.setGenerateMips(tm.generateMips);
+            tex.setSourceFile(tm.sourceFile);
+        }
+        // else: metadata.type == None, metaBuilder defaults to none
 
         auto serialized = serialize(builder);
         if (serialized.failed()) {
@@ -1591,6 +1742,679 @@ Result<void> NetworkSession::sendAddEntityToSceneResponse(bool success, const st
     }
 }
 
+// ============================================================================
+// Material System Send Methods
+// ============================================================================
+
+namespace
+{
+
+// Helper to serialize a PropertyValue into a Cap'n Proto PropertyValue builder
+void serializePropertyValue(Protocol::PropertyValue::Builder& builder, const PropertyValue& value) {
+    std::visit(
+        [&builder](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, int32_t>)
+                builder.setInt32(v);
+            else if constexpr (std::is_same_v<T, int64_t>)
+                builder.setInt64(v);
+            else if constexpr (std::is_same_v<T, float>)
+                builder.setFloat32(v);
+            else if constexpr (std::is_same_v<T, double>)
+                builder.setFloat64(v);
+            else if constexpr (std::is_same_v<T, Vec2>) {
+                auto b = builder.initVec2();
+                b.setX(v.x);
+                b.setY(v.y);
+            } else if constexpr (std::is_same_v<T, Vec3>) {
+                auto b = builder.initVec3();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+            } else if constexpr (std::is_same_v<T, Vec4>) {
+                auto b = builder.initVec4();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+                b.setW(v.w);
+            } else if constexpr (std::is_same_v<T, Quat>) {
+                auto b = builder.initQuat();
+                b.setX(v.x);
+                b.setY(v.y);
+                b.setZ(v.z);
+                b.setW(v.w);
+            } else if constexpr (std::is_same_v<T, std::string>)
+                builder.setString(v);
+            else if constexpr (std::is_same_v<T, bool>)
+                builder.setBool(v);
+            else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
+                builder.setBytes(kj::arrayPtr(v.data(), v.size()));
+            else if constexpr (std::is_same_v<T, AssetId>)
+                builder.setAssetId(kj::arrayPtr(v.hash.data(), v.hash.size()));
+            else if constexpr (std::is_same_v<T, Mat3>) {
+                auto b = builder.initMat3();
+                auto col0 = b.initCol0();
+                col0.setX(v[0].x);
+                col0.setY(v[0].y);
+                col0.setZ(v[0].z);
+                auto col1 = b.initCol1();
+                col1.setX(v[1].x);
+                col1.setY(v[1].y);
+                col1.setZ(v[1].z);
+                auto col2 = b.initCol2();
+                col2.setX(v[2].x);
+                col2.setY(v[2].y);
+                col2.setZ(v[2].z);
+            } else if constexpr (std::is_same_v<T, Mat4>) {
+                auto b = builder.initMat4();
+                auto col0 = b.initCol0();
+                col0.setX(v[0].x);
+                col0.setY(v[0].y);
+                col0.setZ(v[0].z);
+                col0.setW(v[0].w);
+                auto col1 = b.initCol1();
+                col1.setX(v[1].x);
+                col1.setY(v[1].y);
+                col1.setZ(v[1].z);
+                col1.setW(v[1].w);
+                auto col2 = b.initCol2();
+                col2.setX(v[2].x);
+                col2.setY(v[2].y);
+                col2.setZ(v[2].z);
+                col2.setW(v[2].w);
+                auto col3 = b.initCol3();
+                col3.setX(v[3].x);
+                col3.setY(v[3].y);
+                col3.setZ(v[3].z);
+                col3.setW(v[3].w);
+            }
+        },
+        value);
+}
+
+// Helper to serialize MaterialAssetData into a Cap'n Proto MaterialAssetData builder
+void serializeMaterialAssetData(Protocol::MaterialAssetData::Builder& builder,
+                                const NetworkSession::MaterialAssetData& data) {
+    builder.setName(data.name);
+    builder.setShaderAssetId(kj::arrayPtr(data.shaderAssetId.data(), data.shaderAssetId.size()));
+
+    auto propsBuilder = builder.initProperties(data.properties.size());
+    for (size_t i = 0; i < data.properties.size(); ++i) {
+        propsBuilder[i].setName(data.properties[i].name);
+        auto valueBuilder = propsBuilder[i].initValue();
+        serializePropertyValue(valueBuilder, data.properties[i].value);
+    }
+
+    auto keywordsBuilder = builder.initEnabledKeywords(data.enabledKeywords.size());
+    for (size_t i = 0; i < data.enabledKeywords.size(); ++i) {
+        keywordsBuilder.set(i, data.enabledKeywords[i]);
+    }
+
+    builder.setRenderQueue(data.renderQueue);
+    builder.setCastsShadows(data.castsShadows);
+    builder.setReceivesShadows(data.receivesShadows);
+    builder.setDepthWrite(data.depthWrite);
+    builder.setCreatorSessionId(data.creatorSessionId);
+    builder.setVersion(data.version);
+    builder.setModifiedAt(data.modifiedAt);
+    builder.setAppId(data.appId);
+}
+
+}  // namespace
+
+Result<void> NetworkSession::sendCreateMaterialRequest(const MaterialAssetData& material, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initCreateMaterialRequest();
+        auto matBuilder = request.initMaterial();
+        serializeMaterialAssetData(matBuilder, material);
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendCreateMaterialResponse(bool success, const std::array<uint8_t, 32>& materialId,
+                                                        const std::string& errorMessage, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initCreateMaterialResponse();
+        response.setSuccess(success);
+        response.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUpdateMaterialPropertyRequest(const std::array<uint8_t, 32>& materialId,
+                                                               const std::string& propertyName,
+                                                               const PropertyValue& value, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initUpdateMaterialPropertyRequest();
+        request.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        request.setPropertyName(propertyName);
+        auto valueBuilder = request.initValue();
+        serializePropertyValue(valueBuilder, value);
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUpdateMaterialPropertyResponse(bool success, uint64_t newVersion,
+                                                                const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initUpdateMaterialPropertyResponse();
+        response.setSuccess(success);
+        response.setNewVersion(newVersion);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUpdateMaterialPropertiesBatchRequest(
+    const std::array<uint8_t, 32>& materialId, const std::vector<MaterialPropertyData>& properties,
+    uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initUpdateMaterialPropertiesBatchRequest();
+        request.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+
+        auto propsBuilder = request.initProperties(properties.size());
+        for (size_t i = 0; i < properties.size(); ++i) {
+            propsBuilder[i].setName(properties[i].name);
+            auto valueBuilder = propsBuilder[i].initValue();
+            serializePropertyValue(valueBuilder, properties[i].value);
+        }
+
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUpdateMaterialPropertiesBatchResponse(bool success, uint64_t newVersion,
+                                                                       const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initUpdateMaterialPropertiesBatchResponse();
+        response.setSuccess(success);
+        response.setNewVersion(newVersion);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialPropertyUpdate(const std::array<uint8_t, 32>& materialId,
+                                                        const std::string& propertyName, const PropertyValue& value,
+                                                        uint64_t newVersion, uint64_t originSessionId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto update = message.initMaterialPropertyUpdate();
+        update.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        update.setPropertyName(propertyName);
+        auto valueBuilder = update.initValue();
+        serializePropertyValue(valueBuilder, value);
+        update.setVersion(newVersion);
+        update.setOriginSessionId(originSessionId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialSubscribeRequest(const std::array<uint8_t, 32>& materialId,
+                                                          uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initMaterialSubscribeRequest();
+        request.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialSubscribeResponse(bool success, const MaterialAssetData& material,
+                                                           const std::string& errorMessage, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initMaterialSubscribeResponse();
+        response.setSuccess(success);
+        if (success) {
+            auto matBuilder = response.initMaterial();
+            serializeMaterialAssetData(matBuilder, material);
+        }
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialUnsubscribeRequest(const std::array<uint8_t, 32>& materialId,
+                                                            uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initMaterialUnsubscribeRequest();
+        request.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialUnsubscribeResponse(bool success, const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initMaterialUnsubscribeResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendGetMaterialRequest(const std::array<uint8_t, 32>& materialId, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    if (!_handshakeComplete) {
+        return Result<void>::err(NetworkError::HandshakeFailed, "Handshake not complete");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initGetMaterialRequest();
+        request.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendGetMaterialResponse(bool success, const MaterialAssetData& material,
+                                                     const std::string& /*errorMessage*/) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initGetMaterialResponse();
+        response.setFound(success);
+        if (success) {
+            auto matBuilder = response.initMaterial();
+            serializeMaterialAssetData(matBuilder, material);
+        }
+        // Note: errorMessage not in current schema, ignored for now
+        response.setRequestId(0);  // No request correlation in current signature
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMaterialResolved(const std::array<uint8_t, 32>& materialId,
+                                                  const MaterialAssetData& material) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto resolved = message.initMaterialResolved();
+        resolved.setMaterialId(kj::arrayPtr(materialId.data(), materialId.size()));
+        auto matBuilder = resolved.initMaterial();
+        serializeMaterialAssetData(matBuilder, material);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMeshMaterialBindingRequest(uint64_t entityId,
+                                                            const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                                            uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initMeshMaterialBindingRequest();
+        request.setEntityId(entityId);
+        request.setRequestId(requestId);
+
+        auto matIdsBuilder = request.initMaterialIds(materialIds.size());
+        for (size_t i = 0; i < materialIds.size(); ++i) {
+            matIdsBuilder.set(i, kj::arrayPtr(materialIds[i].data(), materialIds[i].size()));
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMeshMaterialBindingResponse(bool success, const std::string& errorMessage,
+                                                             uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initMeshMaterialBindingResponse();
+        response.setSuccess(success);
+        response.setErrorMessage(errorMessage);
+        response.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendMeshMaterialBindingUpdate(uint64_t entityId,
+                                                           const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                                           uint64_t originSessionId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto update = message.initMeshMaterialBindingUpdate();
+        update.setEntityId(entityId);
+        update.setOriginSessionId(originSessionId);
+
+        auto matIdsBuilder = update.initMaterialIds(materialIds.size());
+        for (size_t i = 0; i < materialIds.size(); ++i) {
+            matIdsBuilder.set(i, kj::arrayPtr(materialIds[i].data(), materialIds[i].size()));
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+//=============================================================================
+// Shader Protocol Messages
+//=============================================================================
+
+Result<void> NetworkSession::sendGetShaderRequest(const std::array<uint8_t, 32>& shaderAssetId, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initGetShaderRequest();
+        request.setShaderAssetId(kj::arrayPtr(shaderAssetId.data(), shaderAssetId.size()));
+        request.setRequestId(requestId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendGetShaderResponse(const GetShaderResponseData& response, uint64_t requestId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto resp = message.initGetShaderResponse();
+        resp.setFound(response.found);
+        resp.setIsBuiltin(response.isBuiltin);
+        resp.setMainSource(response.mainSource);
+        resp.setRequestId(requestId);
+
+        // Modules
+        auto modulesBuilder = resp.initModules(response.modules.size());
+        for (size_t i = 0; i < response.modules.size(); ++i) {
+            modulesBuilder[i].setModuleName(response.modules[i].moduleName);
+            modulesBuilder[i].setSource(response.modules[i].source);
+        }
+
+        // Metadata
+        auto metaBuilder = resp.initMetadata();
+        metaBuilder.setName(response.metadata.name);
+        metaBuilder.setDescription(response.metadata.description);
+        metaBuilder.setRenderQueue(response.metadata.renderQueue);
+        metaBuilder.setCastsShadows(response.metadata.castsShadows);
+        metaBuilder.setTransparent(response.metadata.transparent);
+        metaBuilder.setAuthor(response.metadata.author);
+
+        // Keywords
+        auto keywordsBuilder = metaBuilder.initKeywords(response.metadata.keywords.size());
+        for (size_t i = 0; i < response.metadata.keywords.size(); ++i) {
+            keywordsBuilder.set(i, response.metadata.keywords[i]);
+        }
+
+        // Parameters (native typed)
+        auto paramsBuilder = metaBuilder.initParameters(response.metadata.parameters.size());
+        for (size_t i = 0; i < response.metadata.parameters.size(); ++i) {
+            const auto& param = response.metadata.parameters[i];
+            paramsBuilder[i].setName(param.name);
+            paramsBuilder[i].setDisplayName(param.displayName);
+            paramsBuilder[i].setType(static_cast<Protocol::PropertyType>(toCapnpPropertyType(param.type)));
+            // Serialize defaultValue if present
+            if (param.defaultValue.has_value()) {
+                auto valueBuilder = paramsBuilder[i].initDefaultValue();
+                serializePropertyValue(valueBuilder, param.defaultValue.value());
+            }
+            // Serialize KeyValue attributes
+            auto attrsBuilder = paramsBuilder[i].initAttributes(param.attributes.size());
+            size_t j = 0;
+            for (const auto& [key, value] : param.attributes) {
+                attrsBuilder[j].setKey(key);
+                attrsBuilder[j].setValue(value);
+                ++j;
+            }
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
 std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
     uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
     return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
@@ -1973,6 +2797,160 @@ void NetworkSession::setAddEntityToSceneResponseCallback(AddEntityToSceneRespons
     _addEntityToSceneResponseCallback = std::move(callback);
 }
 
+// Material system callback setters
+void NetworkSession::setCreateMaterialCallback(CreateMaterialCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _createMaterialCallback = std::move(callback);
+}
+
+void NetworkSession::setCreateMaterialResponseCallback(CreateMaterialResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _createMaterialResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setUpdateMaterialPropertyCallback(UpdateMaterialPropertyCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _updateMaterialPropertyCallback = std::move(callback);
+}
+
+void NetworkSession::setUpdateMaterialPropertyResponseCallback(UpdateMaterialPropertyResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _updateMaterialPropertyResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setUpdateMaterialPropertiesBatchCallback(UpdateMaterialPropertiesBatchCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _updateMaterialPropertiesBatchCallback = std::move(callback);
+}
+
+void NetworkSession::setUpdateMaterialPropertiesBatchResponseCallback(
+    UpdateMaterialPropertiesBatchResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _updateMaterialPropertiesBatchResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialPropertyUpdateCallback(MaterialPropertyUpdateCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialPropertyUpdateCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialSubscribeCallback(MaterialSubscribeCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialSubscribeCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialSubscribeResponseCallback(MaterialSubscribeResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialSubscribeResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialUnsubscribeCallback(MaterialUnsubscribeCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialUnsubscribeCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialUnsubscribeResponseCallback(MaterialUnsubscribeResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialUnsubscribeResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setGetMaterialCallback(GetMaterialCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _getMaterialCallback = std::move(callback);
+}
+
+void NetworkSession::setGetMaterialResponseCallback(GetMaterialResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _getMaterialResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setMaterialResolvedCallback(MaterialResolvedCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _materialResolvedCallback = std::move(callback);
+}
+
+void NetworkSession::setMeshMaterialBindingCallback(MeshMaterialBindingCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _meshMaterialBindingCallback = std::move(callback);
+}
+
+void NetworkSession::setMeshMaterialBindingResponseCallback(MeshMaterialBindingResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _meshMaterialBindingResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setMeshMaterialBindingUpdateCallback(MeshMaterialBindingUpdateCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _meshMaterialBindingUpdateCallback = std::move(callback);
+}
+
+void NetworkSession::setGetShaderCallback(GetShaderCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _getShaderCallback = std::move(callback);
+}
+
+void NetworkSession::setGetShaderResponseCallback(GetShaderResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _getShaderResponseCallback = std::move(callback);
+}
+
 void NetworkSession::clearCallbacks() {
     // Mark as shutting down to prevent new callbacks
     _shuttingDown.store(true, std::memory_order_release);
@@ -2036,6 +3014,31 @@ void NetworkSession::clearCallbacks() {
     _setSceneEnabledResponseCallback = nullptr;
     _addEntityToSceneCallback = nullptr;
     _addEntityToSceneResponseCallback = nullptr;
+
+    // Material system callbacks
+    _createMaterialCallback = nullptr;
+    _createMaterialResponseCallback = nullptr;
+    _updateMaterialPropertyCallback = nullptr;
+    _updateMaterialPropertyResponseCallback = nullptr;
+    _updateMaterialPropertiesBatchCallback = nullptr;
+    _updateMaterialPropertiesBatchResponseCallback = nullptr;
+    _materialPropertyUpdateCallback = nullptr;
+    _materialSubscribeCallback = nullptr;
+    _materialSubscribeResponseCallback = nullptr;
+    _materialUnsubscribeCallback = nullptr;
+    _materialUnsubscribeResponseCallback = nullptr;
+    _getMaterialCallback = nullptr;
+    _getMaterialResponseCallback = nullptr;
+    _materialResolvedCallback = nullptr;
+
+    // Mesh-material binding callbacks
+    _meshMaterialBindingCallback = nullptr;
+    _meshMaterialBindingResponseCallback = nullptr;
+    _meshMaterialBindingUpdateCallback = nullptr;
+
+    // Shader callbacks
+    _getShaderCallback = nullptr;
+    _getShaderResponseCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -2910,9 +3913,58 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 bool persistent = req.getPersistent();
                 uint64_t requestId = req.getRequestId();
 
+                // Parse asset metadata
+                AssetMetadataData metadata;
+                if (req.hasMetadata()) {
+                    auto metaReader = req.getMetadata();
+                    if (metaReader.isShader()) {
+                        metadata.type = AssetMetadataType::Shader;
+                        auto shaderMeta = metaReader.getShader();
+                        ShaderMetadataData shaderData;
+                        shaderData.name = shaderMeta.getName().cStr();
+                        shaderData.description = shaderMeta.getDescription().cStr();
+                        shaderData.renderQueue = shaderMeta.getRenderQueue();
+                        shaderData.castsShadows = shaderMeta.getCastsShadows();
+                        shaderData.transparent = shaderMeta.getTransparent();
+                        shaderData.author = shaderMeta.getAuthor().cStr();
+                        for (auto kw : shaderMeta.getKeywords()) {
+                            shaderData.keywords.push_back(kw.cStr());
+                        }
+                        for (auto param : shaderMeta.getParameters()) {
+                            ShaderParameterDefData paramData;
+                            paramData.name = param.getName().cStr();
+                            paramData.displayName = param.getDisplayName().cStr();
+                            paramData.type = fromCapnpPropertyType(static_cast<uint16_t>(param.getType()));
+                            if (param.hasDefaultValue()) {
+                                paramData.defaultValue = deserializePropertyValue(param.getDefaultValue());
+                            }
+                            for (auto attr : param.getAttributes()) {
+                                paramData.attributes[attr.getKey().cStr()] = attr.getValue().cStr();
+                            }
+                            shaderData.parameters.push_back(std::move(paramData));
+                        }
+                        metadata.shaderMetadata = std::move(shaderData);
+                    } else if (metaReader.isTexture()) {
+                        metadata.type = AssetMetadataType::Texture;
+                        auto texMeta = metaReader.getTexture();
+                        TextureMetadataData texData;
+                        texData.width = texMeta.getWidth();
+                        texData.height = texMeta.getHeight();
+                        texData.depth = texMeta.getDepth();
+                        texData.mipLevels = texMeta.getMipLevels();
+                        texData.arrayLayers = texMeta.getArrayLayers();
+                        texData.textureType = texMeta.getTextureType();
+                        texData.format = texMeta.getFormat();
+                        texData.colorSpace = texMeta.getColorSpace();
+                        texData.generateMips = texMeta.getGenerateMips();
+                        texData.sourceFile = texMeta.getSourceFile().cStr();
+                        metadata.textureMetadata = std::move(texData);
+                    }
+                }
+
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadCallback) {
-                    _assetUploadCallback(appId, data, contentType, persistent, requestId);
+                    _assetUploadCallback(appId, data, contentType, persistent, requestId, metadata);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
@@ -2992,6 +4044,54 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     std::memcpy(data.plaintextHash.data(), hashData.begin(), 32);
                 }
                 data.requestId = req.getRequestId();
+
+                // Parse asset metadata
+                if (req.hasMetadata()) {
+                    auto metaReader = req.getMetadata();
+                    if (metaReader.isShader()) {
+                        data.metadata.type = AssetMetadataType::Shader;
+                        auto shaderMeta = metaReader.getShader();
+                        ShaderMetadataData shaderData;
+                        shaderData.name = shaderMeta.getName().cStr();
+                        shaderData.description = shaderMeta.getDescription().cStr();
+                        shaderData.renderQueue = shaderMeta.getRenderQueue();
+                        shaderData.castsShadows = shaderMeta.getCastsShadows();
+                        shaderData.transparent = shaderMeta.getTransparent();
+                        shaderData.author = shaderMeta.getAuthor().cStr();
+                        for (auto kw : shaderMeta.getKeywords()) {
+                            shaderData.keywords.push_back(kw.cStr());
+                        }
+                        for (auto param : shaderMeta.getParameters()) {
+                            ShaderParameterDefData paramData;
+                            paramData.name = param.getName().cStr();
+                            paramData.displayName = param.getDisplayName().cStr();
+                            paramData.type = fromCapnpPropertyType(static_cast<uint16_t>(param.getType()));
+                            if (param.hasDefaultValue()) {
+                                paramData.defaultValue = deserializePropertyValue(param.getDefaultValue());
+                            }
+                            for (auto attr : param.getAttributes()) {
+                                paramData.attributes[attr.getKey().cStr()] = attr.getValue().cStr();
+                            }
+                            shaderData.parameters.push_back(std::move(paramData));
+                        }
+                        data.metadata.shaderMetadata = std::move(shaderData);
+                    } else if (metaReader.isTexture()) {
+                        data.metadata.type = AssetMetadataType::Texture;
+                        auto texMeta = metaReader.getTexture();
+                        TextureMetadataData texData;
+                        texData.width = texMeta.getWidth();
+                        texData.height = texMeta.getHeight();
+                        texData.depth = texMeta.getDepth();
+                        texData.mipLevels = texMeta.getMipLevels();
+                        texData.arrayLayers = texMeta.getArrayLayers();
+                        texData.textureType = texMeta.getTextureType();
+                        texData.format = texMeta.getFormat();
+                        texData.colorSpace = texMeta.getColorSpace();
+                        texData.generateMips = texMeta.getGenerateMips();
+                        texData.sourceFile = texMeta.getSourceFile().cStr();
+                        data.metadata.textureMetadata = std::move(texData);
+                    }
+                }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _assetUploadBeginCallback) {
@@ -3233,6 +4333,501 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _addEntityToSceneResponseCallback) {
                     _addEntityToSceneResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ============================================================================
+                // Material System Messages
+                // ============================================================================
+
+            case Protocol::Message::CREATE_MATERIAL_REQUEST:
+            {
+                auto req = message.getCreateMaterialRequest();
+                auto matReader = req.getMaterial();
+
+                MaterialAssetData material;
+                material.name = matReader.getName().cStr();
+
+                auto shaderIdData = matReader.getShaderAssetId();
+                if (shaderIdData.size() == 32) {
+                    std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
+                }
+
+                for (auto propReader : matReader.getProperties()) {
+                    MaterialPropertyData prop;
+                    prop.name = propReader.getName().cStr();
+                    prop.value = deserializePropertyValue(propReader.getValue());
+                    material.properties.push_back(std::move(prop));
+                }
+
+                for (auto kw : matReader.getEnabledKeywords()) {
+                    material.enabledKeywords.push_back(kw.cStr());
+                }
+
+                material.renderQueue = matReader.getRenderQueue();
+                material.castsShadows = matReader.getCastsShadows();
+                material.receivesShadows = matReader.getReceivesShadows();
+                material.depthWrite = matReader.getDepthWrite();
+                material.creatorSessionId = matReader.getCreatorSessionId();
+                material.version = matReader.getVersion();
+                material.modifiedAt = matReader.getModifiedAt();
+                material.appId = matReader.getAppId().cStr();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _createMaterialCallback) {
+                    _createMaterialCallback(material, req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::CREATE_MATERIAL_RESPONSE:
+            {
+                auto resp = message.getCreateMaterialResponse();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = resp.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+                uint64_t requestId = resp.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _createMaterialResponseCallback) {
+                    _createMaterialResponseCallback(resp.getSuccess(), materialId,
+                                                    std::string(resp.getErrorMessage().cStr()), requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UPDATE_MATERIAL_PROPERTY_REQUEST:
+            {
+                auto req = message.getUpdateMaterialPropertyRequest();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = req.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                PropertyValue value = deserializePropertyValue(req.getValue());
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _updateMaterialPropertyCallback) {
+                    _updateMaterialPropertyCallback(materialId, std::string(req.getPropertyName().cStr()), value,
+                                                    req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UPDATE_MATERIAL_PROPERTY_RESPONSE:
+            {
+                auto resp = message.getUpdateMaterialPropertyResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _updateMaterialPropertyResponseCallback) {
+                    _updateMaterialPropertyResponseCallback(resp.getSuccess(), resp.getNewVersion(),
+                                                            std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UPDATE_MATERIAL_PROPERTIES_BATCH_REQUEST:
+            {
+                auto req = message.getUpdateMaterialPropertiesBatchRequest();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = req.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                std::vector<MaterialPropertyData> properties;
+                for (auto propReader : req.getProperties()) {
+                    MaterialPropertyData prop;
+                    prop.name = propReader.getName().cStr();
+                    prop.value = deserializePropertyValue(propReader.getValue());
+                    properties.push_back(std::move(prop));
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _updateMaterialPropertiesBatchCallback) {
+                    _updateMaterialPropertiesBatchCallback(materialId, properties, req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UPDATE_MATERIAL_PROPERTIES_BATCH_RESPONSE:
+            {
+                auto resp = message.getUpdateMaterialPropertiesBatchResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _updateMaterialPropertiesBatchResponseCallback) {
+                    _updateMaterialPropertiesBatchResponseCallback(resp.getSuccess(), resp.getNewVersion(),
+                                                                   std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_PROPERTY_UPDATE:
+            {
+                auto update = message.getMaterialPropertyUpdate();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = update.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                PropertyValue value = deserializePropertyValue(update.getValue());
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialPropertyUpdateCallback) {
+                    _materialPropertyUpdateCallback(materialId, std::string(update.getPropertyName().cStr()), value,
+                                                    update.getVersion(), update.getOriginSessionId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_SUBSCRIBE_REQUEST:
+            {
+                auto req = message.getMaterialSubscribeRequest();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = req.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialSubscribeCallback) {
+                    _materialSubscribeCallback(materialId, req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_SUBSCRIBE_RESPONSE:
+            {
+                auto resp = message.getMaterialSubscribeResponse();
+
+                MaterialAssetData material;
+                if (resp.getSuccess() && resp.hasMaterial()) {
+                    auto matReader = resp.getMaterial();
+                    material.name = matReader.getName().cStr();
+
+                    auto shaderIdData = matReader.getShaderAssetId();
+                    if (shaderIdData.size() == 32) {
+                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
+                    }
+
+                    for (auto propReader : matReader.getProperties()) {
+                        MaterialPropertyData prop;
+                        prop.name = propReader.getName().cStr();
+                        prop.value = deserializePropertyValue(propReader.getValue());
+                        material.properties.push_back(std::move(prop));
+                    }
+
+                    for (auto kw : matReader.getEnabledKeywords()) {
+                        material.enabledKeywords.push_back(kw.cStr());
+                    }
+
+                    material.renderQueue = matReader.getRenderQueue();
+                    material.castsShadows = matReader.getCastsShadows();
+                    material.receivesShadows = matReader.getReceivesShadows();
+                    material.depthWrite = matReader.getDepthWrite();
+                    material.creatorSessionId = matReader.getCreatorSessionId();
+                    material.version = matReader.getVersion();
+                    material.modifiedAt = matReader.getModifiedAt();
+                    material.appId = matReader.getAppId().cStr();
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialSubscribeResponseCallback) {
+                    _materialSubscribeResponseCallback(resp.getSuccess(), material,
+                                                       std::string(resp.getErrorMessage().cStr()), resp.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_UNSUBSCRIBE_REQUEST:
+            {
+                auto req = message.getMaterialUnsubscribeRequest();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = req.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialUnsubscribeCallback) {
+                    _materialUnsubscribeCallback(materialId, req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_UNSUBSCRIBE_RESPONSE:
+            {
+                auto resp = message.getMaterialUnsubscribeResponse();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialUnsubscribeResponseCallback) {
+                    _materialUnsubscribeResponseCallback(resp.getSuccess(), std::string(resp.getErrorMessage().cStr()));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::GET_MATERIAL_REQUEST:
+            {
+                auto req = message.getGetMaterialRequest();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = req.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _getMaterialCallback) {
+                    _getMaterialCallback(materialId, req.getRequestId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::GET_MATERIAL_RESPONSE:
+            {
+                auto resp = message.getGetMaterialResponse();
+
+                MaterialAssetData material;
+                if (resp.getFound() && resp.hasMaterial()) {
+                    auto matReader = resp.getMaterial();
+                    material.name = matReader.getName().cStr();
+
+                    auto shaderIdData = matReader.getShaderAssetId();
+                    if (shaderIdData.size() == 32) {
+                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
+                    }
+
+                    for (auto propReader : matReader.getProperties()) {
+                        MaterialPropertyData prop;
+                        prop.name = propReader.getName().cStr();
+                        prop.value = deserializePropertyValue(propReader.getValue());
+                        material.properties.push_back(std::move(prop));
+                    }
+
+                    for (auto kw : matReader.getEnabledKeywords()) {
+                        material.enabledKeywords.push_back(kw.cStr());
+                    }
+
+                    material.renderQueue = matReader.getRenderQueue();
+                    material.castsShadows = matReader.getCastsShadows();
+                    material.receivesShadows = matReader.getReceivesShadows();
+                    material.depthWrite = matReader.getDepthWrite();
+                    material.creatorSessionId = matReader.getCreatorSessionId();
+                    material.version = matReader.getVersion();
+                    material.modifiedAt = matReader.getModifiedAt();
+                    material.appId = matReader.getAppId().cStr();
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _getMaterialResponseCallback) {
+                    // Note: Cap'n Proto schema has requestId but callback expects errorMessage
+                    // Pass empty error message when found, generic error when not found
+                    std::string errorMessage = resp.getFound() ? "" : "Material not found";
+                    _getMaterialResponseCallback(resp.getFound(), material, errorMessage);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MATERIAL_RESOLVED:
+            {
+                auto resolved = message.getMaterialResolved();
+                std::array<uint8_t, 32> materialId{};
+                auto idData = resolved.getMaterialId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), materialId.begin());
+                }
+
+                MaterialAssetData material;
+                if (resolved.hasMaterial()) {
+                    auto matReader = resolved.getMaterial();
+                    material.name = matReader.getName().cStr();
+
+                    auto shaderIdData = matReader.getShaderAssetId();
+                    if (shaderIdData.size() == 32) {
+                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
+                    }
+
+                    for (auto propReader : matReader.getProperties()) {
+                        MaterialPropertyData prop;
+                        prop.name = propReader.getName().cStr();
+                        prop.value = deserializePropertyValue(propReader.getValue());
+                        material.properties.push_back(std::move(prop));
+                    }
+
+                    for (auto kw : matReader.getEnabledKeywords()) {
+                        material.enabledKeywords.push_back(kw.cStr());
+                    }
+
+                    material.renderQueue = matReader.getRenderQueue();
+                    material.castsShadows = matReader.getCastsShadows();
+                    material.receivesShadows = matReader.getReceivesShadows();
+                    material.depthWrite = matReader.getDepthWrite();
+                    material.creatorSessionId = matReader.getCreatorSessionId();
+                    material.version = matReader.getVersion();
+                    material.modifiedAt = matReader.getModifiedAt();
+                    material.appId = matReader.getAppId().cStr();
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _materialResolvedCallback) {
+                    _materialResolvedCallback(materialId, material);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MESH_MATERIAL_BINDING_REQUEST:
+            {
+                auto request = message.getMeshMaterialBindingRequest();
+                uint64_t entityId = request.getEntityId();
+                uint64_t requestId = request.getRequestId();
+
+                std::vector<std::array<uint8_t, 32>> materialIds;
+                for (auto matIdData : request.getMaterialIds()) {
+                    std::array<uint8_t, 32> matId{};
+                    if (matIdData.size() == 32) {
+                        std::copy(matIdData.begin(), matIdData.end(), matId.begin());
+                    }
+                    materialIds.push_back(matId);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _meshMaterialBindingCallback) {
+                    _meshMaterialBindingCallback(entityId, materialIds, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MESH_MATERIAL_BINDING_RESPONSE:
+            {
+                auto response = message.getMeshMaterialBindingResponse();
+                bool success = response.getSuccess();
+                std::string errorMessage = response.getErrorMessage().cStr();
+                uint64_t requestId = response.getRequestId();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _meshMaterialBindingResponseCallback) {
+                    _meshMaterialBindingResponseCallback(success, errorMessage, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::MESH_MATERIAL_BINDING_UPDATE:
+            {
+                auto update = message.getMeshMaterialBindingUpdate();
+                uint64_t entityId = update.getEntityId();
+                uint64_t originSessionId = update.getOriginSessionId();
+
+                std::vector<std::array<uint8_t, 32>> materialIds;
+                for (auto matIdData : update.getMaterialIds()) {
+                    std::array<uint8_t, 32> matId{};
+                    if (matIdData.size() == 32) {
+                        std::copy(matIdData.begin(), matIdData.end(), matId.begin());
+                    }
+                    materialIds.push_back(matId);
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _meshMaterialBindingUpdateCallback) {
+                    _meshMaterialBindingUpdateCallback(entityId, materialIds, originSessionId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ==================================================================
+                // Shader Protocol Messages
+                // ==================================================================
+
+            case Protocol::Message::GET_SHADER_REQUEST:
+            {
+                auto request = message.getGetShaderRequest();
+                uint64_t requestId = request.getRequestId();
+
+                std::array<uint8_t, 32> shaderAssetId{};
+                auto idData = request.getShaderAssetId();
+                if (idData.size() == 32) {
+                    std::copy(idData.begin(), idData.end(), shaderAssetId.begin());
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _getShaderCallback) {
+                    _getShaderCallback(shaderAssetId, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::GET_SHADER_RESPONSE:
+            {
+                auto response = message.getGetShaderResponse();
+                uint64_t requestId = response.getRequestId();
+
+                GetShaderResponseData data;
+                data.found = response.getFound();
+                data.isBuiltin = response.getIsBuiltin();
+                data.mainSource = response.getMainSource().cStr();
+
+                // Modules
+                for (auto mod : response.getModules()) {
+                    ShaderModuleData moduleData;
+                    moduleData.moduleName = mod.getModuleName().cStr();
+                    moduleData.source = mod.getSource().cStr();
+                    data.modules.push_back(std::move(moduleData));
+                }
+
+                // Metadata (native typed)
+                auto meta = response.getMetadata();
+                data.metadata.name = meta.getName().cStr();
+                data.metadata.description = meta.getDescription().cStr();
+                data.metadata.renderQueue = meta.getRenderQueue();  // int32_t
+                data.metadata.castsShadows = meta.getCastsShadows();
+                data.metadata.transparent = meta.getTransparent();
+                data.metadata.author = meta.getAuthor().cStr();
+
+                for (auto kw : meta.getKeywords()) {
+                    data.metadata.keywords.push_back(kw.cStr());
+                }
+
+                for (auto param : meta.getParameters()) {
+                    ShaderParameterDefData paramData;
+                    paramData.name = param.getName().cStr();
+                    paramData.displayName = param.getDisplayName().cStr();
+                    paramData.type = fromCapnpPropertyType(static_cast<uint16_t>(param.getType()));
+                    // Deserialize defaultValue if present
+                    if (param.hasDefaultValue()) {
+                        paramData.defaultValue = deserializePropertyValue(param.getDefaultValue());
+                    }
+                    // Parse KeyValue attributes
+                    for (auto attr : param.getAttributes()) {
+                        paramData.attributes[attr.getKey().cStr()] = attr.getValue().cStr();
+                    }
+                    data.metadata.parameters.push_back(std::move(paramData));
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _getShaderResponseCallback) {
+                    _getShaderResponseCallback(data, requestId);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;

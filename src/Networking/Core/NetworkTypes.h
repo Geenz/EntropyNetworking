@@ -75,5 +75,15 @@ using Vec4 = glm::vec4;
  */
 using Quat = glm::quat;
 
+/**
+ * @brief 3x3 matrix type (GLM, column-major)
+ */
+using Mat3 = glm::mat3;
+
+/**
+ * @brief 4x4 matrix type (GLM, column-major)
+ */
+using Mat4 = glm::mat4;
+
 }  // namespace Networking
 }  // namespace EntropyEngine

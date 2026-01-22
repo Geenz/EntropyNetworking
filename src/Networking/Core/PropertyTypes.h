@@ -58,7 +58,23 @@ enum class PropertyType
     QuatArray,
 
     // Asset reference
-    AssetId
+    AssetId,
+    AssetIdArray,
+
+    // Matrix types
+    Mat3,
+    Mat4,
+
+    // Texture types (values are AssetId references)
+    Texture1D,
+    Texture2D,
+    Texture3D,
+    TextureCube,
+    Texture2DArray,
+    TextureCubeArray,
+
+    // Sampler type
+    Sampler
 };
 
 /**
@@ -75,7 +91,10 @@ using PropertyValue = std::variant<int32_t, int64_t, float, double, Vec2, Vec3, 
                                    std::vector<Vec2>, std::vector<Vec3>, std::vector<Vec4>, std::vector<Quat>,
 
                                    // Asset reference
-                                   AssetId>;
+                                   AssetId, std::vector<AssetId>,
+
+                                   // Matrix types
+                                   Mat3, Mat4>;
 
 /**
  * @brief Validate that a property value matches the expected type

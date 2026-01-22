@@ -278,6 +278,20 @@ public:
                                  bool persistent, uint64_t requestId = 0) const;
 
     /**
+     * @brief Sends AssetUpload request with metadata
+     * @param appId Application identifier
+     * @param data Asset data
+     * @param contentType Content type
+     * @param persistent Whether asset survives app disconnect
+     * @param requestId Request ID for response correlation
+     * @param metadata Type-specific metadata (shader, texture, etc.)
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                                 bool persistent, uint64_t requestId,
+                                 const NetworkSession::AssetMetadataData& metadata) const;
+
+    /**
      * @brief Sends AssetFetch request (for WebRTC delivery)
      * @param assetId Asset ID to fetch
      * @param requestId Request ID for response correlation

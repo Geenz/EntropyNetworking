@@ -68,6 +68,50 @@ void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Buil
     } else if (std::holds_alternative<AssetId>(value)) {
         const auto& assetId = std::get<AssetId>(value);
         builder.setAssetId(kj::ArrayPtr<const uint8_t>(assetId.hash.data(), assetId.hash.size()));
+    } else if (std::holds_alternative<std::vector<AssetId>>(value)) {
+        const auto& assetIds = std::get<std::vector<AssetId>>(value);
+        auto arr = builder.initAssetIdArray(assetIds.size());
+        for (size_t i = 0; i < assetIds.size(); ++i) {
+            arr.set(i, kj::ArrayPtr<const uint8_t>(assetIds[i].hash.data(), assetIds[i].hash.size()));
+        }
+    } else if (std::holds_alternative<Mat3>(value)) {
+        auto mat = std::get<Mat3>(value);
+        auto matBuilder = builder.initMat3();
+        auto col0 = matBuilder.initCol0();
+        col0.setX(mat[0].x);
+        col0.setY(mat[0].y);
+        col0.setZ(mat[0].z);
+        auto col1 = matBuilder.initCol1();
+        col1.setX(mat[1].x);
+        col1.setY(mat[1].y);
+        col1.setZ(mat[1].z);
+        auto col2 = matBuilder.initCol2();
+        col2.setX(mat[2].x);
+        col2.setY(mat[2].y);
+        col2.setZ(mat[2].z);
+    } else if (std::holds_alternative<Mat4>(value)) {
+        auto mat = std::get<Mat4>(value);
+        auto matBuilder = builder.initMat4();
+        auto col0 = matBuilder.initCol0();
+        col0.setX(mat[0].x);
+        col0.setY(mat[0].y);
+        col0.setZ(mat[0].z);
+        col0.setW(mat[0].w);
+        auto col1 = matBuilder.initCol1();
+        col1.setX(mat[1].x);
+        col1.setY(mat[1].y);
+        col1.setZ(mat[1].z);
+        col1.setW(mat[1].w);
+        auto col2 = matBuilder.initCol2();
+        col2.setX(mat[2].x);
+        col2.setY(mat[2].y);
+        col2.setZ(mat[2].z);
+        col2.setW(mat[2].w);
+        auto col3 = matBuilder.initCol3();
+        col3.setX(mat[3].x);
+        col3.setY(mat[3].y);
+        col3.setZ(mat[3].z);
+        col3.setW(mat[3].w);
     }
     // Note: Array types not serialized for default values (not commonly used as defaults)
 }
@@ -120,6 +164,41 @@ PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader) {
                 std::memcpy(assetId.hash.data(), assetIdBytes.begin(), 32);
             }
             return assetId;
+        }
+        case CapnpPropertyValue::ASSET_ID_ARRAY:
+        {
+            auto arr = reader.getAssetIdArray();
+            std::vector<AssetId> assetIds;
+            assetIds.reserve(arr.size());
+            for (auto item : arr) {
+                AssetId id;
+                if (item.size() == 32) {
+                    std::memcpy(id.hash.data(), item.begin(), 32);
+                }
+                assetIds.push_back(id);
+            }
+            return assetIds;
+        }
+        case CapnpPropertyValue::MAT3:
+        {
+            auto mat = reader.getMat3();
+            auto col0 = mat.getCol0();
+            auto col1 = mat.getCol1();
+            auto col2 = mat.getCol2();
+            return Mat3{Vec3{col0.getX(), col0.getY(), col0.getZ()}, Vec3{col1.getX(), col1.getY(), col1.getZ()},
+                        Vec3{col2.getX(), col2.getY(), col2.getZ()}};
+        }
+        case CapnpPropertyValue::MAT4:
+        {
+            auto mat = reader.getMat4();
+            auto col0 = mat.getCol0();
+            auto col1 = mat.getCol1();
+            auto col2 = mat.getCol2();
+            auto col3 = mat.getCol3();
+            return Mat4{Vec4{col0.getX(), col0.getY(), col0.getZ(), col0.getW()},
+                        Vec4{col1.getX(), col1.getY(), col1.getZ(), col1.getW()},
+                        Vec4{col2.getX(), col2.getY(), col2.getZ(), col2.getW()},
+                        Vec4{col3.getX(), col3.getY(), col3.getZ(), col3.getW()}};
         }
         default:
             return int32_t{0};

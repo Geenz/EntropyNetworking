@@ -40,6 +40,22 @@ enum PropertyType {
 
     # Asset reference
     assetId @19;
+    assetIdArray @29;
+
+    # Matrix types
+    mat3 @20;
+    mat4 @21;
+
+    # Texture types (values are AssetId references)
+    texture1D @22;
+    texture2D @23;
+    texture3D @24;
+    textureCube @25;
+    texture2DArray @26;
+    textureCubeArray @27;
+
+    # Sampler type
+    sampler @28;
 }
 
 struct Vec2 {
@@ -67,6 +83,26 @@ struct Quat {
     w @3 :Float32;
 }
 
+struct Mat3 {
+    # Column-major order (matches GLM)
+    col0 @0 :Vec3;
+    col1 @1 :Vec3;
+    col2 @2 :Vec3;
+}
+
+struct Mat4 {
+    # Column-major order (matches GLM)
+    col0 @0 :Vec4;
+    col1 @1 :Vec4;
+    col2 @2 :Vec4;
+    col3 @3 :Vec4;
+}
+
+struct KeyValue {
+    key @0 :Text;
+    value @1 :Text;
+}
+
 struct PropertyValue {
     union {
         int32 @0 :Int32;
@@ -81,6 +117,9 @@ struct PropertyValue {
         bool @9 :Bool;
         bytes @10 :Data;
         assetId @11 :Data;        # 32-byte SHA-256 asset identifier
+        mat3 @12 :Mat3;
+        mat4 @13 :Mat4;
+        assetIdArray @14 :List(Data);  # List of 32-byte AssetIds
     }
 }
 
@@ -366,6 +405,7 @@ struct AssetEntry {
     plaintextHash @5 :Data;          # 32-byte verification hash (if encrypted)
     appId @6 :Text;                  # Owning app (empty = canvas-owned)
     persistent @7 :Bool;             # Survives app disconnect
+    metadata @8 :AssetMetadata;      # Type-specific metadata (shader, texture, etc.)
 }
 
 # App registers assets in the catalog
@@ -453,6 +493,7 @@ struct AssetUploadRequest {
     contentType @2 :UInt8;           # ContentType enum
     persistent @3 :Bool;
     requestId @4 :UInt64;            # For response correlation
+    metadata @5 :AssetMetadata;      # Type-specific metadata (shader, texture, etc.)
 }
 
 struct AssetUploadResponse {
@@ -490,6 +531,7 @@ struct AssetUploadBeginRequest {
     encrypted @5 :Bool;              # Will the final asset be encrypted?
     plaintextHash @6 :Data;          # 32-byte hash for verification (if encrypted)
     requestId @7 :UInt64;            # For response correlation
+    metadata @8 :AssetMetadata;      # Type-specific metadata (shader, texture, etc.)
 }
 
 struct AssetUploadBeginResponse {
@@ -589,6 +631,237 @@ struct AddEntityToSceneResponse {
 }
 
 # ============================================================================
+# Material System Messages (Reliable Channel)
+# ============================================================================
+
+# Material property value - supports basic types and asset references
+struct MaterialProperty {
+    name @0 :Text;
+    value @1 :PropertyValue;
+}
+
+# Full material data for network transfer
+struct MaterialAssetData {
+    name @0 :Text;
+    shaderAssetId @1 :Data;                  # 32-byte shader AssetId
+    properties @2 :List(MaterialProperty);
+    enabledKeywords @3 :List(Text);          # Enabled shader keywords
+    renderQueue @4 :Int32 = 2000;            # Default: Geometry queue
+    castsShadows @5 :Bool = true;
+    receivesShadows @6 :Bool = true;
+    depthWrite @7 :Bool = true;
+    creatorSessionId @8 :UInt64;             # Session that created this material
+    version @9 :UInt64;                      # Monotonic version for change tracking
+    modifiedAt @10 :UInt64;                  # Timestamp of last modification (microseconds)
+    appId @11 :Text;                         # Creating application identifier
+}
+
+# Create a new material
+struct CreateMaterialRequest {
+    material @0 :MaterialAssetData;
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct CreateMaterialResponse {
+    success @0 :Bool;
+    materialId @1 :Data;                     # 32-byte assigned AssetId
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;                    # Echo back for correlation
+}
+
+# Update a single material property
+struct UpdateMaterialPropertyRequest {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    propertyName @1 :Text;
+    value @2 :PropertyValue;
+    requestId @3 :UInt64;                    # For response correlation
+}
+
+struct UpdateMaterialPropertyResponse {
+    success @0 :Bool;
+    newVersion @1 :UInt64;                   # Updated version number
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;                    # Echo back for correlation
+}
+
+# Batch update multiple material properties
+struct UpdateMaterialPropertiesBatchRequest {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    properties @1 :List(MaterialProperty);
+    requestId @2 :UInt64;                    # For response correlation
+}
+
+struct UpdateMaterialPropertiesBatchResponse {
+    success @0 :Bool;
+    newVersion @1 :UInt64;                   # Updated version number
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;                    # Echo back for correlation
+}
+
+# Broadcast: Material property changed (sent to subscribers)
+struct MaterialPropertyUpdate {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    propertyName @1 :Text;
+    value @2 :PropertyValue;
+    version @3 :UInt64;                      # New version number
+    originSessionId @4 :UInt64;              # Session that made the change (for echo filtering)
+}
+
+# Subscribe to material updates
+struct MaterialSubscribeRequest {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct MaterialSubscribeResponse {
+    success @0 :Bool;
+    material @1 :MaterialAssetData;          # Current material state (if success)
+    errorMessage @2 :Text;
+    requestId @3 :UInt64;                    # Echo back for correlation
+}
+
+# Unsubscribe from material updates
+struct MaterialUnsubscribeRequest {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct MaterialUnsubscribeResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+    requestId @2 :UInt64;                    # Echo back for correlation
+}
+
+# Get material by ID
+struct GetMaterialRequest {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct GetMaterialResponse {
+    found @0 :Bool;
+    material @1 :MaterialAssetData;
+    requestId @2 :UInt64;                    # Echo back for correlation
+}
+
+# Broadcast: Full material resolved (sent when a new material is created)
+struct MaterialResolved {
+    materialId @0 :Data;                     # 32-byte material AssetId
+    material @1 :MaterialAssetData;
+}
+
+# ============================================================================
+# Shader System Messages (Reliable Channel)
+# ============================================================================
+
+# Shader parameter definition (typed version for asset metadata system)
+struct ShaderParameterDef {
+    name @0 :Text;
+    displayName @1 :Text;
+    type @2 :PropertyType;                   # Native PropertyType enum
+    defaultValue @3 :PropertyValue;          # Native typed default
+    attributes @4 :List(KeyValue);           # UI attributes like "[Range(0,1)]"
+}
+
+# Shader metadata (typed version for asset metadata system)
+struct ShaderMetadataData {
+    name @0 :Text;
+    description @1 :Text;
+    keywords @2 :List(Text);                 # Declared keywords
+    parameters @3 :List(ShaderParameterDef);
+    renderQueue @4 :Int32 = 2000;            # Default render queue (int, not string)
+    castsShadows @5 :Bool = true;
+    transparent @6 :Bool = false;
+    author @7 :Text;
+}
+
+# Texture metadata for asset metadata system
+struct TextureMetadata {
+    width @0 :UInt32;
+    height @1 :UInt32;
+    depth @2 :UInt32 = 1;
+    mipLevels @3 :UInt32 = 1;
+    arrayLayers @4 :UInt32 = 1;
+    textureType @5 :UInt8;                   # TextureType enum
+    format @6 :UInt8;                        # TextureFormat enum
+    colorSpace @7 :UInt8;                    # ColorSpace enum
+    generateMips @8 :Bool = false;
+    sourceFile @9 :Text;
+}
+
+# Asset metadata union - supports shader, texture, and future types
+struct AssetMetadata {
+    union {
+        none @0 :Void;
+        shader @1 :ShaderMetadataData;
+        texture @2 :TextureMetadata;
+        # Future: material @3 :MaterialMetadata;
+        # Future: mesh @4 :MeshMetadata;
+    }
+}
+
+# Shader module entry (for bundled dependencies)
+struct ShaderModuleData {
+    moduleName @0 :Text;                     # Module name (as in import statement)
+    source @1 :Text;                         # Module source code
+}
+
+# Get shader source (for Portal compilation)
+struct GetShaderRequest {
+    shaderAssetId @0 :Data;                  # 32-byte shader AssetId
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct GetShaderResponse {
+    found @0 :Bool;
+    isBuiltin @1 :Bool;                      # True if this is a built-in shader
+    mainSource @2 :Text;                     # Main shader source (empty if builtin)
+    modules @3 :List(ShaderModuleData);      # Bundled modules (empty if builtin)
+    metadata @4 :ShaderMetadataData;
+    requestId @5 :UInt64;                    # Echo back for correlation
+}
+
+# ============================================================================
+# Asset Metadata Messages (Reliable Channel)
+# ============================================================================
+
+# Request metadata for an asset
+struct AssetMetadataRequest {
+    assetId @0 :Data;                        # 32-byte AssetId
+    requestId @1 :UInt64;                    # For response correlation
+}
+
+struct AssetMetadataResponse {
+    found @0 :Bool;
+    metadata @1 :AssetMetadata;
+    requestId @2 :UInt64;                    # Echo back for correlation
+}
+
+# ============================================================================
+# Mesh-Material Binding Messages (Reliable Channel)
+# ============================================================================
+
+# Bind materials to a mesh (per-submesh assignment)
+struct MeshMaterialBindingRequest {
+    entityId @0 :UInt64;                     # Entity with Mesh component
+    materialIds @1 :List(Data);              # List of 32-byte material AssetIds (one per submesh)
+    requestId @2 :UInt64;                    # For response correlation
+}
+
+struct MeshMaterialBindingResponse {
+    success @0 :Bool;
+    errorMessage @1 :Text;
+    requestId @2 :UInt64;                    # Echo back for correlation
+}
+
+# Broadcast: Mesh material binding changed
+struct MeshMaterialBindingUpdate {
+    entityId @0 :UInt64;                     # Entity with Mesh component
+    materialIds @1 :List(Data);              # List of 32-byte material AssetIds
+    originSessionId @2 :UInt64;              # Session that made the change
+}
+
+# ============================================================================
 # Top-Level Message Envelope
 # ============================================================================
 
@@ -676,5 +949,34 @@ struct Message {
         # Component lifecycle
         componentAdded @59 :ComponentAdded;
         componentRemoved @60 :ComponentRemoved;
+
+        # Material system
+        createMaterialRequest @61 :CreateMaterialRequest;
+        createMaterialResponse @62 :CreateMaterialResponse;
+        updateMaterialPropertyRequest @63 :UpdateMaterialPropertyRequest;
+        updateMaterialPropertyResponse @64 :UpdateMaterialPropertyResponse;
+        updateMaterialPropertiesBatchRequest @65 :UpdateMaterialPropertiesBatchRequest;
+        updateMaterialPropertiesBatchResponse @66 :UpdateMaterialPropertiesBatchResponse;
+        materialPropertyUpdate @67 :MaterialPropertyUpdate;
+        materialSubscribeRequest @68 :MaterialSubscribeRequest;
+        materialSubscribeResponse @69 :MaterialSubscribeResponse;
+        materialUnsubscribeRequest @70 :MaterialUnsubscribeRequest;
+        materialUnsubscribeResponse @71 :MaterialUnsubscribeResponse;
+        getMaterialRequest @72 :GetMaterialRequest;
+        getMaterialResponse @73 :GetMaterialResponse;
+        materialResolved @74 :MaterialResolved;
+
+        # Shader system
+        getShaderRequest @75 :GetShaderRequest;
+        getShaderResponse @76 :GetShaderResponse;
+
+        # Mesh-material binding
+        meshMaterialBindingRequest @77 :MeshMaterialBindingRequest;
+        meshMaterialBindingResponse @78 :MeshMaterialBindingResponse;
+        meshMaterialBindingUpdate @79 :MeshMaterialBindingUpdate;
+
+        # Asset metadata
+        assetMetadataRequest @80 :AssetMetadataRequest;
+        assetMetadataResponse @81 :AssetMetadataResponse;
     }
 }

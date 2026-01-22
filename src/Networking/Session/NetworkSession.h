@@ -16,8 +16,10 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "../Core/ComponentSchemaRegistry.h"
@@ -90,6 +92,63 @@ public:
     using SchemaAdvertisementCallback = std::function<void(ComponentTypeHash typeHash, const std::string& appId,
                                                            const std::string& componentName, uint32_t schemaVersion)>;
 
+    // =========================================================================
+    // Asset Metadata Data Structures
+    // =========================================================================
+
+    // Shader parameter definition for metadata
+    struct ShaderParameterDefData
+    {
+        std::string name;
+        std::string displayName;
+        PropertyType type = PropertyType::Float32;
+        std::optional<PropertyValue> defaultValue;
+        std::map<std::string, std::string> attributes;  // key -> value
+    };
+
+    // Shader metadata
+    struct ShaderMetadataData
+    {
+        std::string name;
+        std::string description;
+        std::vector<std::string> keywords;
+        std::vector<ShaderParameterDefData> parameters;
+        int32_t renderQueue = 2000;
+        bool castsShadows = true;
+        bool transparent = false;
+        std::string author;
+    };
+
+    // Texture metadata (mirrors TextureMetadata in SDK)
+    struct TextureMetadataData
+    {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t depth = 1;
+        uint32_t mipLevels = 1;
+        uint32_t arrayLayers = 1;
+        uint8_t textureType = 1;  // TextureType enum
+        uint8_t format = 3;       // TextureFormat enum (RGBA8 = 3)
+        uint8_t colorSpace = 1;   // ColorSpace enum (sRGB = 1)
+        bool generateMips = false;
+        std::string sourceFile;
+    };
+
+    // Asset metadata variant - supports shader and texture metadata
+    enum class AssetMetadataType : uint8_t
+    {
+        None = 0,
+        Shader = 1,
+        Texture = 2
+    };
+
+    struct AssetMetadataData
+    {
+        AssetMetadataType type = AssetMetadataType::None;
+        std::optional<ShaderMetadataData> shaderMetadata;
+        std::optional<TextureMetadataData> textureMetadata;
+    };
+
     // Asset entry data structure (mirrors AssetEntry in entropy.capnp)
     struct AssetEntryData
     {
@@ -101,6 +160,7 @@ public:
         std::array<uint8_t, 32> plaintextHash{};
         std::string appId;
         bool persistent = false;
+        AssetMetadataData metadata;  // Type-specific metadata
     };
 
     // Asset resolve response data structure
@@ -137,14 +197,20 @@ public:
                                                        const std::array<uint8_t, 32>& key, uint64_t requestId)>;
     using AssetProvideKeyResponseCallback =
         std::function<void(bool success, const std::string& errorMessage, uint64_t requestId)>;
-    using AssetUploadCallback = std::function<void(const std::string& appId, const std::vector<uint8_t>& data,
-                                                   uint8_t contentType, bool persistent, uint64_t requestId)>;
+    using AssetUploadCallback =
+        std::function<void(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                           bool persistent, uint64_t requestId, const AssetMetadataData& metadata)>;
     using AssetUploadResponseCallback =
         std::function<void(bool success, const std::array<uint8_t, 32>& assetId, const std::string& uri,
                            const std::string& errorMessage, uint64_t requestId)>;
     using AssetFetchCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
     using AssetFetchResponseCallback = std::function<void(bool found, const std::vector<uint8_t>& data,
                                                           const std::string& errorMessage, uint64_t requestId)>;
+
+    // Asset metadata callbacks
+    using AssetMetadataCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
+    using AssetMetadataResponseCallback =
+        std::function<void(bool found, const AssetMetadataData& metadata, uint64_t requestId)>;
 
     // Chunked upload data structures
     struct AssetUploadBeginData
@@ -156,7 +222,8 @@ public:
         uint32_t chunkSize = 0;
         bool encrypted = false;
         std::array<uint8_t, 32> plaintextHash{};
-        uint64_t requestId = 0;  // For response correlation
+        uint64_t requestId = 0;      // For response correlation
+        AssetMetadataData metadata;  // Type-specific metadata
     };
 
     struct AssetUploadBeginResponseData
@@ -220,6 +287,104 @@ public:
     using SetSceneEnabledResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
     using AddEntityToSceneCallback = std::function<void(uint64_t entityId, uint64_t sceneId)>;
     using AddEntityToSceneResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
+    // Material system callbacks
+    struct MaterialPropertyData
+    {
+        std::string name;
+        PropertyValue value;
+    };
+
+    struct MaterialAssetData
+    {
+        std::string name;
+        std::array<uint8_t, 32> shaderAssetId{};
+        std::vector<MaterialPropertyData> properties;
+        int32_t renderQueue = 2000;
+        bool castsShadows = true;
+        bool receivesShadows = true;
+        bool depthWrite = true;
+        uint64_t creatorSessionId = 0;
+        uint64_t version = 0;
+        uint64_t modifiedAt = 0;
+        std::string appId;
+        std::vector<std::string> enabledKeywords;
+    };
+
+    using CreateMaterialCallback = std::function<void(const MaterialAssetData& material, uint64_t requestId)>;
+    using CreateMaterialResponseCallback = std::function<void(bool success, const std::array<uint8_t, 32>& materialId,
+                                                              const std::string& errorMessage, uint64_t requestId)>;
+
+    using UpdateMaterialPropertyCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId, const std::string& propertyName,
+                           const PropertyValue& value, uint64_t requestId)>;
+    using UpdateMaterialPropertyResponseCallback =
+        std::function<void(bool success, uint64_t newVersion, const std::string& errorMessage)>;
+
+    using UpdateMaterialPropertiesBatchCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId,
+                           const std::vector<MaterialPropertyData>& properties, uint64_t requestId)>;
+    using UpdateMaterialPropertiesBatchResponseCallback =
+        std::function<void(bool success, uint64_t newVersion, const std::string& errorMessage)>;
+
+    using MaterialPropertyUpdateCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId, const std::string& propertyName,
+                           const PropertyValue& value, uint64_t newVersion, uint64_t originSessionId)>;
+
+    using MaterialSubscribeCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId, uint64_t requestId)>;
+    using MaterialSubscribeResponseCallback = std::function<void(bool success, const MaterialAssetData& material,
+                                                                 const std::string& errorMessage, uint64_t requestId)>;
+
+    using MaterialUnsubscribeCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId, uint64_t requestId)>;
+    using MaterialUnsubscribeResponseCallback = std::function<void(bool success, const std::string& errorMessage)>;
+
+    using GetMaterialCallback = std::function<void(const std::array<uint8_t, 32>& materialId, uint64_t requestId)>;
+    using GetMaterialResponseCallback =
+        std::function<void(bool success, const MaterialAssetData& material, const std::string& errorMessage)>;
+
+    using MaterialResolvedCallback =
+        std::function<void(const std::array<uint8_t, 32>& materialId, const MaterialAssetData& material)>;
+
+    // Mesh-material binding callbacks
+    using MeshMaterialBindingCallback = std::function<void(
+        uint64_t entityId, const std::vector<std::array<uint8_t, 32>>& materialIds, uint64_t requestId)>;
+    using MeshMaterialBindingResponseCallback =
+        std::function<void(bool success, const std::string& errorMessage, uint64_t requestId)>;
+    using MeshMaterialBindingUpdateCallback = std::function<void(
+        uint64_t entityId, const std::vector<std::array<uint8_t, 32>>& materialIds, uint64_t originSessionId)>;
+
+    // =========================================================================
+    // Shader Protocol Types
+    // =========================================================================
+
+    /**
+     * @brief Shader module for network transfer
+     */
+    struct ShaderModuleData
+    {
+        std::string moduleName;
+        std::string source;
+    };
+
+    /**
+     * @brief Get shader response data
+     *
+     * Uses ShaderMetadataData (defined above) for native typed metadata.
+     */
+    struct GetShaderResponseData
+    {
+        bool found = false;
+        bool isBuiltin = false;
+        std::string mainSource;
+        std::vector<ShaderModuleData> modules;
+        ShaderMetadataData metadata;  // Uses native PropertyType-based parameters
+    };
+
+    // Get shader callbacks
+    using GetShaderCallback = std::function<void(const std::array<uint8_t, 32>& shaderAssetId, uint64_t requestId)>;
+    using GetShaderResponseCallback = std::function<void(const GetShaderResponseData& response, uint64_t requestId)>;
 
     /**
      * @brief Construct a NetworkSession
@@ -438,6 +603,8 @@ public:
     Result<void> sendAssetProvideKeyResponse(bool success, const std::string& errorMessage, uint64_t requestId = 0);
     Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
                                  bool persistent, uint64_t requestId = 0);
+    Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                                 bool persistent, uint64_t requestId, const AssetMetadataData& metadata);
     Result<void> sendAssetUploadResponse(bool success, const std::array<uint8_t, 32>& assetId, const std::string& uri,
                                          const std::string& errorMessage, uint64_t requestId = 0);
     Result<void> sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId = 0);
@@ -463,6 +630,44 @@ public:
     Result<void> sendSetSceneEnabledResponse(bool success, const std::string& errorMessage);
     Result<void> sendAddEntityToSceneRequest(uint64_t entityId, uint64_t sceneId);
     Result<void> sendAddEntityToSceneResponse(bool success, const std::string& errorMessage);
+
+    // Material system messages
+    Result<void> sendCreateMaterialRequest(const MaterialAssetData& material, uint64_t requestId = 0);
+    Result<void> sendCreateMaterialResponse(bool success, const std::array<uint8_t, 32>& materialId,
+                                            const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendUpdateMaterialPropertyRequest(const std::array<uint8_t, 32>& materialId,
+                                                   const std::string& propertyName, const PropertyValue& value,
+                                                   uint64_t requestId = 0);
+    Result<void> sendUpdateMaterialPropertyResponse(bool success, uint64_t newVersion, const std::string& errorMessage);
+    Result<void> sendUpdateMaterialPropertiesBatchRequest(const std::array<uint8_t, 32>& materialId,
+                                                          const std::vector<MaterialPropertyData>& properties,
+                                                          uint64_t requestId = 0);
+    Result<void> sendUpdateMaterialPropertiesBatchResponse(bool success, uint64_t newVersion,
+                                                           const std::string& errorMessage);
+    Result<void> sendMaterialPropertyUpdate(const std::array<uint8_t, 32>& materialId, const std::string& propertyName,
+                                            const PropertyValue& value, uint64_t newVersion, uint64_t originSessionId);
+    Result<void> sendMaterialSubscribeRequest(const std::array<uint8_t, 32>& materialId, uint64_t requestId = 0);
+    Result<void> sendMaterialSubscribeResponse(bool success, const MaterialAssetData& material,
+                                               const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendMaterialUnsubscribeRequest(const std::array<uint8_t, 32>& materialId, uint64_t requestId = 0);
+    Result<void> sendMaterialUnsubscribeResponse(bool success, const std::string& errorMessage);
+    Result<void> sendGetMaterialRequest(const std::array<uint8_t, 32>& materialId, uint64_t requestId = 0);
+    Result<void> sendGetMaterialResponse(bool success, const MaterialAssetData& material,
+                                         const std::string& errorMessage);
+    Result<void> sendMaterialResolved(const std::array<uint8_t, 32>& materialId, const MaterialAssetData& material);
+
+    // Mesh-material binding messages
+    Result<void> sendMeshMaterialBindingRequest(uint64_t entityId,
+                                                const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                                uint64_t requestId = 0);
+    Result<void> sendMeshMaterialBindingResponse(bool success, const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendMeshMaterialBindingUpdate(uint64_t entityId,
+                                               const std::vector<std::array<uint8_t, 32>>& materialIds,
+                                               uint64_t originSessionId);
+
+    // Shader messages
+    Result<void> sendGetShaderRequest(const std::array<uint8_t, 32>& shaderAssetId, uint64_t requestId = 0);
+    Result<void> sendGetShaderResponse(const GetShaderResponseData& response, uint64_t requestId = 0);
 
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
@@ -501,6 +706,10 @@ public:
     void setAssetFetchCallback(AssetFetchCallback callback);
     void setAssetFetchResponseCallback(AssetFetchResponseCallback callback);
 
+    // Asset metadata callbacks
+    void setAssetMetadataCallback(AssetMetadataCallback callback);
+    void setAssetMetadataResponseCallback(AssetMetadataResponseCallback callback);
+
     // Chunked upload callbacks
     void setAssetUploadBeginCallback(AssetUploadBeginCallback callback);
     void setAssetUploadBeginResponseCallback(AssetUploadBeginResponseCallback callback);
@@ -520,6 +729,31 @@ public:
     void setSetSceneEnabledResponseCallback(SetSceneEnabledResponseCallback callback);
     void setAddEntityToSceneCallback(AddEntityToSceneCallback callback);
     void setAddEntityToSceneResponseCallback(AddEntityToSceneResponseCallback callback);
+
+    // Material system callbacks
+    void setCreateMaterialCallback(CreateMaterialCallback callback);
+    void setCreateMaterialResponseCallback(CreateMaterialResponseCallback callback);
+    void setUpdateMaterialPropertyCallback(UpdateMaterialPropertyCallback callback);
+    void setUpdateMaterialPropertyResponseCallback(UpdateMaterialPropertyResponseCallback callback);
+    void setUpdateMaterialPropertiesBatchCallback(UpdateMaterialPropertiesBatchCallback callback);
+    void setUpdateMaterialPropertiesBatchResponseCallback(UpdateMaterialPropertiesBatchResponseCallback callback);
+    void setMaterialPropertyUpdateCallback(MaterialPropertyUpdateCallback callback);
+    void setMaterialSubscribeCallback(MaterialSubscribeCallback callback);
+    void setMaterialSubscribeResponseCallback(MaterialSubscribeResponseCallback callback);
+    void setMaterialUnsubscribeCallback(MaterialUnsubscribeCallback callback);
+    void setMaterialUnsubscribeResponseCallback(MaterialUnsubscribeResponseCallback callback);
+    void setGetMaterialCallback(GetMaterialCallback callback);
+    void setGetMaterialResponseCallback(GetMaterialResponseCallback callback);
+    void setMaterialResolvedCallback(MaterialResolvedCallback callback);
+
+    // Mesh-material binding callbacks
+    void setMeshMaterialBindingCallback(MeshMaterialBindingCallback callback);
+    void setMeshMaterialBindingResponseCallback(MeshMaterialBindingResponseCallback callback);
+    void setMeshMaterialBindingUpdateCallback(MeshMaterialBindingUpdateCallback callback);
+
+    // Shader callbacks
+    void setGetShaderCallback(GetShaderCallback callback);
+    void setGetShaderResponseCallback(GetShaderResponseCallback callback);
 
     /**
      * @brief Clears all callbacks to prevent invocation during/after destruction
@@ -685,6 +919,31 @@ private:
     SetSceneEnabledResponseCallback _setSceneEnabledResponseCallback;
     AddEntityToSceneCallback _addEntityToSceneCallback;
     AddEntityToSceneResponseCallback _addEntityToSceneResponseCallback;
+
+    // Material system callbacks
+    CreateMaterialCallback _createMaterialCallback;
+    CreateMaterialResponseCallback _createMaterialResponseCallback;
+    UpdateMaterialPropertyCallback _updateMaterialPropertyCallback;
+    UpdateMaterialPropertyResponseCallback _updateMaterialPropertyResponseCallback;
+    UpdateMaterialPropertiesBatchCallback _updateMaterialPropertiesBatchCallback;
+    UpdateMaterialPropertiesBatchResponseCallback _updateMaterialPropertiesBatchResponseCallback;
+    MaterialPropertyUpdateCallback _materialPropertyUpdateCallback;
+    MaterialSubscribeCallback _materialSubscribeCallback;
+    MaterialSubscribeResponseCallback _materialSubscribeResponseCallback;
+    MaterialUnsubscribeCallback _materialUnsubscribeCallback;
+    MaterialUnsubscribeResponseCallback _materialUnsubscribeResponseCallback;
+    GetMaterialCallback _getMaterialCallback;
+    GetMaterialResponseCallback _getMaterialResponseCallback;
+    MaterialResolvedCallback _materialResolvedCallback;
+
+    // Mesh-material binding callbacks
+    MeshMaterialBindingCallback _meshMaterialBindingCallback;
+    MeshMaterialBindingResponseCallback _meshMaterialBindingResponseCallback;
+    MeshMaterialBindingUpdateCallback _meshMaterialBindingUpdateCallback;
+
+    // Shader callbacks
+    GetShaderCallback _getShaderCallback;
+    GetShaderResponseCallback _getShaderResponseCallback;
 
     // Heartbeat tracking
     std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch

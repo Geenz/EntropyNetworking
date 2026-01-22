@@ -152,6 +152,16 @@ Result<void> SessionHandle::sendAssetUpload(const std::string& appId, const std:
     return mgr->sendAssetUpload(*this, appId, data, contentType, persistent, requestId);
 }
 
+Result<void> SessionHandle::sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data,
+                                            uint8_t contentType, bool persistent, uint64_t requestId,
+                                            const NetworkSession::AssetMetadataData& metadata) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendAssetUpload(*this, appId, data, contentType, persistent, requestId, metadata);
+}
+
 Result<void> SessionHandle::sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId) const {
     auto* mgr = manager();
     if (!mgr) {

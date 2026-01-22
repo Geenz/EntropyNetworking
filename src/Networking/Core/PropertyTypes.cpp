@@ -49,6 +49,11 @@ PropertyType getPropertyType(const PropertyValue& value) {
 
     // Asset reference
     if (std::holds_alternative<AssetId>(value)) return PropertyType::AssetId;
+    if (std::holds_alternative<std::vector<AssetId>>(value)) return PropertyType::AssetIdArray;
+
+    // Matrix types
+    if (std::holds_alternative<Mat3>(value)) return PropertyType::Mat3;
+    if (std::holds_alternative<Mat4>(value)) return PropertyType::Mat4;
 
     // Should never reach here
     return PropertyType::Int32;
@@ -96,6 +101,26 @@ const char* propertyTypeToString(PropertyType type) {
             return "QuatArray";
         case PropertyType::AssetId:
             return "AssetId";
+        case PropertyType::AssetIdArray:
+            return "AssetIdArray";
+        case PropertyType::Mat3:
+            return "Mat3";
+        case PropertyType::Mat4:
+            return "Mat4";
+        case PropertyType::Texture1D:
+            return "Texture1D";
+        case PropertyType::Texture2D:
+            return "Texture2D";
+        case PropertyType::Texture3D:
+            return "Texture3D";
+        case PropertyType::TextureCube:
+            return "TextureCube";
+        case PropertyType::Texture2DArray:
+            return "Texture2DArray";
+        case PropertyType::TextureCubeArray:
+            return "TextureCubeArray";
+        case PropertyType::Sampler:
+            return "Sampler";
         default:
             return "Unknown";
     }
@@ -143,6 +168,21 @@ size_t getPropertySize(PropertyType type) {
             return sizeof(std::vector<Vec4>);
         case PropertyType::QuatArray:
             return sizeof(std::vector<Quat>);
+        case PropertyType::AssetIdArray:
+            return sizeof(std::vector<AssetId>);
+        case PropertyType::Mat3:
+            return sizeof(Mat3);
+        case PropertyType::Mat4:
+            return sizeof(Mat4);
+        // Texture and sampler types use AssetId as their value
+        case PropertyType::Texture1D:
+        case PropertyType::Texture2D:
+        case PropertyType::Texture3D:
+        case PropertyType::TextureCube:
+        case PropertyType::Texture2DArray:
+        case PropertyType::TextureCubeArray:
+        case PropertyType::Sampler:
+            return sizeof(EntropyEngine::Networking::AssetId);
     }
     return 0;
 }
@@ -191,6 +231,26 @@ uint16_t toCapnpPropertyType(PropertyType type) {
             return static_cast<uint16_t>(CapnpPropertyType::QUAT_ARRAY);
         case PropertyType::AssetId:
             return static_cast<uint16_t>(CapnpPropertyType::ASSET_ID);
+        case PropertyType::AssetIdArray:
+            return static_cast<uint16_t>(CapnpPropertyType::ASSET_ID_ARRAY);
+        case PropertyType::Mat3:
+            return static_cast<uint16_t>(CapnpPropertyType::MAT3);
+        case PropertyType::Mat4:
+            return static_cast<uint16_t>(CapnpPropertyType::MAT4);
+        case PropertyType::Texture1D:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE1_D);
+        case PropertyType::Texture2D:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE2_D);
+        case PropertyType::Texture3D:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE3_D);
+        case PropertyType::TextureCube:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE_CUBE);
+        case PropertyType::Texture2DArray:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE2_D_ARRAY);
+        case PropertyType::TextureCubeArray:
+            return static_cast<uint16_t>(CapnpPropertyType::TEXTURE_CUBE_ARRAY);
+        case PropertyType::Sampler:
+            return static_cast<uint16_t>(CapnpPropertyType::SAMPLER);
         default:
             return static_cast<uint16_t>(CapnpPropertyType::INT32);  // Fallback
     }
@@ -241,6 +301,26 @@ PropertyType fromCapnpPropertyType(uint16_t capnpType) {
             return PropertyType::QuatArray;
         case CapnpPropertyType::ASSET_ID:
             return PropertyType::AssetId;
+        case CapnpPropertyType::ASSET_ID_ARRAY:
+            return PropertyType::AssetIdArray;
+        case CapnpPropertyType::MAT3:
+            return PropertyType::Mat3;
+        case CapnpPropertyType::MAT4:
+            return PropertyType::Mat4;
+        case CapnpPropertyType::TEXTURE1_D:
+            return PropertyType::Texture1D;
+        case CapnpPropertyType::TEXTURE2_D:
+            return PropertyType::Texture2D;
+        case CapnpPropertyType::TEXTURE3_D:
+            return PropertyType::Texture3D;
+        case CapnpPropertyType::TEXTURE_CUBE:
+            return PropertyType::TextureCube;
+        case CapnpPropertyType::TEXTURE2_D_ARRAY:
+            return PropertyType::Texture2DArray;
+        case CapnpPropertyType::TEXTURE_CUBE_ARRAY:
+            return PropertyType::TextureCubeArray;
+        case CapnpPropertyType::SAMPLER:
+            return PropertyType::Sampler;
         default:
             return PropertyType::Int32;  // Fallback
     }

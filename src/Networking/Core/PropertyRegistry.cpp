@@ -41,6 +41,7 @@ Result<void> PropertyRegistry::registerProperty(PropertyMetadata metadata) {
             case PropertyType::Vec4Array:
             case PropertyType::QuatArray:
             case PropertyType::AssetId:
+            case PropertyType::AssetIdArray:
                 return true;
             default:
                 return false;
