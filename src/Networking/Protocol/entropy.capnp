@@ -654,6 +654,13 @@ struct MaterialAssetData {
     version @9 :UInt64;                      # Monotonic version for change tracking
     modifiedAt @10 :UInt64;                  # Timestamp of last modification (microseconds)
     appId @11 :Text;                         # Creating application identifier
+    samplerOverrides @12 :List(SamplerOverride);  # Custom sampler overrides per slot
+}
+
+# Sampler override for a material's sampler slot
+struct SamplerOverride {
+    slotName @0 :Text;                       # Shader SamplerState name
+    samplerAssetId @1 :Data;                 # 32-byte sampler AssetId
 }
 
 # Create a new material

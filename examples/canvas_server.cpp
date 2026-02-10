@@ -141,8 +141,9 @@ int main() {
                 // Set up entity callbacks to handle messages from client
                 sessMgr.setEntityCreatedCallback(
                     session,
-                    [](uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId,
-                       const std::vector<EntropyEngine::Networking::NetworkSession::ComponentGroupData>& components) {
+                    [](uint64_t entityId, const string& /*appId*/, const string& typeName, uint64_t /*parentId*/,
+                       const std::vector<EntropyEngine::Networking::NetworkSession::ComponentGroupData>& components,
+                       uint64_t /*targetSceneId*/, const string& /*entityName*/) {
                         ENTROPY_LOG_INFO(std::format("Client created entity: {} ({}) with {} components", entityId,
                                                      typeName, components.size()));
                     });

@@ -75,7 +75,8 @@ int main() {
         sessMgr.setEntityCreatedCallback(
             session, [&entitiesReceived](
                          uint64_t entityId, const string& appId, const string& typeName, uint64_t parentId,
-                         const std::vector<EntropyEngine::Networking::NetworkSession::ComponentGroupData>& components) {
+                         const std::vector<EntropyEngine::Networking::NetworkSession::ComponentGroupData>& components,
+                         uint64_t /*targetSceneId*/, const string& /*entityName*/) {
                 ENTROPY_LOG_INFO("\n>>> Received Entity Created:");
                 ENTROPY_LOG_INFO(std::format("    Entity ID: {}", entityId));
                 ENTROPY_LOG_INFO(std::format("    App ID: {}", appId));

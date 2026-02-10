@@ -9,8 +9,8 @@
 
 #include "ComponentSchema.h"
 
+#include <Crypto/SHA256.h>
 #include <Logging/Logger.h>
-#include <openssl/sha.h>
 
 #include <algorithm>
 #include <format>
@@ -76,8 +76,8 @@ PropertyHash ComponentSchema::computeStructuralHash(const std::vector<PropertyDe
     std::string canonical = oss.str();
 
     // Hash the UTF-8 bytes
-    uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()), canonical.size(), hash);
+    EntropyEngine::Core::Crypto::SHA256 sha256Struct(canonical.data(), canonical.size());
+    auto hash = sha256Struct.getDigest();
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;
@@ -109,8 +109,8 @@ ComponentTypeHash ComponentSchema::computeTypeHash(const std::string& appId, con
     std::string canonical = oss.str();
 
     // Hash the UTF-8 bytes
-    uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()), canonical.size(), hash);
+    EntropyEngine::Core::Crypto::SHA256 sha256Type(canonical.data(), canonical.size());
+    auto hash = sha256Type.getDigest();
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;

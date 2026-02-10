@@ -1858,6 +1858,16 @@ void serializeMaterialAssetData(Protocol::MaterialAssetData::Builder& builder,
     builder.setVersion(data.version);
     builder.setModifiedAt(data.modifiedAt);
     builder.setAppId(data.appId);
+
+    // Sampler overrides
+    if (!data.samplerOverrides.empty()) {
+        auto overridesBuilder = builder.initSamplerOverrides(data.samplerOverrides.size());
+        for (size_t i = 0; i < data.samplerOverrides.size(); ++i) {
+            overridesBuilder[i].setSlotName(data.samplerOverrides[i].slotName);
+            overridesBuilder[i].setSamplerAssetId(kj::arrayPtr(data.samplerOverrides[i].samplerAssetId.data(),
+                                                               data.samplerOverrides[i].samplerAssetId.size()));
+        }
+    }
 }
 
 }  // namespace
@@ -4375,6 +4385,18 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 material.modifiedAt = matReader.getModifiedAt();
                 material.appId = matReader.getAppId().cStr();
 
+                if (matReader.hasSamplerOverrides()) {
+                    for (auto override : matReader.getSamplerOverrides()) {
+                        NetworkSession::SamplerOverrideData overrideData;
+                        overrideData.slotName = override.getSlotName().cStr();
+                        auto assetIdData = override.getSamplerAssetId();
+                        if (assetIdData.size() == 32) {
+                            std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
+                        }
+                        material.samplerOverrides.push_back(std::move(overrideData));
+                    }
+                }
+
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _createMaterialCallback) {
                     _createMaterialCallback(material, req.getRequestId());
@@ -4543,6 +4565,18 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     material.version = matReader.getVersion();
                     material.modifiedAt = matReader.getModifiedAt();
                     material.appId = matReader.getAppId().cStr();
+
+                    if (matReader.hasSamplerOverrides()) {
+                        for (auto override : matReader.getSamplerOverrides()) {
+                            NetworkSession::SamplerOverrideData overrideData;
+                            overrideData.slotName = override.getSlotName().cStr();
+                            auto assetIdData = override.getSamplerAssetId();
+                            if (assetIdData.size() == 32) {
+                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
+                            }
+                            material.samplerOverrides.push_back(std::move(overrideData));
+                        }
+                    }
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -4633,6 +4667,18 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     material.version = matReader.getVersion();
                     material.modifiedAt = matReader.getModifiedAt();
                     material.appId = matReader.getAppId().cStr();
+
+                    if (matReader.hasSamplerOverrides()) {
+                        for (auto override : matReader.getSamplerOverrides()) {
+                            NetworkSession::SamplerOverrideData overrideData;
+                            overrideData.slotName = override.getSlotName().cStr();
+                            auto assetIdData = override.getSamplerAssetId();
+                            if (assetIdData.size() == 32) {
+                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
+                            }
+                            material.samplerOverrides.push_back(std::move(overrideData));
+                        }
+                    }
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -4684,6 +4730,18 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                     material.version = matReader.getVersion();
                     material.modifiedAt = matReader.getModifiedAt();
                     material.appId = matReader.getAppId().cStr();
+
+                    if (matReader.hasSamplerOverrides()) {
+                        for (auto override : matReader.getSamplerOverrides()) {
+                            NetworkSession::SamplerOverrideData overrideData;
+                            overrideData.slotName = override.getSlotName().cStr();
+                            auto assetIdData = override.getSamplerAssetId();
+                            if (assetIdData.size() == 32) {
+                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
+                            }
+                            material.samplerOverrides.push_back(std::move(overrideData));
+                        }
+                    }
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);

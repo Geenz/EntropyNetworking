@@ -9,7 +9,7 @@
 
 #include "PropertyHash.h"
 
-#include <openssl/sha.h>
+#include <Crypto/SHA256.h>
 
 #include <iomanip>
 #include <sstream>
@@ -29,8 +29,8 @@ PropertyHash computePropertyHash(uint64_t entityId, ComponentTypeHash componentT
     std::string canonical = oss.str();
 
     // Hash the UTF-8 bytes
-    uint8_t hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const uint8_t*>(canonical.data()), canonical.size(), hash);
+    EntropyEngine::Core::Crypto::SHA256 sha256(canonical.data(), canonical.size());
+    auto hash = sha256.getDigest();
 
     // Extract high 128 bits (first 16 bytes)
     uint64_t high = 0;

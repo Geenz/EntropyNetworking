@@ -295,6 +295,12 @@ public:
         PropertyValue value;
     };
 
+    struct SamplerOverrideData
+    {
+        std::string slotName;
+        std::array<uint8_t, 32> samplerAssetId{};
+    };
+
     struct MaterialAssetData
     {
         std::string name;
@@ -309,6 +315,7 @@ public:
         uint64_t modifiedAt = 0;
         std::string appId;
         std::vector<std::string> enabledKeywords;
+        std::vector<SamplerOverrideData> samplerOverrides;
     };
 
     using CreateMaterialCallback = std::function<void(const MaterialAssetData& material, uint64_t requestId)>;
