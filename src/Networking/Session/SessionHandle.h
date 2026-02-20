@@ -348,6 +348,59 @@ public:
      */
     Result<void> openChannel(const std::string& channel) const;
 
+    // Permission system operations
+
+    /**
+     * @brief Sends PermissionRequest to remote peer
+     * @param requestId Correlation ID for this request
+     * @param requestingSessionId Session originating the request
+     * @param appId Human-readable name of the requesting application
+     * @param key Permission category/permission pair
+     * @param reason Human-readable reason shown to user
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRequest(uint64_t requestId, uint64_t requestingSessionId, const std::string& appId,
+                                       PermissionKey key, const std::string& reason) const;
+
+    /**
+     * @brief Sends PermissionResponse to remote peer
+     * @param requestId Correlates to the original PermissionRequest
+     * @param respondingSessionId Session that is responding (portal)
+     * @param key Permission key being responded to
+     * @param granted User's decision
+     * @return Result indicating success or failure
+     */
+    Result<void> sendHeadPosePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false) const;
+
+    Result<void> sendIdentityPermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& identityHash = "") const;
+
+    Result<void> sendUsernamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& username = "") const;
+
+    Result<void> sendHostnamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& hostname = "") const;
+
+    /**
+     * @brief Sends PermissionRevoked notification
+     * @param portalSessionId Portal that disconnected
+     * @param key Which permission is revoked
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRevoked(uint64_t portalSessionId, PermissionKey key) const;
+
+    /**
+     * @brief Sends PermissionRequestCancelled notification
+     * @param requestId Which request was cancelled
+     * @param key Which permission
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key) const;
+
     // Handshake operations
 
     /**

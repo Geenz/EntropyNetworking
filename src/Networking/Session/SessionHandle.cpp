@@ -218,6 +218,76 @@ Result<void> SessionHandle::openChannel(const std::string& channel) const {
     return mgr->openChannel(*this, channel);
 }
 
+// Permission system operations
+
+Result<void> SessionHandle::sendPermissionRequest(uint64_t requestId, uint64_t requestingSessionId,
+                                                  const std::string& appId, PermissionKey key,
+                                                  const std::string& reason) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendPermissionRequest(*this, requestId, requestingSessionId, appId, key, reason);
+}
+
+Result<void> SessionHandle::sendHeadPosePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                           bool granted, uint64_t grantToken, bool isNewGrant) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendHeadPosePermissionResponse(*this, requestId, respondingSessionId, granted, grantToken, isNewGrant);
+}
+
+Result<void> SessionHandle::sendIdentityPermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                           bool granted, uint64_t grantToken, bool isNewGrant,
+                                                           const std::string& identityHash) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendIdentityPermissionResponse(*this, requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                               identityHash);
+}
+
+Result<void> SessionHandle::sendUsernamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                           bool granted, uint64_t grantToken, bool isNewGrant,
+                                                           const std::string& username) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendUsernamePermissionResponse(*this, requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                               username);
+}
+
+Result<void> SessionHandle::sendHostnamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                           bool granted, uint64_t grantToken, bool isNewGrant,
+                                                           const std::string& hostname) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendHostnamePermissionResponse(*this, requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                               hostname);
+}
+
+Result<void> SessionHandle::sendPermissionRevoked(uint64_t portalSessionId, PermissionKey key) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendPermissionRevoked(*this, portalSessionId, key);
+}
+
+Result<void> SessionHandle::sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendPermissionRequestCancelled(*this, requestId, key);
+}
+
 Result<void> SessionHandle::performHandshake(const std::string& clientType, const std::string& clientId) const {
     auto* mgr = manager();
     if (!mgr) {

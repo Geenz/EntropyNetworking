@@ -2524,4 +2524,279 @@ Result<void> SessionManager::sendGetShaderResponse(const SessionHandle& handle,
     return slot.session->sendGetShaderResponse(response, requestId);
 }
 
+//=============================================================================
+// Permission System
+//=============================================================================
+
+Result<void> SessionManager::setPermissionRequestCallback(const SessionHandle& handle,
+                                                          NetworkSession::PermissionRequestCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setPermissionRequestCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setHeadPosePermissionResponseCallback(
+    const SessionHandle& handle, NetworkSession::HeadPosePermissionResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setHeadPosePermissionResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setIdentityPermissionResponseCallback(
+    const SessionHandle& handle, NetworkSession::IdentityPermissionResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setIdentityPermissionResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setUsernamePermissionResponseCallback(
+    const SessionHandle& handle, NetworkSession::UsernamePermissionResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setUsernamePermissionResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setHostnamePermissionResponseCallback(
+    const SessionHandle& handle, NetworkSession::HostnamePermissionResponseCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setHostnamePermissionResponseCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setPermissionRevokedCallback(const SessionHandle& handle,
+                                                          NetworkSession::PermissionRevokedCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setPermissionRevokedCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setPermissionRequestCancelledCallback(
+    const SessionHandle& handle, NetworkSession::PermissionRequestCancelledCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setPermissionRequestCancelledCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::sendPermissionRequest(const SessionHandle& handle, uint64_t requestId,
+                                                   uint64_t requestingSessionId, const std::string& appId,
+                                                   PermissionKey key, const std::string& reason) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendPermissionRequest(requestId, requestingSessionId, appId, key, reason);
+}
+
+Result<void> SessionManager::sendHeadPosePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                            uint64_t respondingSessionId, bool granted,
+                                                            uint64_t grantToken, bool isNewGrant) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendHeadPosePermissionResponse(requestId, respondingSessionId, granted, grantToken,
+                                                        isNewGrant);
+}
+
+Result<void> SessionManager::sendIdentityPermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                            uint64_t respondingSessionId, bool granted,
+                                                            uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& identityHash) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendIdentityPermissionResponse(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        identityHash);
+}
+
+Result<void> SessionManager::sendUsernamePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                            uint64_t respondingSessionId, bool granted,
+                                                            uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& username) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendUsernamePermissionResponse(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        username);
+}
+
+Result<void> SessionManager::sendHostnamePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                            uint64_t respondingSessionId, bool granted,
+                                                            uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& hostname) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendHostnamePermissionResponse(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        hostname);
+}
+
+Result<void> SessionManager::sendPermissionRevoked(const SessionHandle& handle, uint64_t portalSessionId,
+                                                   PermissionKey key) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendPermissionRevoked(portalSessionId, key);
+}
+
+Result<void> SessionManager::sendPermissionRequestCancelled(const SessionHandle& handle, uint64_t requestId,
+                                                            PermissionKey key) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendPermissionRequestCancelled(requestId, key);
+}
+
 }  // namespace EntropyEngine::Networking

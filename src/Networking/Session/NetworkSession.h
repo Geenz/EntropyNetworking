@@ -24,6 +24,7 @@
 
 #include "../Core/ComponentSchemaRegistry.h"
 #include "../Core/ErrorCodes.h"
+#include "../Core/PermissionTypes.h"
 #include "../Core/PropertyRegistry.h"
 #include "../Core/SchemaNackPolicy.h"
 #include "../Core/SchemaNackTracker.h"
@@ -393,6 +394,34 @@ public:
     using GetShaderCallback = std::function<void(const std::array<uint8_t, 32>& shaderAssetId, uint64_t requestId)>;
     using GetShaderResponseCallback = std::function<void(const GetShaderResponseData& response, uint64_t requestId)>;
 
+    // =========================================================================
+    // Per-Permission Response Callbacks
+    // =========================================================================
+
+    // Permission system callbacks
+    using PermissionRequestCallback =
+        std::function<void(uint64_t requestId, uint64_t requestingSessionId, const std::string& appId,
+                           PermissionKey key, const std::string& reason)>;
+
+    using HeadPosePermissionResponseCallback = std::function<void(uint64_t requestId, uint64_t respondingSessionId,
+                                                                  bool granted, uint64_t grantToken, bool isNewGrant)>;
+
+    using IdentityPermissionResponseCallback =
+        std::function<void(uint64_t requestId, uint64_t respondingSessionId, bool granted, uint64_t grantToken,
+                           bool isNewGrant, const std::string& identityHash)>;
+
+    using UsernamePermissionResponseCallback =
+        std::function<void(uint64_t requestId, uint64_t respondingSessionId, bool granted, uint64_t grantToken,
+                           bool isNewGrant, const std::string& username)>;
+
+    using HostnamePermissionResponseCallback =
+        std::function<void(uint64_t requestId, uint64_t respondingSessionId, bool granted, uint64_t grantToken,
+                           bool isNewGrant, const std::string& hostname)>;
+
+    using PermissionRevokedCallback = std::function<void(uint64_t portalSessionId, PermissionKey key)>;
+
+    using PermissionRequestCancelledCallback = std::function<void(uint64_t requestId, PermissionKey key)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
@@ -676,6 +705,29 @@ public:
     Result<void> sendGetShaderRequest(const std::array<uint8_t, 32>& shaderAssetId, uint64_t requestId = 0);
     Result<void> sendGetShaderResponse(const GetShaderResponseData& response, uint64_t requestId = 0);
 
+    // Permission system messages
+    Result<void> sendPermissionRequest(uint64_t requestId, uint64_t requestingSessionId, const std::string& appId,
+                                       PermissionKey key, const std::string& reason);
+
+    Result<void> sendHeadPosePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false);
+
+    Result<void> sendIdentityPermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& identityHash = "");
+
+    Result<void> sendUsernamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& username = "");
+
+    Result<void> sendHostnamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& hostname = "");
+
+    Result<void> sendPermissionRevoked(uint64_t portalSessionId, PermissionKey key);
+
+    Result<void> sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -761,6 +813,15 @@ public:
     // Shader callbacks
     void setGetShaderCallback(GetShaderCallback callback);
     void setGetShaderResponseCallback(GetShaderResponseCallback callback);
+
+    // Permission system callbacks
+    void setPermissionRequestCallback(PermissionRequestCallback callback);
+    void setHeadPosePermissionResponseCallback(HeadPosePermissionResponseCallback callback);
+    void setIdentityPermissionResponseCallback(IdentityPermissionResponseCallback callback);
+    void setUsernamePermissionResponseCallback(UsernamePermissionResponseCallback callback);
+    void setHostnamePermissionResponseCallback(HostnamePermissionResponseCallback callback);
+    void setPermissionRevokedCallback(PermissionRevokedCallback callback);
+    void setPermissionRequestCancelledCallback(PermissionRequestCancelledCallback callback);
 
     /**
      * @brief Clears all callbacks to prevent invocation during/after destruction
@@ -951,6 +1012,15 @@ private:
     // Shader callbacks
     GetShaderCallback _getShaderCallback;
     GetShaderResponseCallback _getShaderResponseCallback;
+
+    // Permission system callbacks
+    PermissionRequestCallback _permissionRequestCallback;
+    HeadPosePermissionResponseCallback _headPosePermissionResponseCallback;
+    IdentityPermissionResponseCallback _identityPermissionResponseCallback;
+    UsernamePermissionResponseCallback _usernamePermissionResponseCallback;
+    HostnamePermissionResponseCallback _hostnamePermissionResponseCallback;
+    PermissionRevokedCallback _permissionRevokedCallback;
+    PermissionRequestCancelledCallback _permissionRequestCancelledCallback;
 
     // Heartbeat tracking
     std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch

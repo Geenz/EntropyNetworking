@@ -869,6 +869,73 @@ struct MeshMaterialBindingUpdate {
 }
 
 # ============================================================================
+# Permission System
+# ============================================================================
+
+# Permission key — generic category + specific permission, both integer-indexed
+struct PermissionKey {
+    category @0 :UInt16;    # Category index (meaning defined by consumers)
+    permission @1 :UInt16;  # Permission index within category
+}
+
+struct PermissionRequest {
+    requestId @0 :UInt64;               # Correlation ID
+    requestingSessionId @1 :UInt64;     # App or canvas session
+    requestingAppId @2 :Text;           # Human-readable name ("Sculpt Tool")
+    key @3 :PermissionKey;              # What permission
+    reason @4 :Text;                    # "To show your avatar to other users"
+}
+
+# Per-permission response structs — each carries only its own fields
+
+struct HeadPosePermissionResponse {
+    requestId @0 :UInt64;
+    respondingSessionId @1 :UInt64;
+    granted @2 :Bool;
+    grantToken @3 :UInt64;              # Opaque per-viewer token (non-deterministic, privacy-safe)
+    isNewGrant @4 :Bool;
+}
+
+struct IdentityPermissionResponse {
+    requestId @0 :UInt64;
+    respondingSessionId @1 :UInt64;
+    granted @2 :Bool;
+    isNewGrant @3 :Bool;
+    identityHash @4 :Text;             # SHA-256 hex of salted "username@hostname"
+    grantToken @5 :UInt64;
+}
+
+struct UsernamePermissionResponse {
+    requestId @0 :UInt64;
+    respondingSessionId @1 :UInt64;
+    granted @2 :Bool;
+    isNewGrant @3 :Bool;
+    username @4 :Text;
+    grantToken @5 :UInt64;
+}
+
+struct HostnamePermissionResponse {
+    requestId @0 :UInt64;
+    respondingSessionId @1 :UInt64;
+    granted @2 :Bool;
+    isNewGrant @3 :Bool;
+    hostname @4 :Text;
+    grantToken @5 :UInt64;
+}
+
+# Sent by canvas to requesters when a portal disconnects (implicit revocation)
+struct PermissionRevoked {
+    portalSessionId @0 :UInt64;         # Portal that disconnected
+    key @1 :PermissionKey;              # Which permission is revoked
+}
+
+# Sent by canvas to portals when a requesting app disconnects (request cancelled)
+struct PermissionRequestCancelled {
+    requestId @0 :UInt64;               # Which request was cancelled
+    key @1 :PermissionKey;              # Which permission
+}
+
+# ============================================================================
 # Top-Level Message Envelope
 # ============================================================================
 
@@ -985,5 +1052,14 @@ struct Message {
         # Asset metadata
         assetMetadataRequest @80 :AssetMetadataRequest;
         assetMetadataResponse @81 :AssetMetadataResponse;
+
+        # Permission system
+        permissionRequest @82 :PermissionRequest;
+        headPosePermissionResponse @83 :HeadPosePermissionResponse;
+        permissionRevoked @84 :PermissionRevoked;
+        permissionRequestCancelled @85 :PermissionRequestCancelled;
+        identityPermissionResponse @86 :IdentityPermissionResponse;
+        usernamePermissionResponse @87 :UsernamePermissionResponse;
+        hostnamePermissionResponse @88 :HostnamePermissionResponse;
     }
 }

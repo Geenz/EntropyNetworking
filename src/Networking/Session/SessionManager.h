@@ -612,6 +612,25 @@ public:
     Result<void> setGetShaderResponseCallback(const SessionHandle& handle,
                                               NetworkSession::GetShaderResponseCallback callback);
 
+    // =========================================================================
+    // Permission System Callback Setters
+    // =========================================================================
+
+    Result<void> setPermissionRequestCallback(const SessionHandle& handle,
+                                              NetworkSession::PermissionRequestCallback callback);
+    Result<void> setHeadPosePermissionResponseCallback(const SessionHandle& handle,
+                                                       NetworkSession::HeadPosePermissionResponseCallback callback);
+    Result<void> setIdentityPermissionResponseCallback(const SessionHandle& handle,
+                                                       NetworkSession::IdentityPermissionResponseCallback callback);
+    Result<void> setUsernamePermissionResponseCallback(const SessionHandle& handle,
+                                                       NetworkSession::UsernamePermissionResponseCallback callback);
+    Result<void> setHostnamePermissionResponseCallback(const SessionHandle& handle,
+                                                       NetworkSession::HostnamePermissionResponseCallback callback);
+    Result<void> setPermissionRevokedCallback(const SessionHandle& handle,
+                                              NetworkSession::PermissionRevokedCallback callback);
+    Result<void> setPermissionRequestCancelledCallback(const SessionHandle& handle,
+                                                       NetworkSession::PermissionRequestCancelledCallback callback);
+
     // Asset send methods (for clients sending requests)
 
     /**
@@ -967,6 +986,33 @@ public:
      */
     Result<void> sendGetShaderResponse(const SessionHandle& handle,
                                        const NetworkSession::GetShaderResponseData& response, uint64_t requestId = 0);
+
+    // =========================================================================
+    // Permission System Send Methods
+    // =========================================================================
+
+    Result<void> sendPermissionRequest(const SessionHandle& handle, uint64_t requestId, uint64_t requestingSessionId,
+                                       const std::string& appId, PermissionKey key, const std::string& reason);
+
+    Result<void> sendHeadPosePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                uint64_t respondingSessionId, bool granted, uint64_t grantToken = 0,
+                                                bool isNewGrant = false);
+
+    Result<void> sendIdentityPermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                uint64_t respondingSessionId, bool granted, uint64_t grantToken = 0,
+                                                bool isNewGrant = false, const std::string& identityHash = "");
+
+    Result<void> sendUsernamePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                uint64_t respondingSessionId, bool granted, uint64_t grantToken = 0,
+                                                bool isNewGrant = false, const std::string& username = "");
+
+    Result<void> sendHostnamePermissionResponse(const SessionHandle& handle, uint64_t requestId,
+                                                uint64_t respondingSessionId, bool granted, uint64_t grantToken = 0,
+                                                bool isNewGrant = false, const std::string& hostname = "");
+
+    Result<void> sendPermissionRevoked(const SessionHandle& handle, uint64_t portalSessionId, PermissionKey key);
+
+    Result<void> sendPermissionRequestCancelled(const SessionHandle& handle, uint64_t requestId, PermissionKey key);
 
     /**
      * @brief Checks if connected (called by handle.isConnected())

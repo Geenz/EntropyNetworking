@@ -2425,6 +2425,197 @@ Result<void> NetworkSession::sendGetShaderResponse(const GetShaderResponseData& 
     }
 }
 
+//=============================================================================
+// Permission System Messages
+//=============================================================================
+
+Result<void> NetworkSession::sendPermissionRequest(uint64_t requestId, uint64_t requestingSessionId,
+                                                   const std::string& appId, PermissionKey key,
+                                                   const std::string& reason) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto request = message.initPermissionRequest();
+        request.setRequestId(requestId);
+        request.setRequestingSessionId(requestingSessionId);
+        request.setRequestingAppId(appId);
+        auto keyBuilder = request.initKey();
+        keyBuilder.setCategory(key.category);
+        keyBuilder.setPermission(key.permission);
+        request.setReason(reason);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendHeadPosePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                            bool granted, uint64_t grantToken, bool isNewGrant) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initHeadPosePermissionResponse();
+        response.setRequestId(requestId);
+        response.setRespondingSessionId(respondingSessionId);
+        response.setGranted(granted);
+        response.setGrantToken(grantToken);
+        response.setIsNewGrant(isNewGrant);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendIdentityPermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                            bool granted, uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& identityHash) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initIdentityPermissionResponse();
+        response.setRequestId(requestId);
+        response.setRespondingSessionId(respondingSessionId);
+        response.setGranted(granted);
+        response.setGrantToken(grantToken);
+        response.setIsNewGrant(isNewGrant);
+        response.setIdentityHash(identityHash);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUsernamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                            bool granted, uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& username) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initUsernamePermissionResponse();
+        response.setRequestId(requestId);
+        response.setRespondingSessionId(respondingSessionId);
+        response.setGranted(granted);
+        response.setGrantToken(grantToken);
+        response.setIsNewGrant(isNewGrant);
+        response.setUsername(username);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendHostnamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId,
+                                                            bool granted, uint64_t grantToken, bool isNewGrant,
+                                                            const std::string& hostname) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto response = message.initHostnamePermissionResponse();
+        response.setRequestId(requestId);
+        response.setRespondingSessionId(respondingSessionId);
+        response.setGranted(granted);
+        response.setGrantToken(grantToken);
+        response.setIsNewGrant(isNewGrant);
+        response.setHostname(hostname);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendPermissionRevoked(uint64_t portalSessionId, PermissionKey key) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto revoked = message.initPermissionRevoked();
+        revoked.setPortalSessionId(portalSessionId);
+        auto keyBuilder = revoked.initKey();
+        keyBuilder.setCategory(key.category);
+        keyBuilder.setPermission(key.permission);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto cancelled = message.initPermissionRequestCancelled();
+        cancelled.setRequestId(requestId);
+        auto keyBuilder = cancelled.initKey();
+        keyBuilder.setCategory(key.category);
+        keyBuilder.setPermission(key.permission);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
 std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
     uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
     return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
@@ -2961,6 +3152,62 @@ void NetworkSession::setGetShaderResponseCallback(GetShaderResponseCallback call
     _getShaderResponseCallback = std::move(callback);
 }
 
+void NetworkSession::setPermissionRequestCallback(PermissionRequestCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _permissionRequestCallback = std::move(callback);
+}
+
+void NetworkSession::setHeadPosePermissionResponseCallback(HeadPosePermissionResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _headPosePermissionResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setIdentityPermissionResponseCallback(IdentityPermissionResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _identityPermissionResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setUsernamePermissionResponseCallback(UsernamePermissionResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _usernamePermissionResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setHostnamePermissionResponseCallback(HostnamePermissionResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _hostnamePermissionResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setPermissionRevokedCallback(PermissionRevokedCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _permissionRevokedCallback = std::move(callback);
+}
+
+void NetworkSession::setPermissionRequestCancelledCallback(PermissionRequestCancelledCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _permissionRequestCancelledCallback = std::move(callback);
+}
+
 void NetworkSession::clearCallbacks() {
     // Mark as shutting down to prevent new callbacks
     _shuttingDown.store(true, std::memory_order_release);
@@ -3049,6 +3296,15 @@ void NetworkSession::clearCallbacks() {
     // Shader callbacks
     _getShaderCallback = nullptr;
     _getShaderResponseCallback = nullptr;
+
+    // Permission system callbacks
+    _permissionRequestCallback = nullptr;
+    _headPosePermissionResponseCallback = nullptr;
+    _identityPermissionResponseCallback = nullptr;
+    _usernamePermissionResponseCallback = nullptr;
+    _hostnamePermissionResponseCallback = nullptr;
+    _permissionRevokedCallback = nullptr;
+    _permissionRequestCancelledCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -4886,6 +5142,133 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _getShaderResponseCallback) {
                     _getShaderResponseCallback(data, requestId);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ==================================================================
+                // Permission System Messages
+                // ==================================================================
+
+            case Protocol::Message::PERMISSION_REQUEST:
+            {
+                auto request = message.getPermissionRequest();
+                uint64_t requestId = request.getRequestId();
+                uint64_t requestingSessionId = request.getRequestingSessionId();
+                std::string appId = request.getRequestingAppId().cStr();
+                auto keyReader = request.getKey();
+                PermissionKey key{keyReader.getCategory(), keyReader.getPermission()};
+                std::string reason = request.getReason().cStr();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _permissionRequestCallback) {
+                    _permissionRequestCallback(requestId, requestingSessionId, appId, key, reason);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::HEAD_POSE_PERMISSION_RESPONSE:
+            {
+                auto response = message.getHeadPosePermissionResponse();
+                uint64_t requestId = response.getRequestId();
+                uint64_t respondingSessionId = response.getRespondingSessionId();
+                bool granted = response.getGranted();
+                uint64_t grantToken = response.getGrantToken();
+                bool isNewGrant = response.getIsNewGrant();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _headPosePermissionResponseCallback) {
+                    _headPosePermissionResponseCallback(requestId, respondingSessionId, granted, grantToken,
+                                                        isNewGrant);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::IDENTITY_PERMISSION_RESPONSE:
+            {
+                auto response = message.getIdentityPermissionResponse();
+                uint64_t requestId = response.getRequestId();
+                uint64_t respondingSessionId = response.getRespondingSessionId();
+                bool granted = response.getGranted();
+                uint64_t grantToken = response.getGrantToken();
+                bool isNewGrant = response.getIsNewGrant();
+                std::string identityHash = response.getIdentityHash().cStr();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _identityPermissionResponseCallback) {
+                    _identityPermissionResponseCallback(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        identityHash);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::USERNAME_PERMISSION_RESPONSE:
+            {
+                auto response = message.getUsernamePermissionResponse();
+                uint64_t requestId = response.getRequestId();
+                uint64_t respondingSessionId = response.getRespondingSessionId();
+                bool granted = response.getGranted();
+                uint64_t grantToken = response.getGrantToken();
+                bool isNewGrant = response.getIsNewGrant();
+                std::string username = response.getUsername().cStr();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _usernamePermissionResponseCallback) {
+                    _usernamePermissionResponseCallback(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        username);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::HOSTNAME_PERMISSION_RESPONSE:
+            {
+                auto response = message.getHostnamePermissionResponse();
+                uint64_t requestId = response.getRequestId();
+                uint64_t respondingSessionId = response.getRespondingSessionId();
+                bool granted = response.getGranted();
+                uint64_t grantToken = response.getGrantToken();
+                bool isNewGrant = response.getIsNewGrant();
+                std::string hostname = response.getHostname().cStr();
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _hostnamePermissionResponseCallback) {
+                    _hostnamePermissionResponseCallback(requestId, respondingSessionId, granted, grantToken, isNewGrant,
+                                                        hostname);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::PERMISSION_REVOKED:
+            {
+                auto revoked = message.getPermissionRevoked();
+                uint64_t portalSessionId = revoked.getPortalSessionId();
+                auto keyReader = revoked.getKey();
+                PermissionKey key{keyReader.getCategory(), keyReader.getPermission()};
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _permissionRevokedCallback) {
+                    _permissionRevokedCallback(portalSessionId, key);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::PERMISSION_REQUEST_CANCELLED:
+            {
+                auto cancelled = message.getPermissionRequestCancelled();
+                uint64_t requestId = cancelled.getRequestId();
+                auto keyReader = cancelled.getKey();
+                PermissionKey key{keyReader.getCategory(), keyReader.getPermission()};
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _permissionRequestCancelledCallback) {
+                    _permissionRequestCancelledCallback(requestId, key);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
