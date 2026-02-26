@@ -10,6 +10,7 @@
 #include "XPCServer.h"
 
 #include <Logging/Logger.h>
+#include <TargetConditionals.h>
 
 #include <sstream>
 
@@ -120,6 +121,11 @@ Result<void> XPCServer::close() {
 }
 
 void XPCServer::setupListener() {
+#if TARGET_OS_IPHONE
+    // xpc_connection_create_mach_service is not available on iOS.
+    // iOS XPC services use NSXPCConnection or xpc_connection_create with a named endpoint.
+    ENTROPY_LOG_WARNING("XPC Mach service listener not available on iOS");
+#else
     // Create Mach service listener
     _listener = xpc_connection_create_mach_service(_serviceName.c_str(), _queue, XPC_CONNECTION_MACH_SERVICE_LISTENER);
 
@@ -146,6 +152,7 @@ void XPCServer::setupListener() {
 
     // Activate the listener
     xpc_connection_resume(_listener);
+#endif
 }
 
 void XPCServer::handleNewConnection(xpc_connection_t connection) {
@@ -153,12 +160,17 @@ void XPCServer::handleNewConnection(xpc_connection_t connection) {
 
     // If validator is set, obtain peer pid and validate
     if (_peerValidator) {
+#if TARGET_OS_IPHONE
+        // xpc_connection_get_pid is not available on iOS — skip PID validation
+        ENTROPY_LOG_DEBUG("XPC peer PID validation skipped (iOS)");
+#else
         pid_t pid = xpc_connection_get_pid(connection);
         if (!_peerValidator(pid)) {
             // Reject connection
             xpc_connection_cancel(connection);
             return;
         }
+#endif
     }
 
     // Retain the connection

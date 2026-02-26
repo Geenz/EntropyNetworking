@@ -395,51 +395,53 @@ struct PlatformOps
 /**
  * @brief Calculate available space in a ring buffer for writing
  *
- * Uses monotonic 64-bit counters that wrap via natural overflow. The actual ring
- * buffer position is computed as (counter % bufferSize) when accessing memory.
- * This eliminates wrap-around edge case logic in availability calculations.
+ * Standard ring buffer with wrap-around. Positions stay within [0, bufferSize).
+ * One byte is reserved to distinguish full from empty.
  *
- * @param writePos Current write position (monotonic counter)
- * @param readPos Current read position (monotonic counter)
+ * @param writePos Current write position (wraps at bufferSize)
+ * @param readPos Current read position (wraps at bufferSize)
  * @param bufferSize Total buffer size
  * @return Number of bytes available for writing
  */
 inline size_t ringBufferWriteAvailable(uint64_t writePos, uint64_t readPos, size_t bufferSize) {
-    // Monotonic counters: used bytes is simply the difference
-    // Reserve one byte to distinguish full from empty
-    size_t used = static_cast<size_t>(writePos - readPos);
-    return bufferSize - used - 1;
+    if (writePos >= readPos) {
+        // Write ahead of or equal to read: free space wraps around
+        return bufferSize - (writePos - readPos) - 1;
+    }
+    // Read ahead of write: free space is contiguous
+    return static_cast<size_t>(readPos - writePos) - 1;
 }
 
 /**
  * @brief Calculate available data in a ring buffer for reading
  *
- * Uses monotonic 64-bit counters. The difference between write and read positions
- * gives the number of unread bytes directly.
+ * Standard ring buffer with wrap-around. Returns number of unread bytes.
  *
- * @param writePos Current write position (monotonic counter)
- * @param readPos Current read position (monotonic counter)
- * @param bufferSize Total buffer size (unused, kept for API consistency)
+ * @param writePos Current write position (wraps at bufferSize)
+ * @param readPos Current read position (wraps at bufferSize)
+ * @param bufferSize Total buffer size
  * @return Number of bytes available for reading
  */
-inline size_t ringBufferReadAvailable(uint64_t writePos, uint64_t readPos, [[maybe_unused]] size_t bufferSize) {
-    // Monotonic counters: available bytes is simply the difference
-    return static_cast<size_t>(writePos - readPos);
+inline size_t ringBufferReadAvailable(uint64_t writePos, uint64_t readPos, size_t bufferSize) {
+    if (writePos >= readPos) {
+        return static_cast<size_t>(writePos - readPos);
+    }
+    // Write wrapped around past read
+    return static_cast<size_t>(bufferSize - readPos + writePos);
 }
 
 /**
- * @brief Advance a ring buffer position
+ * @brief Advance a ring buffer position with wrap-around
  *
- * Simply adds the amount to the monotonic counter. Actual memory access
- * should use (pos % bufferSize) to get the ring buffer index.
+ * Advances position by amount, wrapping at bufferSize.
  *
- * @param pos Current position (monotonic counter)
+ * @param pos Current position
  * @param amount Amount to advance
- * @param bufferSize Total buffer size (unused, kept for API consistency)
- * @return New position (monotonic counter)
+ * @param bufferSize Total buffer size (wrap boundary)
+ * @return New position, wrapped to [0, bufferSize)
  */
-inline uint64_t ringBufferAdvance(uint64_t pos, size_t amount, [[maybe_unused]] size_t bufferSize) {
-    return pos + amount;
+inline uint64_t ringBufferAdvance(uint64_t pos, size_t amount, size_t bufferSize) {
+    return (pos + amount) % bufferSize;
 }
 
 }  // namespace EntropyEngine::Networking::SharedMemory

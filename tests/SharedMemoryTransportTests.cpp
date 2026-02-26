@@ -191,34 +191,42 @@ TEST(SharedMemoryControlBlockTest, Initialize) {
 TEST(RingBufferUtilsTest, WriteAvailable) {
     const size_t bufferSize = 1024;
 
-    // Empty buffer
+    // Empty buffer: write == read
     EXPECT_EQ(ringBufferWriteAvailable(0, 0, bufferSize), bufferSize - 1);
 
-    // Partially filled
+    // Partially filled: write ahead of read
     EXPECT_EQ(ringBufferWriteAvailable(100, 0, bufferSize), bufferSize - 100 - 1);
 
-    // Wrapped around
-    EXPECT_EQ(ringBufferWriteAvailable(100, 200, bufferSize), 99);  // 200-100-1 wrapped
+    // Nearly full
+    EXPECT_EQ(ringBufferWriteAvailable(924, 0, bufferSize), 99u);
+
+    // Wrap-around: read ahead of write (contiguous free space)
+    EXPECT_EQ(ringBufferWriteAvailable(100, 200, bufferSize), 99u);
 }
 
 TEST(RingBufferUtilsTest, ReadAvailable) {
     const size_t bufferSize = 1024;
 
-    // Empty buffer
+    // Empty buffer: write == read
     EXPECT_EQ(ringBufferReadAvailable(0, 0, bufferSize), 0u);
 
-    // Some data
+    // Some data: write ahead of read
     EXPECT_EQ(ringBufferReadAvailable(100, 0, bufferSize), 100u);
 
-    // Wrapped around
-    EXPECT_EQ(ringBufferReadAvailable(100, 900, bufferSize), 1024 - 900 + 100);
+    // Wrap-around: write wrapped past read
+    EXPECT_EQ(ringBufferReadAvailable(100, 900, bufferSize), 224u);
 }
 
 TEST(RingBufferUtilsTest, Advance) {
     const size_t bufferSize = 1024;
 
+    // Simple advance within buffer
     EXPECT_EQ(ringBufferAdvance(0, 100, bufferSize), 100u);
-    EXPECT_EQ(ringBufferAdvance(1000, 100, bufferSize), 76u);  // Wrap around
+
+    // Wrap-around past end
+    EXPECT_EQ(ringBufferAdvance(1000, 100, bufferSize), 76u);
+
+    // Exact boundary wrap
     EXPECT_EQ(ringBufferAdvance(1023, 1, bufferSize), 0u);
 }
 

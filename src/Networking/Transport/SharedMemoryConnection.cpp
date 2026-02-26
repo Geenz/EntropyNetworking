@@ -430,14 +430,14 @@ Result<void> SharedMemoryConnection::writeToRingBuffer(const std::vector<uint8_t
     // Write length prefix
     uint32_t length = static_cast<uint32_t>(data.size());
     for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-        _sendRing[writePos % ringSize] = reinterpret_cast<uint8_t*>(&length)[i];
-        writePos++;
+        _sendRing[writePos] = reinterpret_cast<uint8_t*>(&length)[i];
+        writePos = ringBufferAdvance(writePos, 1, ringSize);
     }
 
     // Write payload
     for (size_t i = 0; i < data.size(); ++i) {
-        _sendRing[writePos % ringSize] = data[i];
-        writePos++;
+        _sendRing[writePos] = data[i];
+        writePos = ringBufferAdvance(writePos, 1, ringSize);
     }
 
     // Update write position (release ensures writes are visible)
@@ -494,8 +494,8 @@ bool SharedMemoryConnection::readFromRingBuffer(std::vector<uint8_t>& data, int 
     uint64_t readPos = _recvReadPos->load(std::memory_order_relaxed);
     uint32_t length = 0;
     for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-        reinterpret_cast<uint8_t*>(&length)[i] = _recvRing[readPos % ringSize];
-        readPos++;
+        reinterpret_cast<uint8_t*>(&length)[i] = _recvRing[readPos];
+        readPos = ringBufferAdvance(readPos, 1, ringSize);
     }
 
     if (length == 0 || length > _maxMessageSize) {
@@ -524,8 +524,8 @@ bool SharedMemoryConnection::readFromRingBuffer(std::vector<uint8_t>& data, int 
     // Read payload
     data.resize(length);
     for (size_t i = 0; i < length; ++i) {
-        data[i] = _recvRing[readPos % ringSize];
-        readPos++;
+        data[i] = _recvRing[readPos];
+        readPos = ringBufferAdvance(readPos, 1, ringSize);
     }
 
     // Update read position (release ensures reads are complete)

@@ -10,6 +10,7 @@
 #include "XPCConnection.h"
 
 #include <Logging/Logger.h>
+#include <TargetConditionals.h>
 
 #include <chrono>
 #include <sstream>
@@ -377,7 +378,9 @@ void XPCConnection::handleError(xpc_object_t error) {
     // Gather diagnostics
     pid_t pid = 0;
     if (_connection) {
+#if !TARGET_OS_IPHONE
         pid = xpc_connection_get_pid(_connection);
+#endif
     }
     std::string desc = xpcDescribe(error);
 

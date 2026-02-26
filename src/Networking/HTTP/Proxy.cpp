@@ -15,7 +15,10 @@
 #if defined(__APPLE__)
 #include <CFNetwork/CFNetwork.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <TargetConditionals.h>
+#if !TARGET_OS_IPHONE
 #include <SystemConfiguration/SystemConfiguration.h>
+#endif
 #endif
 
 namespace EntropyEngine::Networking::HTTP

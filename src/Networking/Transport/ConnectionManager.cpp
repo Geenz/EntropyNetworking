@@ -20,7 +20,9 @@
 #if defined(_WIN32)
 #include "NamedPipeConnection.h"
 #elif defined(__unix__) || defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+#if !TARGET_OS_IPHONE
 #include "UnixSocketConnection.h"
+#endif
 #endif
 
 #include <format>
@@ -186,7 +188,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 
     switch (config.backend) {
         case ConnectionBackend::UnixSocket:
-#if defined(__unix__) || defined(__APPLE__)
+#if (defined(__unix__) || defined(__APPLE__)) && !TARGET_OS_IPHONE
             return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
 #else
             throw std::runtime_error("Unix sockets not supported on this platform");

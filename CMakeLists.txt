@@ -56,7 +56,40 @@ endif()
 if(NOT TARGET EntropyCore AND NOT TARGET EntropyCore::Core)
     find_package(EntropyCore CONFIG REQUIRED)
 endif()
+
+# Cross-compilation: set host capnp tools BEFORE find_package(CapnProto)
+# CapnProtoConfig.cmake sets CAPNP_EXECUTABLE via generator expressions that
+# reference tool targets which don't exist in cross-compiled (CAPNP_LITE) builds.
+if(CMAKE_CROSSCOMPILING)
+    # Detect host triplet for locating host tools
+    if(VCPKG_HOST_TRIPLET)
+        set(_CAPNP_HOST_TRIPLET "${VCPKG_HOST_TRIPLET}")
+    elseif(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(_CAPNP_HOST_TRIPLET "arm64-osx")
+    else()
+        set(_CAPNP_HOST_TRIPLET "x64-osx")
+    endif()
+
+    # vcpkg installs host tools under the build directory's vcpkg_installed/<host-triplet>
+    set(_CAPNP_HOST_TOOLS "${CMAKE_BINARY_DIR}/vcpkg_installed/${_CAPNP_HOST_TRIPLET}/tools/capnproto")
+
+    if(EXISTS "${_CAPNP_HOST_TOOLS}/capnp")
+        set(CAPNP_EXECUTABLE "${_CAPNP_HOST_TOOLS}/capnp" CACHE FILEPATH "Location of capnp executable" FORCE)
+        set(CAPNPC_CXX_EXECUTABLE "${_CAPNP_HOST_TOOLS}/capnpc-c++" CACHE FILEPATH "Location of capnpc-c++ executable" FORCE)
+        message(STATUS "Cross-compile: using host capnp tools from ${_CAPNP_HOST_TOOLS}")
+    else()
+        message(FATAL_ERROR "Cross-compilation requires host capnp tools at ${_CAPNP_HOST_TOOLS}. "
+            "Add capnproto as a host dependency in vcpkg.json.")
+    endif()
+endif()
+
 find_package(CapnProto CONFIG REQUIRED)
+
+# Ensure CAPNP_INCLUDE_DIRECTORY is set for cross-compilation
+if(CMAKE_CROSSCOMPILING AND NOT CAPNP_INCLUDE_DIRECTORY)
+    set(CAPNP_INCLUDE_DIRECTORY "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+endif()
+
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(zstd CONFIG REQUIRED)
@@ -107,31 +140,33 @@ set(NETWORKING_SOURCES
     ${CAPNP_SRCS}
 )
 
-# Unix-only local IPC (Unix domain sockets)
-if(UNIX OR APPLE)
+# Unix-only local IPC (Unix domain sockets) — NOT available on iOS (sandbox)
+if((UNIX OR APPLE) AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     list(APPEND NETWORKING_SOURCES
         src/Networking/Transport/UnixSocketConnection.cpp
         src/Networking/Transport/UnixSocketServer.cpp
     )
 endif()
 
-# Cross-platform shared memory transport
-list(APPEND NETWORKING_SOURCES
-    src/Networking/Transport/SharedMemoryConnection.cpp
-    src/Networking/Transport/SharedMemoryServer.cpp
-)
-
-# Platform-specific shared memory implementations
-if(UNIX OR APPLE)
+# Shared memory transport — NOT available on iOS (shm_open rejected by sandbox)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     list(APPEND NETWORKING_SOURCES
-        src/Networking/Transport/SharedMemoryPlatformUnix.cpp
+        src/Networking/Transport/SharedMemoryConnection.cpp
+        src/Networking/Transport/SharedMemoryServer.cpp
     )
-endif()
 
-if(WIN32)
-    list(APPEND NETWORKING_SOURCES
-        src/Networking/Transport/SharedMemoryPlatformWin32.cpp
-    )
+    # Platform-specific shared memory implementations
+    if(UNIX OR APPLE)
+        list(APPEND NETWORKING_SOURCES
+            src/Networking/Transport/SharedMemoryPlatformUnix.cpp
+        )
+    endif()
+
+    if(WIN32)
+        list(APPEND NETWORKING_SOURCES
+            src/Networking/Transport/SharedMemoryPlatformWin32.cpp
+        )
+    endif()
 endif()
 
 # Windows local IPC (Named Pipes)
@@ -192,13 +227,18 @@ if (WIN32)
     target_link_libraries(EntropyNetworking PRIVATE winhttp)
 endif()
 
-# Link macOS frameworks for CFNetwork-based proxy resolution
+# Link Apple frameworks for proxy resolution
 if(APPLE)
     target_link_libraries(EntropyNetworking PRIVATE
         "-framework CoreFoundation"
-        "-framework SystemConfiguration"
         "-framework CFNetwork"
     )
+    # SystemConfiguration is macOS-only (SCDynamicStoreCopyProxies unavailable on iOS)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        target_link_libraries(EntropyNetworking PRIVATE
+            "-framework SystemConfiguration"
+        )
+    endif()
 endif()
 
 # Platform and compiler-specific settings
@@ -216,10 +256,12 @@ else()
         target_compile_options(EntropyNetworking PUBLIC -fexperimental-library)
     endif()
     if(APPLE)
-        # macOS specific
-        target_compile_definitions(EntropyNetworking PUBLIC EntropyDarwin)
+        if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+            target_compile_definitions(EntropyNetworking PUBLIC EntropyiOS EntropyDarwin)
+        else()
+            target_compile_definitions(EntropyNetworking PUBLIC EntropyDarwin)
+        endif()
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        # Linux specific
         target_compile_definitions(EntropyNetworking PUBLIC EntropyLinux)
     endif()
 endif()
