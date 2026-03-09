@@ -390,6 +390,10 @@ public:
      * @brief Sets callback for AssetFetchResponse messages
      */
     Result<void> setAssetFetchResponseCallback(const SessionHandle& handle, AssetFetchResponseCallback callback);
+    Result<void> setAssetFetchBeginCallback(const SessionHandle& handle,
+                                            NetworkSession::AssetFetchBeginCallback callback);
+    Result<void> setAssetFetchChunkCallback(const SessionHandle& handle,
+                                            NetworkSession::AssetFetchChunkCallback callback);
 
     // Asset metadata callback setters
 
@@ -794,6 +798,10 @@ public:
      */
     Result<void> sendAssetFetchResponse(const SessionHandle& handle, bool found, const std::vector<uint8_t>& data,
                                         const std::string& errorMessage, uint64_t requestId = 0);
+    Result<void> sendAssetFetchBegin(const SessionHandle& handle, uint64_t requestId, uint64_t totalSize,
+                                     uint32_t chunkCount, uint8_t contentType);
+    Result<void> sendAssetFetchChunk(const SessionHandle& handle, uint64_t requestId, uint32_t sequence,
+                                     const std::vector<uint8_t>& data);
 
     /**
      * @brief Sends AssetMetadataRequest message

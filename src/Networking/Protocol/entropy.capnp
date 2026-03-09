@@ -583,6 +583,25 @@ struct AssetUploadCancelResponse {
 }
 
 # ============================================================================
+# Chunked Asset Download (for large assets over WebRTC)
+# ============================================================================
+
+# Initiates a chunked download - sent before the first chunk
+struct AssetFetchBegin {
+    requestId @0 :UInt64;       # Correlates with original AssetFetchRequest
+    totalSize @1 :UInt64;       # Total payload bytes for pre-allocation
+    chunkCount @2 :UInt32;      # Expected number of ASSET_FETCH_CHUNK messages
+    contentType @3 :UInt8;      # ContentType enum (informational)
+}
+
+# A single chunk of asset data
+struct AssetFetchChunk {
+    requestId @0 :UInt64;       # Same requestId as AssetFetchBegin
+    sequence @1 :UInt32;        # 0-indexed chunk sequence number
+    data @2 :Data;              # Chunk payload (up to 128 KiB)
+}
+
+# ============================================================================
 # Scene Management
 # ============================================================================
 
@@ -1061,5 +1080,9 @@ struct Message {
         identityPermissionResponse @86 :IdentityPermissionResponse;
         usernamePermissionResponse @87 :UsernamePermissionResponse;
         hostnamePermissionResponse @88 :HostnamePermissionResponse;
+
+        # Chunked asset download
+        assetFetchBegin @89 :AssetFetchBegin;
+        assetFetchChunk @90 :AssetFetchChunk;
     }
 }

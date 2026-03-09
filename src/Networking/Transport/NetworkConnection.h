@@ -20,6 +20,7 @@
 #include <EntropyCore.h>
 
 #include <atomic>
+#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -376,7 +377,13 @@ protected:
         }
 
         if (cb) {
+            ENTROPY_LOG_DEBUG(
+                std::format("onChannelMessageReceived: Dispatching '{}' ({} bytes) to callback", channel, data.size()));
             cb(data);
+        } else {
+            ENTROPY_LOG_WARNING(
+                std::format("onChannelMessageReceived: No callback registered for channel '{}' ({} bytes dropped)",
+                            channel, data.size()));
         }
     }
 

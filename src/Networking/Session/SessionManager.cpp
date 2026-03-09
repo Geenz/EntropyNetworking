@@ -141,6 +141,15 @@ SessionHandle SessionManager::createSession(ConnectionHandle connection, Propert
         _connectionManager->setStateCallback(
             connection, [session](ConnectionState state) { session->onConnectionStateChanged(state); });
 
+        // Register named channel callbacks directly on the underlying connection.
+        // ConnectionManager only fans out the default message callback; named channels
+        // (e.g. asset-download, asset-upload) are dispatched by the backend's
+        // onChannelMessageReceived → _channelCallbacks map, bypassing ConnectionManager.
+        // Without this, messages sent on named data channels are silently dropped.
+        auto channelHandler = [session](const std::vector<uint8_t>& data) { session->onMessageReceived(data); };
+        connPtr->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, channelHandler);
+        connPtr->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_UPLOAD, channelHandler);
+
         return SessionHandle(this, index, generation);
     } catch (const std::exception& e) {
         // Failed to create session - return slot to free list
@@ -166,6 +175,13 @@ Result<void> SessionManager::destroySession(const SessionHandle& handle) {
     if (slot.connection.valid()) {
         _connectionManager->setMessageCallback(slot.connection, nullptr);
         _connectionManager->setStateCallback(slot.connection, nullptr);
+
+        // Clear named channel callbacks set directly on the connection
+        NetworkConnection* connPtr = _connectionManager->getConnectionPointer(slot.connection);
+        if (connPtr) {
+            connPtr->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, nullptr);
+            connPtr->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_UPLOAD, nullptr);
+        }
     }
 
     // Return slot to free list (increments generation, clears session)
@@ -679,6 +695,44 @@ Result<void> SessionManager::setAssetFetchResponseCallback(const SessionHandle& 
                                                                            uint64_t requestId) {
         if (cb) cb(requestId, found, data, errorMessage);
     });
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetFetchBeginCallback(const SessionHandle& handle,
+                                                        NetworkSession::AssetFetchBeginCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetFetchBeginCallback(std::move(callback));
+    return Result<void>::ok();
+}
+
+Result<void> SessionManager::setAssetFetchChunkCallback(const SessionHandle& handle,
+                                                        NetworkSession::AssetFetchChunkCallback callback) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    slot.session->setAssetFetchChunkCallback(std::move(callback));
     return Result<void>::ok();
 }
 
@@ -1399,6 +1453,42 @@ Result<void> SessionManager::sendAssetFetchResponse(const SessionHandle& handle,
     }
 
     return slot.session->sendAssetFetchResponse(found, data, errorMessage, requestId);
+}
+
+Result<void> SessionManager::sendAssetFetchBegin(const SessionHandle& handle, uint64_t requestId, uint64_t totalSize,
+                                                 uint32_t chunkCount, uint8_t contentType) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetFetchBegin(requestId, totalSize, chunkCount, contentType);
+}
+
+Result<void> SessionManager::sendAssetFetchChunk(const SessionHandle& handle, uint64_t requestId, uint32_t sequence,
+                                                 const std::vector<uint8_t>& data) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendAssetFetchChunk(requestId, sequence, data);
 }
 
 Result<void> SessionManager::performHandshake(const SessionHandle& handle, const std::string& clientType,

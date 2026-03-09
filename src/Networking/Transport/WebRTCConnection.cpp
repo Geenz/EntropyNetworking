@@ -367,30 +367,40 @@ void WebRTCConnection::onDataChannelCallback(int, int dc, void* user) {
     if (!guard.isValid()) return;
     auto* self = guard.getConnection();
 
-    char label[256];
-    if (rtcGetDataChannelLabel(dc, label, sizeof(label)) < 0) {
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(dc, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         return;
     }
+    std::string labelStr(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
-    ENTROPY_LOG_INFO(std::string("Incoming data channel negotiated: ") + label);
+    ENTROPY_LOG_INFO(std::format("Incoming data channel negotiated: '{}'", labelStr));
 
     std::lock_guard<std::mutex> lock(self->_mutex);
-    std::string_view labelView(label);
 
     // Accept remote data channels only if different from our local ones
     // This callback fires when remote peer's channels are negotiated to us
     // Note: During reconnection, old channels will close naturally via onClosedCallback
-    if (labelView == self->_dataChannelLabel) {
+    if (labelStr == self->_dataChannelLabel) {
         if (self->_dataChannelId != dc) {
             ENTROPY_LOG_DEBUG(
                 std::format("Switching _dataChannelId from {} to REMOTE channel {}", self->_dataChannelId, dc));
             self->_dataChannelId = dc;
             self->setupDataChannelCallbacks(dc, true);
         }
-    } else if (labelView == self->_unreliableChannelLabel) {
+    } else if (labelStr == self->_unreliableChannelLabel) {
         if (self->_unreliableDataChannelId != dc) {
             self->_unreliableDataChannelId = dc;
             self->setupDataChannelCallbacks(dc, false);
+        }
+    } else {
+        // Named channel from remote peer (e.g. asset-upload, asset-download).
+        // Accept it and register callbacks so messages are routed properly.
+        auto it = self->_namedChannels.find(labelStr);
+        if (it == self->_namedChannels.end() || it->second.id != dc) {
+            ENTROPY_LOG_INFO(std::format("Accepting remote named channel '{}' (id={})", labelStr, dc));
+            self->_namedChannels[labelStr] = NamedChannel{dc, false};
+            self->setupNamedChannelCallbacks(dc, labelStr);
         }
     }
 }
@@ -400,14 +410,15 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
     if (!guard.isValid()) return;
     auto* self = guard.getConnection();
 
-    char label[256];
-    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(id, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         return;
     }
+    std::string label(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
-    ENTROPY_LOG_INFO(std::string("Data channel opened: ") + label + ", id=" + std::to_string(id));
+    ENTROPY_LOG_INFO(std::format("Data channel opened: '{}', id={}", label, id));
 
-    std::string_view labelView(label);
     std::optional<ConnectionState> pending;
     bool shouldOpenAssetChannels = false;
 
@@ -422,7 +433,7 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
         }
 
         // Only transition to Connected for reliable channel
-        if (labelView != self->_dataChannelLabel) return;
+        if (label != self->_dataChannelLabel) return;
 
         // Verify this is our current reliable channel (not a stale/replaced one)
         if (id != self->_dataChannelId) {
@@ -440,8 +451,10 @@ void WebRTCConnection::onOpenCallback(int id, void* user) {
                 ENTROPY_LOG_INFO(std::string("Connection established (") +
                                  (wasFirstConnection ? "first" : "reconnected") + ")");
 
-                // First connection - open asset channels for bulk data isolation
-                shouldOpenAssetChannels = wasFirstConnection;
+                // First connection - only the polite peer (client) opens asset channels.
+                // The impolite peer (server) receives them via onDataChannelCallback.
+                // Both sides opening creates duplicate channels with conflicting IDs.
+                shouldOpenAssetChannels = wasFirstConnection && self->_polite;
             }
 
             auto now = std::chrono::system_clock::now();
@@ -469,14 +482,15 @@ void WebRTCConnection::onClosedCallback(int id, void* user) {
     if (!guard.isValid()) return;
     auto* self = guard.getConnection();
 
-    char label[256];
-    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(id, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         return;
     }
+    std::string label(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
-    ENTROPY_LOG_INFO(std::string("Data channel closed: ") + label + ", id=" + std::to_string(id));
+    ENTROPY_LOG_INFO(std::format("Data channel closed: '{}', id={}", label, id));
 
-    std::string_view labelView(label);
     std::optional<ConnectionState> pending;
 
     {
@@ -490,7 +504,7 @@ void WebRTCConnection::onClosedCallback(int id, void* user) {
         }
 
         // Only transition to Disconnected for reliable channel
-        if (labelView != self->_dataChannelLabel) return;
+        if (label != self->_dataChannelLabel) return;
 
         if (self->_state != ConnectionState::Disconnected && self->_state != ConnectionState::Failed) {
             self->_state = ConnectionState::Disconnected;
@@ -1077,12 +1091,18 @@ void WebRTCConnection::onNamedChannelMessageCallback(int id, const char* message
 
     if (size <= 0) return;
 
-    // Get channel label to identify which channel this is
-    char label[256];
-    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+    // Get channel label to identify which channel this is.
+    // rtcGetDataChannelLabel returns length INCLUDING null terminator, or negative on error.
+    // Use the returned length to construct the string — do NOT rely on stack buffer
+    // null-termination, as stack garbage after the written region can confuse std::string.
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(id, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         ENTROPY_LOG_ERROR("Failed to get channel label for message callback");
         return;
     }
+    // len includes null terminator; clamp to valid string length
+    std::string channelLabel(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
     std::vector<uint8_t> data(reinterpret_cast<const uint8_t*>(message),
                               reinterpret_cast<const uint8_t*>(message) + size);
@@ -1097,7 +1117,8 @@ void WebRTCConnection::onNamedChannelMessageCallback(int id, const char* message
 
     // Route to channel-specific callback in base class
     if (!self->isShuttingDown()) {
-        self->onChannelMessageReceived(std::string(label), data);
+        ENTROPY_LOG_DEBUG(std::format("Named channel '{}' received {} bytes (id={})", channelLabel, size, id));
+        self->onChannelMessageReceived(channelLabel, data);
     }
 }
 
@@ -1106,12 +1127,14 @@ void WebRTCConnection::onNamedChannelOpenCallback(int id, void* user) {
     if (!guard.isValid()) return;
     auto* self = guard.getConnection();
 
-    char label[256];
-    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(id, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         return;
     }
+    std::string label(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
-    ENTROPY_LOG_INFO(std::format("Named data channel opened: {}, id={}", label, id));
+    ENTROPY_LOG_INFO(std::format("Named data channel opened: '{}', id={}", label, id));
 
     std::lock_guard<std::mutex> lock(self->_mutex);
     auto it = self->_namedChannels.find(label);
@@ -1125,12 +1148,14 @@ void WebRTCConnection::onNamedChannelClosedCallback(int id, void* user) {
     if (!guard.isValid()) return;
     auto* self = guard.getConnection();
 
-    char label[256];
-    if (rtcGetDataChannelLabel(id, label, sizeof(label)) < 0) {
+    char labelBuf[256] = {};
+    int len = rtcGetDataChannelLabel(id, labelBuf, sizeof(labelBuf));
+    if (len < 0) {
         return;
     }
+    std::string label(labelBuf, len > 1 ? static_cast<size_t>(len - 1) : 0);
 
-    ENTROPY_LOG_INFO(std::format("Named data channel closed: {}, id={}", label, id));
+    ENTROPY_LOG_INFO(std::format("Named data channel closed: '{}', id={}", label, id));
 
     std::lock_guard<std::mutex> lock(self->_mutex);
     auto it = self->_namedChannels.find(label);
@@ -1201,6 +1226,8 @@ Result<void> WebRTCConnection::sendOnChannel(const std::string& channel, const s
         return send(data);
     }
 
+    ENTROPY_LOG_DEBUG(
+        std::format("sendOnChannel('{}', {} bytes) → rtcSendMessage(id={}, open={})", channel, data.size(), id, open));
     int result = rtcSendMessage(id, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()));
     if (result < 0) {
         ENTROPY_LOG_ERROR(std::format("rtcSendMessage on channel '{}' failed with code {}", channel, result));

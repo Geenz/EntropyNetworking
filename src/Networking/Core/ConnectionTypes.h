@@ -30,6 +30,8 @@ static constexpr size_t DEFAULT_MAX_MESSAGE_SIZE = 16ull * 1024ull * 1024ull;   
 static constexpr size_t DEFAULT_XPC_MAX_MESSAGE_SIZE = 64ull * 1024ull * 1024ull;      // 64 MiB
 static constexpr int DEFAULT_WEBRTC_MAX_MESSAGE_SIZE = 256 * 1024;                     // 256 KiB
 static constexpr size_t DEFAULT_SHARED_MEMORY_REGION_SIZE = 4ull * 1024ull * 1024ull;  // 4 MiB
+static constexpr size_t CHUNKED_DOWNLOAD_THRESHOLD = 192ull * 1024ull;                 // 192 KiB
+static constexpr size_t CHUNKED_DOWNLOAD_CHUNK_SIZE = 128ull * 1024ull;                // 128 KiB
 
 /**
  * @brief High-level connection type abstraction

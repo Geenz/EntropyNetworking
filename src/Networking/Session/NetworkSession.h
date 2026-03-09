@@ -208,6 +208,11 @@ public:
     using AssetFetchResponseCallback = std::function<void(bool found, const std::vector<uint8_t>& data,
                                                           const std::string& errorMessage, uint64_t requestId)>;
 
+    // Chunked download callbacks
+    using AssetFetchBeginCallback = std::function<void(uint64_t requestId, uint64_t totalSize, uint32_t chunkCount)>;
+    using AssetFetchChunkCallback =
+        std::function<void(uint64_t requestId, uint32_t sequence, const std::vector<uint8_t>& data)>;
+
     // Asset metadata callbacks
     using AssetMetadataCallback = std::function<void(const std::array<uint8_t, 32>& assetId, uint64_t requestId)>;
     using AssetMetadataResponseCallback =
@@ -647,6 +652,10 @@ public:
     Result<void> sendAssetFetchResponse(bool found, const std::vector<uint8_t>& data, const std::string& errorMessage,
                                         uint64_t requestId = 0);
 
+    // Chunked download send methods
+    Result<void> sendAssetFetchBegin(uint64_t requestId, uint64_t totalSize, uint32_t chunkCount, uint8_t contentType);
+    Result<void> sendAssetFetchChunk(uint64_t requestId, uint32_t sequence, const std::vector<uint8_t>& data);
+
     // Chunked upload send methods
     Result<void> sendAssetUploadBegin(const AssetUploadBeginData& data);
     Result<void> sendAssetUploadBeginResponse(const AssetUploadBeginResponseData& data);
@@ -764,6 +773,8 @@ public:
     void setAssetUploadResponseCallback(AssetUploadResponseCallback callback);
     void setAssetFetchCallback(AssetFetchCallback callback);
     void setAssetFetchResponseCallback(AssetFetchResponseCallback callback);
+    void setAssetFetchBeginCallback(AssetFetchBeginCallback callback);
+    void setAssetFetchChunkCallback(AssetFetchChunkCallback callback);
 
     // Asset metadata callbacks
     void setAssetMetadataCallback(AssetMetadataCallback callback);
@@ -967,6 +978,8 @@ private:
     AssetUploadResponseCallback _assetUploadResponseCallback;
     AssetFetchCallback _assetFetchCallback;
     AssetFetchResponseCallback _assetFetchResponseCallback;
+    AssetFetchBeginCallback _assetFetchBeginCallback;
+    AssetFetchChunkCallback _assetFetchChunkCallback;
 
     // Chunked upload callbacks
     AssetUploadBeginCallback _assetUploadBeginCallback;

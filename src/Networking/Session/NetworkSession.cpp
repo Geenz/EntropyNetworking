@@ -63,6 +63,8 @@ NetworkSession::~NetworkSession() {
     if (_connection) {
         _connection->setMessageCallback(nullptr);
         _connection->setStateCallback(nullptr);
+        _connection->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, nullptr);
+        _connection->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_UPLOAD, nullptr);
 
         // Wait for active callbacks to complete
         while (_activeCallbacks.load(std::memory_order_acquire) > 0) {
@@ -117,6 +119,13 @@ void NetworkSession::setupCallbacks() {
     _connection->setMessageCallback([this](const std::vector<uint8_t>& data) { this->onMessageReceived(data); });
 
     _connection->setStateCallback([this](ConnectionState state) { this->onConnectionStateChanged(state); });
+
+    // Register callbacks for named data channels (WebRTC bulk transfer channels).
+    // These channels carry the same Cap'n Proto protocol messages as the default channel,
+    // just isolated for bandwidth management. Route them to the same message handler.
+    auto channelHandler = [this](const std::vector<uint8_t>& data) { this->onMessageReceived(data); };
+    _connection->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, channelHandler);
+    _connection->setChannelMessageCallback(NetworkConnection::CHANNEL_ASSET_UPLOAD, channelHandler);
 }
 
 bool NetworkSession::isConnected() const {
@@ -1355,6 +1364,61 @@ Result<void> NetworkSession::sendAssetFetchResponse(bool found, const std::vecto
 
         // Route bulk asset data to dedicated download channel
         // Falls back to default channel if multi-channel not supported
+        return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+// ============================================================================
+// Chunked Download Send Methods
+// ============================================================================
+
+Result<void> NetworkSession::sendAssetFetchBegin(uint64_t requestId, uint64_t totalSize, uint32_t chunkCount,
+                                                 uint8_t contentType) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto begin = message.initAssetFetchBegin();
+        begin.setRequestId(requestId);
+        begin.setTotalSize(totalSize);
+        begin.setChunkCount(chunkCount);
+        begin.setContentType(contentType);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
+        return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendAssetFetchChunk(uint64_t requestId, uint32_t sequence,
+                                                 const std::vector<uint8_t>& data) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto chunk = message.initAssetFetchChunk();
+        chunk.setRequestId(requestId);
+        chunk.setSequence(sequence);
+        chunk.setData(kj::arrayPtr(data.data(), data.size()));
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+
         return _connection->sendOnChannel(NetworkConnection::CHANNEL_ASSET_DOWNLOAD, serialized.value);
     } catch (const std::exception& e) {
         return Result<void>::err(NetworkError::SerializationFailed, e.what());
@@ -2869,6 +2933,22 @@ void NetworkSession::setAssetFetchResponseCallback(AssetFetchResponseCallback ca
     _assetFetchResponseCallback = std::move(callback);
 }
 
+void NetworkSession::setAssetFetchBeginCallback(AssetFetchBeginCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetFetchBeginCallback = std::move(callback);
+}
+
+void NetworkSession::setAssetFetchChunkCallback(AssetFetchChunkCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _assetFetchChunkCallback = std::move(callback);
+}
+
 void NetworkSession::setAssetUploadBeginCallback(AssetUploadBeginCallback callback) {
     if (_shuttingDown.load(std::memory_order_acquire)) {
         return;
@@ -3466,6 +3546,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         // Deserialize the message
         auto deserialized = deserialize(data);
         if (deserialized.failed()) {
+            ENTROPY_LOG_WARNING(std::format("handleReceivedMessage: Deserialization failed ({} bytes): {}", data.size(),
+                                            deserialized.errorMessage));
             _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
             if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                 _errorCallback(deserialized.error, deserialized.errorMessage);
@@ -4282,10 +4364,57 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 std::vector<uint8_t> data(dataReader.begin(), dataReader.end());
                 uint64_t requestId = resp.getRequestId();
 
+                ENTROPY_LOG_DEBUG(std::format(
+                    "handleReceivedMessage: ASSET_FETCH_RESPONSE requestId={} found={} dataSize={} callbackSet={}",
+                    requestId, resp.getFound(), data.size(), _assetFetchResponseCallback != nullptr));
+
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _assetFetchResponseCallback) {
                     _assetFetchResponseCallback(resp.getFound(), data, std::string(resp.getErrorMessage().cStr()),
                                                 requestId);
+                } else {
+                    ENTROPY_LOG_WARNING(std::format(
+                        "handleReceivedMessage: ASSET_FETCH_RESPONSE dropped (shutting_down={}, callback={})",
+                        _shuttingDown.load(std::memory_order_relaxed), _assetFetchResponseCallback != nullptr));
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+                // ================================================================
+                // Chunked Download Messages
+                // ================================================================
+
+            case Protocol::Message::ASSET_FETCH_BEGIN:
+            {
+                auto begin = message.getAssetFetchBegin();
+                uint64_t requestId = begin.getRequestId();
+                uint64_t totalSize = begin.getTotalSize();
+                uint32_t chunkCount = begin.getChunkCount();
+
+                ENTROPY_LOG_DEBUG(
+                    std::format("handleReceivedMessage: ASSET_FETCH_BEGIN requestId={} totalSize={} chunkCount={}",
+                                requestId, totalSize, chunkCount));
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetFetchBeginCallback) {
+                    _assetFetchBeginCallback(requestId, totalSize, chunkCount);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::ASSET_FETCH_CHUNK:
+            {
+                auto chunkMsg = message.getAssetFetchChunk();
+                uint64_t requestId = chunkMsg.getRequestId();
+                uint32_t sequence = chunkMsg.getSequence();
+                auto dataReader = chunkMsg.getData();
+                std::vector<uint8_t> data(dataReader.begin(), dataReader.end());
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _assetFetchChunkCallback) {
+                    _assetFetchChunkCallback(requestId, sequence, data);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;
@@ -5276,6 +5405,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
             default:
                 // Unknown or unhandled message type
+                ENTROPY_LOG_WARNING(std::format("handleReceivedMessage: Unknown message type (which={})",
+                                                static_cast<uint16_t>(message.which())));
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
                     _errorCallback(NetworkError::InvalidMessage, "Unknown message type");
@@ -5285,11 +5416,15 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
         }
 
     } catch (const std::exception& e) {
+        ENTROPY_LOG_ERROR(
+            std::format("handleReceivedMessage: Exception processing {} bytes: {}", data.size(), e.what()));
         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
         if (!_shuttingDown.load(std::memory_order_acquire) && _errorCallback) {
             _errorCallback(NetworkError::DeserializationFailed, e.what());
         }
         _activeCallbacks.fetch_sub(1, std::memory_order_release);
+    } catch (...) {
+        ENTROPY_LOG_ERROR(std::format("handleReceivedMessage: Unknown exception processing {} bytes", data.size()));
     }
 }
 
