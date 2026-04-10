@@ -288,6 +288,70 @@ Result<void> SessionHandle::sendPermissionRequestCancelled(uint64_t requestId, P
     return mgr->sendPermissionRequestCancelled(*this, requestId, key);
 }
 
+// Spatial anchoring operations
+
+Result<void> SessionHandle::sendRegisterLandmarkRequest(uint64_t requestId,
+                                                        const std::vector<uint8_t>& definitionMsgData) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendRegisterLandmarkRequest(*this, requestId, definitionMsgData);
+}
+
+Result<void> SessionHandle::sendRegisterLandmarkResponse(uint64_t requestId, bool success, uint64_t landmarkId,
+                                                         const std::string& errorMessage) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendRegisterLandmarkResponse(*this, requestId, success, landmarkId, errorMessage);
+}
+
+Result<void> SessionHandle::sendLandmarkObservation(uint64_t landmarkId, uint64_t observerSessionId, bool detected,
+                                                    const LandmarkPose& pose, float confidence,
+                                                    uint64_t timestamp) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendLandmarkObservation(*this, landmarkId, observerSessionId, detected, pose, confidence, timestamp);
+}
+
+Result<void> SessionHandle::sendLandmarkStateUpdate(uint64_t landmarkId, uint8_t state, const LandmarkPose& pose,
+                                                    uint16_t observerCount) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendLandmarkStateUpdate(*this, landmarkId, state, pose, observerCount);
+}
+
+Result<void> SessionHandle::sendUnregisterLandmarkRequest(uint64_t requestId, uint64_t landmarkId) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendUnregisterLandmarkRequest(*this, requestId, landmarkId);
+}
+
+Result<void> SessionHandle::sendUnregisterLandmarkResponse(uint64_t requestId, bool success,
+                                                           const std::string& errorMessage) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendUnregisterLandmarkResponse(*this, requestId, success, errorMessage);
+}
+
+Result<void> SessionHandle::sendLandmarkSnapshot(const std::vector<uint8_t>& snapshotData) const {
+    auto* mgr = manager();
+    if (!mgr) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+    return mgr->sendLandmarkSnapshot(*this, snapshotData);
+}
+
 Result<void> SessionHandle::performHandshake(const std::string& clientType, const std::string& clientId) const {
     auto* mgr = manager();
     if (!mgr) {

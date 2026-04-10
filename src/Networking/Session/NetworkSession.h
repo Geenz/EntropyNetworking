@@ -16,6 +16,8 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -33,6 +35,26 @@
 
 namespace EntropyEngine::Networking
 {
+
+/// Compact pose for landmark network messages.
+/// Avoids decomposed float parameters that invite transposition bugs.
+struct LandmarkPose
+{
+    float posX = 0, posY = 0, posZ = 0;
+    float oriX = 0, oriY = 0, oriZ = 0, oriW = 1;
+
+    /// Construct from glm types (quat component order: w,x,y,z)
+    static LandmarkPose fromGlm(const glm::vec3& pos, const glm::quat& ori) {
+        return {pos.x, pos.y, pos.z, ori.x, ori.y, ori.z, ori.w};
+    }
+
+    [[nodiscard]] glm::vec3 position() const {
+        return {posX, posY, posZ};
+    }
+    [[nodiscard]] glm::quat orientation() const {
+        return {oriW, oriX, oriY, oriZ};
+    }
+};
 
 /**
  * NetworkSession - High-level session that manages a peer connection
@@ -427,6 +449,21 @@ public:
 
     using PermissionRequestCancelledCallback = std::function<void(uint64_t requestId, PermissionKey key)>;
 
+    // Spatial anchoring callbacks
+    using RegisterLandmarkRequestCallback =
+        std::function<void(uint64_t requestId, const std::vector<uint8_t>& definitionMsgData)>;
+    using RegisterLandmarkResponseCallback =
+        std::function<void(uint64_t requestId, bool success, uint64_t landmarkId, const std::string& errorMessage)>;
+    using LandmarkObservationMsgCallback =
+        std::function<void(uint64_t landmarkId, uint64_t observerSessionId, bool detected, const LandmarkPose& pose,
+                           float confidence, uint64_t timestamp)>;
+    using LandmarkStateUpdateMsgCallback =
+        std::function<void(uint64_t landmarkId, uint8_t state, const LandmarkPose& pose, uint16_t observerCount)>;
+    using UnregisterLandmarkRequestCallback = std::function<void(uint64_t requestId, uint64_t landmarkId)>;
+    using UnregisterLandmarkResponseCallback =
+        std::function<void(uint64_t requestId, bool success, const std::string& errorMessage)>;
+    using LandmarkSnapshotMsgCallback = std::function<void(const std::vector<uint8_t>& snapshotData)>;
+
     /**
      * @brief Construct a NetworkSession
      * @param connection Network connection to wrap
@@ -737,6 +774,18 @@ public:
 
     Result<void> sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key);
 
+    // Spatial anchoring messages
+    Result<void> sendRegisterLandmarkRequest(uint64_t requestId, const std::vector<uint8_t>& definitionMsgData);
+    Result<void> sendRegisterLandmarkResponse(uint64_t requestId, bool success, uint64_t landmarkId,
+                                              const std::string& errorMessage = "");
+    Result<void> sendLandmarkObservation(uint64_t landmarkId, uint64_t observerSessionId, bool detected,
+                                         const LandmarkPose& pose, float confidence, uint64_t timestamp);
+    Result<void> sendLandmarkStateUpdate(uint64_t landmarkId, uint8_t state, const LandmarkPose& pose,
+                                         uint16_t observerCount);
+    Result<void> sendUnregisterLandmarkRequest(uint64_t requestId, uint64_t landmarkId);
+    Result<void> sendUnregisterLandmarkResponse(uint64_t requestId, bool success, const std::string& errorMessage = "");
+    Result<void> sendLandmarkSnapshot(const std::vector<uint8_t>& snapshotData);
+
     // Message callbacks
     void setEntityCreatedCallback(EntityCreatedCallback callback);
     void setEntityDestroyedCallback(EntityDestroyedCallback callback);
@@ -833,6 +882,15 @@ public:
     void setHostnamePermissionResponseCallback(HostnamePermissionResponseCallback callback);
     void setPermissionRevokedCallback(PermissionRevokedCallback callback);
     void setPermissionRequestCancelledCallback(PermissionRequestCancelledCallback callback);
+
+    // Spatial anchoring callbacks
+    void setRegisterLandmarkRequestCallback(RegisterLandmarkRequestCallback callback);
+    void setRegisterLandmarkResponseCallback(RegisterLandmarkResponseCallback callback);
+    void setLandmarkObservationCallback(LandmarkObservationMsgCallback callback);
+    void setLandmarkStateUpdateCallback(LandmarkStateUpdateMsgCallback callback);
+    void setUnregisterLandmarkRequestCallback(UnregisterLandmarkRequestCallback callback);
+    void setUnregisterLandmarkResponseCallback(UnregisterLandmarkResponseCallback callback);
+    void setLandmarkSnapshotCallback(LandmarkSnapshotMsgCallback callback);
 
     /**
      * @brief Clears all callbacks to prevent invocation during/after destruction
@@ -1034,6 +1092,15 @@ private:
     HostnamePermissionResponseCallback _hostnamePermissionResponseCallback;
     PermissionRevokedCallback _permissionRevokedCallback;
     PermissionRequestCancelledCallback _permissionRequestCancelledCallback;
+
+    // Spatial anchoring callbacks
+    RegisterLandmarkRequestCallback _registerLandmarkRequestCallback;
+    RegisterLandmarkResponseCallback _registerLandmarkResponseCallback;
+    LandmarkObservationMsgCallback _landmarkObservationCallback;
+    LandmarkStateUpdateMsgCallback _landmarkStateUpdateCallback;
+    UnregisterLandmarkRequestCallback _unregisterLandmarkRequestCallback;
+    UnregisterLandmarkResponseCallback _unregisterLandmarkResponseCallback;
+    LandmarkSnapshotMsgCallback _landmarkSnapshotCallback;
 
     // Heartbeat tracking
     std::atomic<uint64_t> _lastHeartbeatReceivedMs{0};  // steady_clock ms since epoch

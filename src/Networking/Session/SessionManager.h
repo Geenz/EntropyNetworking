@@ -635,6 +635,21 @@ public:
     Result<void> setPermissionRequestCancelledCallback(const SessionHandle& handle,
                                                        NetworkSession::PermissionRequestCancelledCallback callback);
 
+    // Spatial anchoring callbacks
+    void setRegisterLandmarkRequestCallback(const SessionHandle& handle,
+                                            NetworkSession::RegisterLandmarkRequestCallback callback);
+    void setRegisterLandmarkResponseCallback(const SessionHandle& handle,
+                                             NetworkSession::RegisterLandmarkResponseCallback callback);
+    void setLandmarkObservationCallback(const SessionHandle& handle,
+                                        NetworkSession::LandmarkObservationMsgCallback callback);
+    void setLandmarkStateUpdateCallback(const SessionHandle& handle,
+                                        NetworkSession::LandmarkStateUpdateMsgCallback callback);
+    void setUnregisterLandmarkRequestCallback(const SessionHandle& handle,
+                                              NetworkSession::UnregisterLandmarkRequestCallback callback);
+    void setUnregisterLandmarkResponseCallback(const SessionHandle& handle,
+                                               NetworkSession::UnregisterLandmarkResponseCallback callback);
+    void setLandmarkSnapshotCallback(const SessionHandle& handle, NetworkSession::LandmarkSnapshotMsgCallback callback);
+
     // Asset send methods (for clients sending requests)
 
     /**
@@ -1021,6 +1036,20 @@ public:
     Result<void> sendPermissionRevoked(const SessionHandle& handle, uint64_t portalSessionId, PermissionKey key);
 
     Result<void> sendPermissionRequestCancelled(const SessionHandle& handle, uint64_t requestId, PermissionKey key);
+
+    // Spatial anchoring
+    Result<void> sendRegisterLandmarkRequest(const SessionHandle& handle, uint64_t requestId,
+                                             const std::vector<uint8_t>& definitionMsgData);
+    Result<void> sendRegisterLandmarkResponse(const SessionHandle& handle, uint64_t requestId, bool success,
+                                              uint64_t landmarkId, const std::string& errorMessage = "");
+    Result<void> sendLandmarkObservation(const SessionHandle& handle, uint64_t landmarkId, uint64_t observerSessionId,
+                                         bool detected, const LandmarkPose& pose, float confidence, uint64_t timestamp);
+    Result<void> sendLandmarkStateUpdate(const SessionHandle& handle, uint64_t landmarkId, uint8_t state,
+                                         const LandmarkPose& pose, uint16_t observerCount);
+    Result<void> sendUnregisterLandmarkRequest(const SessionHandle& handle, uint64_t requestId, uint64_t landmarkId);
+    Result<void> sendUnregisterLandmarkResponse(const SessionHandle& handle, uint64_t requestId, bool success,
+                                                const std::string& errorMessage = "");
+    Result<void> sendLandmarkSnapshot(const SessionHandle& handle, const std::vector<uint8_t>& snapshotData);
 
     /**
      * @brief Checks if connected (called by handle.isConnected())

@@ -2889,4 +2889,205 @@ Result<void> SessionManager::sendPermissionRequestCancelled(const SessionHandle&
     return slot.session->sendPermissionRequestCancelled(requestId, key);
 }
 
+// Spatial anchoring send methods
+
+Result<void> SessionManager::sendRegisterLandmarkRequest(const SessionHandle& handle, uint64_t requestId,
+                                                         const std::vector<uint8_t>& definitionMsgData) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendRegisterLandmarkRequest(requestId, definitionMsgData);
+}
+
+Result<void> SessionManager::sendRegisterLandmarkResponse(const SessionHandle& handle, uint64_t requestId, bool success,
+                                                          uint64_t landmarkId, const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendRegisterLandmarkResponse(requestId, success, landmarkId, errorMessage);
+}
+
+Result<void> SessionManager::sendLandmarkObservation(const SessionHandle& handle, uint64_t landmarkId,
+                                                     uint64_t observerSessionId, bool detected,
+                                                     const LandmarkPose& pose, float confidence, uint64_t timestamp) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendLandmarkObservation(landmarkId, observerSessionId, detected, pose, confidence, timestamp);
+}
+
+Result<void> SessionManager::sendLandmarkStateUpdate(const SessionHandle& handle, uint64_t landmarkId, uint8_t state,
+                                                     const LandmarkPose& pose, uint16_t observerCount) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendLandmarkStateUpdate(landmarkId, state, pose, observerCount);
+}
+
+Result<void> SessionManager::sendUnregisterLandmarkRequest(const SessionHandle& handle, uint64_t requestId,
+                                                           uint64_t landmarkId) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendUnregisterLandmarkRequest(requestId, landmarkId);
+}
+
+Result<void> SessionManager::sendUnregisterLandmarkResponse(const SessionHandle& handle, uint64_t requestId,
+                                                            bool success, const std::string& errorMessage) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendUnregisterLandmarkResponse(requestId, success, errorMessage);
+}
+
+Result<void> SessionManager::sendLandmarkSnapshot(const SessionHandle& handle,
+                                                  const std::vector<uint8_t>& snapshotData) {
+    if (!validateHandle(handle)) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Invalid session handle");
+    }
+
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+
+    std::lock_guard<std::mutex> lock(slot.mutex);
+
+    if (!slot.session) {
+        return Result<void>::err(NetworkError::InvalidParameter, "Session not initialized");
+    }
+
+    return slot.session->sendLandmarkSnapshot(snapshotData);
+}
+
+// Spatial anchoring callback setters
+
+void SessionManager::setRegisterLandmarkRequestCallback(const SessionHandle& handle,
+                                                        NetworkSession::RegisterLandmarkRequestCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setRegisterLandmarkRequestCallback(std::move(callback));
+}
+
+void SessionManager::setRegisterLandmarkResponseCallback(const SessionHandle& handle,
+                                                         NetworkSession::RegisterLandmarkResponseCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setRegisterLandmarkResponseCallback(std::move(callback));
+}
+
+void SessionManager::setLandmarkObservationCallback(const SessionHandle& handle,
+                                                    NetworkSession::LandmarkObservationMsgCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setLandmarkObservationCallback(std::move(callback));
+}
+
+void SessionManager::setLandmarkStateUpdateCallback(const SessionHandle& handle,
+                                                    NetworkSession::LandmarkStateUpdateMsgCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setLandmarkStateUpdateCallback(std::move(callback));
+}
+
+void SessionManager::setUnregisterLandmarkRequestCallback(const SessionHandle& handle,
+                                                          NetworkSession::UnregisterLandmarkRequestCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setUnregisterLandmarkRequestCallback(std::move(callback));
+}
+
+void SessionManager::setUnregisterLandmarkResponseCallback(
+    const SessionHandle& handle, NetworkSession::UnregisterLandmarkResponseCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setUnregisterLandmarkResponseCallback(std::move(callback));
+}
+
+void SessionManager::setLandmarkSnapshotCallback(const SessionHandle& handle,
+                                                 NetworkSession::LandmarkSnapshotMsgCallback callback) {
+    if (!validateHandle(handle)) return;
+    uint32_t index = handle.handleIndex();
+    auto& slot = _sessionSlots[index];
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.session) return;
+    slot.session->setLandmarkSnapshotCallback(std::move(callback));
+}
+
 }  // namespace EntropyEngine::Networking

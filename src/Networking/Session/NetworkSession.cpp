@@ -91,6 +91,13 @@ NetworkSession::~NetworkSession() {
     _schemaAdvertisementCallback = nullptr;
     _heartbeatCallback = nullptr;
     _heartbeatResponseCallback = nullptr;
+    _registerLandmarkRequestCallback = nullptr;
+    _registerLandmarkResponseCallback = nullptr;
+    _landmarkObservationCallback = nullptr;
+    _landmarkStateUpdateCallback = nullptr;
+    _unregisterLandmarkRequestCallback = nullptr;
+    _unregisterLandmarkResponseCallback = nullptr;
+    _landmarkSnapshotCallback = nullptr;
 }
 
 Result<void> NetworkSession::connect() {
@@ -2680,6 +2687,187 @@ Result<void> NetworkSession::sendPermissionRequestCancelled(uint64_t requestId, 
     }
 }
 
+Result<void> NetworkSession::sendRegisterLandmarkRequest(uint64_t requestId,
+                                                         const std::vector<uint8_t>& definitionMsgData) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto req = message.initRegisterLandmarkRequest();
+        req.setRequestId(requestId);
+
+        // definitionMsgData contains a standalone capnp-serialized TrackableDefinitionMsg
+        if (!definitionMsgData.empty() && definitionMsgData.size() % sizeof(capnp::word) == 0) {
+            auto wordArray =
+                kj::ArrayPtr<const capnp::word>(reinterpret_cast<const capnp::word*>(definitionMsgData.data()),
+                                                definitionMsgData.size() / sizeof(capnp::word));
+            capnp::FlatArrayMessageReader defReader(wordArray);
+            req.setDefinition(defReader.getRoot<Protocol::TrackableDefinitionMsg>());
+        }
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendRegisterLandmarkResponse(uint64_t requestId, bool success, uint64_t landmarkId,
+                                                          const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto resp = message.initRegisterLandmarkResponse();
+        resp.setRequestId(requestId);
+        resp.setSuccess(success);
+        resp.setLandmarkId(landmarkId);
+        resp.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendLandmarkObservation(uint64_t landmarkId, uint64_t observerSessionId, bool detected,
+                                                     const LandmarkPose& lmPose, float confidence, uint64_t timestamp) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto obs = message.initLandmarkObservation();
+        obs.setLandmarkId(landmarkId);
+        obs.setObserverSessionId(observerSessionId);
+        obs.setDetected(detected);
+        auto pose = obs.initPose();
+        auto pos = pose.initPosition();
+        pos.setX(lmPose.posX);
+        pos.setY(lmPose.posY);
+        pos.setZ(lmPose.posZ);
+        auto orient = pose.initOrientation();
+        orient.setX(lmPose.oriX);
+        orient.setY(lmPose.oriY);
+        orient.setZ(lmPose.oriZ);
+        orient.setW(lmPose.oriW);
+        obs.setConfidence(confidence);
+        obs.setTimestamp(timestamp);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendLandmarkStateUpdate(uint64_t landmarkId, uint8_t state, const LandmarkPose& lmPose,
+                                                     uint16_t observerCount) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto update = message.initLandmarkStateUpdate();
+        update.setLandmarkId(landmarkId);
+        update.setState(static_cast<Protocol::TrackingStateEnum>(state));
+        auto pose = update.initPose();
+        auto pos = pose.initPosition();
+        pos.setX(lmPose.posX);
+        pos.setY(lmPose.posY);
+        pos.setZ(lmPose.posZ);
+        auto orient = pose.initOrientation();
+        orient.setX(lmPose.oriX);
+        orient.setY(lmPose.oriY);
+        orient.setZ(lmPose.oriZ);
+        orient.setW(lmPose.oriW);
+        update.setObserverCount(observerCount);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUnregisterLandmarkRequest(uint64_t requestId, uint64_t landmarkId) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto req = message.initUnregisterLandmarkRequest();
+        req.setRequestId(requestId);
+        req.setLandmarkId(landmarkId);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendUnregisterLandmarkResponse(uint64_t requestId, bool success,
+                                                            const std::string& errorMessage) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    try {
+        capnp::MallocMessageBuilder builder;
+        auto message = builder.initRoot<Protocol::Message>();
+        auto resp = message.initUnregisterLandmarkResponse();
+        resp.setRequestId(requestId);
+        resp.setSuccess(success);
+        resp.setErrorMessage(errorMessage);
+
+        auto serialized = serialize(builder);
+        if (serialized.failed()) {
+            return Result<void>::err(serialized.error, serialized.errorMessage);
+        }
+        return _connection->send(serialized.value);
+    } catch (const std::exception& e) {
+        return Result<void>::err(NetworkError::SerializationFailed, e.what());
+    }
+}
+
+Result<void> NetworkSession::sendLandmarkSnapshot(const std::vector<uint8_t>& snapshotData) {
+    if (!_connection || !_connection->isConnected()) {
+        return Result<void>::err(NetworkError::ConnectionClosed, "Not connected");
+    }
+
+    // snapshotData is a pre-serialized capnp Message containing a LandmarkSnapshot
+    return _connection->send(snapshotData);
+}
+
 std::chrono::steady_clock::time_point NetworkSession::getLastHeartbeatReceived() const {
     uint64_t ms = _lastHeartbeatReceivedMs.load(std::memory_order_relaxed);
     return std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms));
@@ -3288,6 +3476,62 @@ void NetworkSession::setPermissionRequestCancelledCallback(PermissionRequestCanc
     _permissionRequestCancelledCallback = std::move(callback);
 }
 
+void NetworkSession::setRegisterLandmarkRequestCallback(RegisterLandmarkRequestCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _registerLandmarkRequestCallback = std::move(callback);
+}
+
+void NetworkSession::setRegisterLandmarkResponseCallback(RegisterLandmarkResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _registerLandmarkResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setLandmarkObservationCallback(LandmarkObservationMsgCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _landmarkObservationCallback = std::move(callback);
+}
+
+void NetworkSession::setLandmarkStateUpdateCallback(LandmarkStateUpdateMsgCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _landmarkStateUpdateCallback = std::move(callback);
+}
+
+void NetworkSession::setUnregisterLandmarkRequestCallback(UnregisterLandmarkRequestCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _unregisterLandmarkRequestCallback = std::move(callback);
+}
+
+void NetworkSession::setUnregisterLandmarkResponseCallback(UnregisterLandmarkResponseCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _unregisterLandmarkResponseCallback = std::move(callback);
+}
+
+void NetworkSession::setLandmarkSnapshotCallback(LandmarkSnapshotMsgCallback callback) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _landmarkSnapshotCallback = std::move(callback);
+}
+
 void NetworkSession::clearCallbacks() {
     // Mark as shutting down to prevent new callbacks
     _shuttingDown.store(true, std::memory_order_release);
@@ -3385,6 +3629,15 @@ void NetworkSession::clearCallbacks() {
     _hostnamePermissionResponseCallback = nullptr;
     _permissionRevokedCallback = nullptr;
     _permissionRequestCancelledCallback = nullptr;
+
+    // Spatial anchoring callbacks
+    _registerLandmarkRequestCallback = nullptr;
+    _registerLandmarkResponseCallback = nullptr;
+    _landmarkObservationCallback = nullptr;
+    _landmarkStateUpdateCallback = nullptr;
+    _unregisterLandmarkRequestCallback = nullptr;
+    _unregisterLandmarkResponseCallback = nullptr;
+    _landmarkSnapshotCallback = nullptr;
 }
 
 void NetworkSession::handleUnknownSchema(ComponentTypeHash typeHash) {
@@ -5398,6 +5651,123 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _permissionRequestCancelledCallback) {
                     _permissionRequestCancelledCallback(requestId, key);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::REGISTER_LANDMARK_REQUEST:
+            {
+                auto req = message.getRegisterLandmarkRequest();
+                uint64_t requestId = req.getRequestId();
+
+                // Serialize the definition sub-message as standalone bytes for the callback
+                capnp::MallocMessageBuilder defBuilder;
+                defBuilder.setRoot(req.getDefinition());
+                auto defArray = capnp::messageToFlatArray(defBuilder);
+                auto defBytes = defArray.asBytes();
+                std::vector<uint8_t> definitionData(defBytes.begin(), defBytes.end());
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _registerLandmarkRequestCallback) {
+                    _registerLandmarkRequestCallback(requestId, definitionData);
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::REGISTER_LANDMARK_RESPONSE:
+            {
+                auto resp = message.getRegisterLandmarkResponse();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _registerLandmarkResponseCallback) {
+                    _registerLandmarkResponseCallback(resp.getRequestId(), resp.getSuccess(), resp.getLandmarkId(),
+                                                      resp.getErrorMessage());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::LANDMARK_OBSERVATION:
+            {
+                auto obs = message.getLandmarkObservation();
+                LandmarkPose lmPose;
+                if (obs.hasPose()) {
+                    auto pose = obs.getPose();
+                    auto pos = pose.getPosition();
+                    lmPose.posX = pos.getX();
+                    lmPose.posY = pos.getY();
+                    lmPose.posZ = pos.getZ();
+                    auto orient = pose.getOrientation();
+                    lmPose.oriX = orient.getX();
+                    lmPose.oriY = orient.getY();
+                    lmPose.oriZ = orient.getZ();
+                    lmPose.oriW = orient.getW();
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _landmarkObservationCallback) {
+                    _landmarkObservationCallback(obs.getLandmarkId(), obs.getObserverSessionId(), obs.getDetected(),
+                                                 lmPose, obs.getConfidence(), obs.getTimestamp());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::LANDMARK_STATE_UPDATE:
+            {
+                auto update = message.getLandmarkStateUpdate();
+                LandmarkPose lmPose;
+                if (update.hasPose()) {
+                    auto pose = update.getPose();
+                    auto pos = pose.getPosition();
+                    lmPose.posX = pos.getX();
+                    lmPose.posY = pos.getY();
+                    lmPose.posZ = pos.getZ();
+                    auto orient = pose.getOrientation();
+                    lmPose.oriX = orient.getX();
+                    lmPose.oriY = orient.getY();
+                    lmPose.oriZ = orient.getZ();
+                    lmPose.oriW = orient.getW();
+                }
+
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _landmarkStateUpdateCallback) {
+                    _landmarkStateUpdateCallback(update.getLandmarkId(), static_cast<uint8_t>(update.getState()),
+                                                 lmPose, update.getObserverCount());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UNREGISTER_LANDMARK_REQUEST:
+            {
+                auto req = message.getUnregisterLandmarkRequest();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _unregisterLandmarkRequestCallback) {
+                    _unregisterLandmarkRequestCallback(req.getRequestId(), req.getLandmarkId());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::UNREGISTER_LANDMARK_RESPONSE:
+            {
+                auto resp = message.getUnregisterLandmarkResponse();
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _unregisterLandmarkResponseCallback) {
+                    _unregisterLandmarkResponseCallback(resp.getRequestId(), resp.getSuccess(), resp.getErrorMessage());
+                }
+                _activeCallbacks.fetch_sub(1, std::memory_order_release);
+                break;
+            }
+
+            case Protocol::Message::LANDMARK_SNAPSHOT:
+            {
+                // Pass raw message data to callback (consumer will deserialize)
+                _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+                if (!_shuttingDown.load(std::memory_order_acquire) && _landmarkSnapshotCallback) {
+                    _landmarkSnapshotCallback(data);
                 }
                 _activeCallbacks.fetch_sub(1, std::memory_order_release);
                 break;

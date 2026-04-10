@@ -98,6 +98,11 @@ struct Mat4 {
     col3 @3 :Vec4;
 }
 
+struct Pose3D {
+    position @0 :Vec3;
+    orientation @1 :Quat;
+}
+
 struct KeyValue {
     key @0 :Text;
     value @1 :Text;
@@ -955,6 +960,109 @@ struct PermissionRequestCancelled {
 }
 
 # ============================================================================
+# Spatial Anchoring
+# ============================================================================
+
+enum FiducialFamily {
+    aprilTag36h11 @0;
+    aruco6x6250   @1;
+    aruco4x450    @2;
+}
+
+struct TrackingHintImageLandmark {
+    referenceAssetId @0 :Data;      # 32-byte AssetId
+    physicalWidthM   @1 :Float32;
+}
+
+struct TrackingHintFiducialMarker {
+    family         @0 :FiducialFamily;
+    markerId       @1 :UInt32;
+    physicalWidthM @2 :Float32;
+}
+
+struct TrackingHintQrCode {
+    content        @0 :Text;
+    physicalWidthM @1 :Float32;
+}
+
+struct TrackingHintCustom {
+    typeUri @0 :Text;
+    payload @1 :Data;
+}
+
+struct TrackingHint {
+    priority @0 :UInt8;
+    hint :union {
+        imageLandmark   @1 :TrackingHintImageLandmark;
+        fiducialMarker  @2 :TrackingHintFiducialMarker;
+        qrCode          @3 :TrackingHintQrCode;
+        custom          @4 :TrackingHintCustom;
+    }
+}
+
+struct TrackableDefinitionMsg {
+    name       @0 :Text;
+    hints      @1 :List(TrackingHint);
+    canvasPose @2 :Pose3D;
+}
+
+struct RegisterLandmarkRequest {
+    requestId  @0 :UInt64;
+    definition @1 :TrackableDefinitionMsg;
+}
+
+struct RegisterLandmarkResponse {
+    requestId    @0 :UInt64;
+    success      @1 :Bool;
+    landmarkId   @2 :UInt64;
+    errorMessage @3 :Text;
+}
+
+struct LandmarkObservation {
+    landmarkId        @0 :UInt64;
+    observerSessionId @1 :UInt64;
+    detected          @2 :Bool;
+    pose              @3 :Pose3D;
+    confidence        @4 :Float32;
+    timestamp         @5 :UInt64;
+}
+
+enum TrackingStateEnum {
+    unavailable @0;
+    searching   @1;
+    tracking    @2;
+    limited     @3;
+}
+
+struct LandmarkStateUpdate {
+    landmarkId    @0 :UInt64;
+    state         @1 :TrackingStateEnum;
+    pose          @2 :Pose3D;
+    observerCount @3 :UInt16;
+}
+
+struct UnregisterLandmarkRequest {
+    requestId  @0 :UInt64;
+    landmarkId @1 :UInt64;
+}
+
+struct UnregisterLandmarkResponse {
+    requestId    @0 :UInt64;
+    success      @1 :Bool;
+    errorMessage @2 :Text;
+}
+
+struct LandmarkSnapshotEntry {
+    landmarkId @0 :UInt64;
+    definition @1 :TrackableDefinitionMsg;
+    state      @2 :TrackingStateEnum;
+}
+
+struct LandmarkSnapshot {
+    landmarks @0 :List(LandmarkSnapshotEntry);
+}
+
+# ============================================================================
 # Top-Level Message Envelope
 # ============================================================================
 
@@ -1084,5 +1192,14 @@ struct Message {
         # Chunked asset download
         assetFetchBegin @89 :AssetFetchBegin;
         assetFetchChunk @90 :AssetFetchChunk;
+
+        # Spatial anchoring
+        registerLandmarkRequest @91 :RegisterLandmarkRequest;
+        registerLandmarkResponse @92 :RegisterLandmarkResponse;
+        landmarkObservation @93 :LandmarkObservation;
+        landmarkStateUpdate @94 :LandmarkStateUpdate;
+        unregisterLandmarkRequest @95 :UnregisterLandmarkRequest;
+        unregisterLandmarkResponse @96 :UnregisterLandmarkResponse;
+        landmarkSnapshot @97 :LandmarkSnapshot;
     }
 }

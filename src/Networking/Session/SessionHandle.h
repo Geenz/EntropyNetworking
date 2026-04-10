@@ -401,6 +401,20 @@ public:
      */
     Result<void> sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key) const;
 
+    // Spatial anchoring operations
+
+    Result<void> sendRegisterLandmarkRequest(uint64_t requestId, const std::vector<uint8_t>& definitionMsgData) const;
+    Result<void> sendRegisterLandmarkResponse(uint64_t requestId, bool success, uint64_t landmarkId,
+                                              const std::string& errorMessage = "") const;
+    Result<void> sendLandmarkObservation(uint64_t landmarkId, uint64_t observerSessionId, bool detected,
+                                         const LandmarkPose& pose, float confidence, uint64_t timestamp) const;
+    Result<void> sendLandmarkStateUpdate(uint64_t landmarkId, uint8_t state, const LandmarkPose& pose,
+                                         uint16_t observerCount) const;
+    Result<void> sendUnregisterLandmarkRequest(uint64_t requestId, uint64_t landmarkId) const;
+    Result<void> sendUnregisterLandmarkResponse(uint64_t requestId, bool success,
+                                                const std::string& errorMessage = "") const;
+    Result<void> sendLandmarkSnapshot(const std::vector<uint8_t>& snapshotData) const;
+
     // Handshake operations
 
     /**
