@@ -329,6 +329,20 @@ public:
         std::array<uint8_t, 32> samplerAssetId{};
     };
 
+    /// Blend-state mirror carried over the wire with MaterialAssetData.
+    /// Factor codes match MTLBlendFactor / VkBlendFactor values; op codes:
+    /// 0=Add, 1=Subtract, 2=ReverseSubtract, 3=Min, 4=Max.
+    struct BlendStateData
+    {
+        bool enabled = false;
+        uint32_t srcColor = 1;  // One
+        uint32_t dstColor = 0;  // Zero
+        uint32_t srcAlpha = 1;  // One
+        uint32_t dstAlpha = 0;  // Zero
+        uint32_t colorOp = 0;   // Add
+        uint32_t alphaOp = 0;   // Add
+    };
+
     struct MaterialAssetData
     {
         std::string name;
@@ -344,6 +358,8 @@ public:
         std::string appId;
         std::vector<std::string> enabledKeywords;
         std::vector<SamplerOverrideData> samplerOverrides;
+        bool useOIT = false;
+        BlendStateData blendState;
     };
 
     using CreateMaterialCallback = std::function<void(const MaterialAssetData& material, uint64_t requestId)>;

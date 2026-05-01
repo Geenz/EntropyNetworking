@@ -664,6 +664,19 @@ struct MaterialProperty {
     value @1 :PropertyValue;
 }
 
+# Blend-state for a material's fragment pipeline.
+# Factor values match MTLBlendFactor / VkBlendFactor numeric codes.
+# Op values: 0=Add, 1=Subtract, 2=ReverseSubtract, 3=Min, 4=Max.
+struct BlendState {
+    enabled @0 :Bool = false;
+    srcColor @1 :UInt32 = 1;                 # One
+    dstColor @2 :UInt32 = 0;                 # Zero
+    srcAlpha @3 :UInt32 = 1;                 # One
+    dstAlpha @4 :UInt32 = 0;                 # Zero
+    colorOp @5 :UInt32 = 0;                  # Add
+    alphaOp @6 :UInt32 = 0;                  # Add
+}
+
 # Full material data for network transfer
 struct MaterialAssetData {
     name @0 :Text;
@@ -679,6 +692,8 @@ struct MaterialAssetData {
     modifiedAt @10 :UInt64;                  # Timestamp of last modification (microseconds)
     appId @11 :Text;                         # Creating application identifier
     samplerOverrides @12 :List(SamplerOverride);  # Custom sampler overrides per slot
+    useOIT @13 :Bool = false;                # Opt-in: request order-independent transparency (k-buffer) when supported
+    blendState @14 :BlendState;              # Blend factors + ops driving the pipeline blend state
 }
 
 # Sampler override for a material's sampler slot

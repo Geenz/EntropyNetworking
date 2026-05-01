@@ -1929,6 +1929,16 @@ void serializeMaterialAssetData(Protocol::MaterialAssetData::Builder& builder,
     builder.setVersion(data.version);
     builder.setModifiedAt(data.modifiedAt);
     builder.setAppId(data.appId);
+    builder.setUseOIT(data.useOIT);
+
+    auto blendBuilder = builder.initBlendState();
+    blendBuilder.setEnabled(data.blendState.enabled);
+    blendBuilder.setSrcColor(data.blendState.srcColor);
+    blendBuilder.setDstColor(data.blendState.dstColor);
+    blendBuilder.setSrcAlpha(data.blendState.srcAlpha);
+    blendBuilder.setDstAlpha(data.blendState.dstAlpha);
+    blendBuilder.setColorOp(data.blendState.colorOp);
+    blendBuilder.setAlphaOp(data.blendState.alphaOp);
 
     // Sampler overrides
     if (!data.samplerOverrides.empty()) {
@@ -1937,6 +1947,63 @@ void serializeMaterialAssetData(Protocol::MaterialAssetData::Builder& builder,
             overridesBuilder[i].setSlotName(data.samplerOverrides[i].slotName);
             overridesBuilder[i].setSamplerAssetId(kj::arrayPtr(data.samplerOverrides[i].samplerAssetId.data(),
                                                                data.samplerOverrides[i].samplerAssetId.size()));
+        }
+    }
+}
+
+// Helper to deserialize a Cap'n Proto MaterialAssetData reader into the C++ mirror.
+// Callers own the destination; this appends to existing property/keyword vectors
+// so they should typically pass in a freshly constructed MaterialAssetData.
+void deserializeMaterialAssetData(Protocol::MaterialAssetData::Reader matReader,
+                                  NetworkSession::MaterialAssetData& material) {
+    material.name = matReader.getName().cStr();
+
+    auto shaderIdData = matReader.getShaderAssetId();
+    if (shaderIdData.size() == 32) {
+        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
+    }
+
+    for (auto propReader : matReader.getProperties()) {
+        NetworkSession::MaterialPropertyData prop;
+        prop.name = propReader.getName().cStr();
+        prop.value = deserializePropertyValue(propReader.getValue());
+        material.properties.push_back(std::move(prop));
+    }
+
+    for (auto kw : matReader.getEnabledKeywords()) {
+        material.enabledKeywords.push_back(kw.cStr());
+    }
+
+    material.renderQueue = matReader.getRenderQueue();
+    material.castsShadows = matReader.getCastsShadows();
+    material.receivesShadows = matReader.getReceivesShadows();
+    material.depthWrite = matReader.getDepthWrite();
+    material.creatorSessionId = matReader.getCreatorSessionId();
+    material.version = matReader.getVersion();
+    material.modifiedAt = matReader.getModifiedAt();
+    material.appId = matReader.getAppId().cStr();
+    material.useOIT = matReader.getUseOIT();
+
+    if (matReader.hasBlendState()) {
+        auto blend = matReader.getBlendState();
+        material.blendState.enabled = blend.getEnabled();
+        material.blendState.srcColor = blend.getSrcColor();
+        material.blendState.dstColor = blend.getDstColor();
+        material.blendState.srcAlpha = blend.getSrcAlpha();
+        material.blendState.dstAlpha = blend.getDstAlpha();
+        material.blendState.colorOp = blend.getColorOp();
+        material.blendState.alphaOp = blend.getAlphaOp();
+    }
+
+    if (matReader.hasSamplerOverrides()) {
+        for (auto override : matReader.getSamplerOverrides()) {
+            NetworkSession::SamplerOverrideData overrideData;
+            overrideData.slotName = override.getSlotName().cStr();
+            auto assetIdData = override.getSamplerAssetId();
+            if (assetIdData.size() == 32) {
+                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
+            }
+            material.samplerOverrides.push_back(std::move(overrideData));
         }
     }
 }
@@ -4993,47 +5060,8 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
             case Protocol::Message::CREATE_MATERIAL_REQUEST:
             {
                 auto req = message.getCreateMaterialRequest();
-                auto matReader = req.getMaterial();
-
                 MaterialAssetData material;
-                material.name = matReader.getName().cStr();
-
-                auto shaderIdData = matReader.getShaderAssetId();
-                if (shaderIdData.size() == 32) {
-                    std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
-                }
-
-                for (auto propReader : matReader.getProperties()) {
-                    MaterialPropertyData prop;
-                    prop.name = propReader.getName().cStr();
-                    prop.value = deserializePropertyValue(propReader.getValue());
-                    material.properties.push_back(std::move(prop));
-                }
-
-                for (auto kw : matReader.getEnabledKeywords()) {
-                    material.enabledKeywords.push_back(kw.cStr());
-                }
-
-                material.renderQueue = matReader.getRenderQueue();
-                material.castsShadows = matReader.getCastsShadows();
-                material.receivesShadows = matReader.getReceivesShadows();
-                material.depthWrite = matReader.getDepthWrite();
-                material.creatorSessionId = matReader.getCreatorSessionId();
-                material.version = matReader.getVersion();
-                material.modifiedAt = matReader.getModifiedAt();
-                material.appId = matReader.getAppId().cStr();
-
-                if (matReader.hasSamplerOverrides()) {
-                    for (auto override : matReader.getSamplerOverrides()) {
-                        NetworkSession::SamplerOverrideData overrideData;
-                        overrideData.slotName = override.getSlotName().cStr();
-                        auto assetIdData = override.getSamplerAssetId();
-                        if (assetIdData.size() == 32) {
-                            std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
-                        }
-                        material.samplerOverrides.push_back(std::move(overrideData));
-                    }
-                }
+                deserializeMaterialAssetData(req.getMaterial(), material);
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
                 if (!_shuttingDown.load(std::memory_order_acquire) && _createMaterialCallback) {
@@ -5176,45 +5204,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
                 MaterialAssetData material;
                 if (resp.getSuccess() && resp.hasMaterial()) {
-                    auto matReader = resp.getMaterial();
-                    material.name = matReader.getName().cStr();
-
-                    auto shaderIdData = matReader.getShaderAssetId();
-                    if (shaderIdData.size() == 32) {
-                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
-                    }
-
-                    for (auto propReader : matReader.getProperties()) {
-                        MaterialPropertyData prop;
-                        prop.name = propReader.getName().cStr();
-                        prop.value = deserializePropertyValue(propReader.getValue());
-                        material.properties.push_back(std::move(prop));
-                    }
-
-                    for (auto kw : matReader.getEnabledKeywords()) {
-                        material.enabledKeywords.push_back(kw.cStr());
-                    }
-
-                    material.renderQueue = matReader.getRenderQueue();
-                    material.castsShadows = matReader.getCastsShadows();
-                    material.receivesShadows = matReader.getReceivesShadows();
-                    material.depthWrite = matReader.getDepthWrite();
-                    material.creatorSessionId = matReader.getCreatorSessionId();
-                    material.version = matReader.getVersion();
-                    material.modifiedAt = matReader.getModifiedAt();
-                    material.appId = matReader.getAppId().cStr();
-
-                    if (matReader.hasSamplerOverrides()) {
-                        for (auto override : matReader.getSamplerOverrides()) {
-                            NetworkSession::SamplerOverrideData overrideData;
-                            overrideData.slotName = override.getSlotName().cStr();
-                            auto assetIdData = override.getSamplerAssetId();
-                            if (assetIdData.size() == 32) {
-                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
-                            }
-                            material.samplerOverrides.push_back(std::move(overrideData));
-                        }
-                    }
+                    deserializeMaterialAssetData(resp.getMaterial(), material);
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -5278,45 +5268,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
                 MaterialAssetData material;
                 if (resp.getFound() && resp.hasMaterial()) {
-                    auto matReader = resp.getMaterial();
-                    material.name = matReader.getName().cStr();
-
-                    auto shaderIdData = matReader.getShaderAssetId();
-                    if (shaderIdData.size() == 32) {
-                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
-                    }
-
-                    for (auto propReader : matReader.getProperties()) {
-                        MaterialPropertyData prop;
-                        prop.name = propReader.getName().cStr();
-                        prop.value = deserializePropertyValue(propReader.getValue());
-                        material.properties.push_back(std::move(prop));
-                    }
-
-                    for (auto kw : matReader.getEnabledKeywords()) {
-                        material.enabledKeywords.push_back(kw.cStr());
-                    }
-
-                    material.renderQueue = matReader.getRenderQueue();
-                    material.castsShadows = matReader.getCastsShadows();
-                    material.receivesShadows = matReader.getReceivesShadows();
-                    material.depthWrite = matReader.getDepthWrite();
-                    material.creatorSessionId = matReader.getCreatorSessionId();
-                    material.version = matReader.getVersion();
-                    material.modifiedAt = matReader.getModifiedAt();
-                    material.appId = matReader.getAppId().cStr();
-
-                    if (matReader.hasSamplerOverrides()) {
-                        for (auto override : matReader.getSamplerOverrides()) {
-                            NetworkSession::SamplerOverrideData overrideData;
-                            overrideData.slotName = override.getSlotName().cStr();
-                            auto assetIdData = override.getSamplerAssetId();
-                            if (assetIdData.size() == 32) {
-                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
-                            }
-                            material.samplerOverrides.push_back(std::move(overrideData));
-                        }
-                    }
+                    deserializeMaterialAssetData(resp.getMaterial(), material);
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -5341,45 +5293,7 @@ void NetworkSession::handleReceivedMessage(const std::vector<uint8_t>& data) {
 
                 MaterialAssetData material;
                 if (resolved.hasMaterial()) {
-                    auto matReader = resolved.getMaterial();
-                    material.name = matReader.getName().cStr();
-
-                    auto shaderIdData = matReader.getShaderAssetId();
-                    if (shaderIdData.size() == 32) {
-                        std::copy(shaderIdData.begin(), shaderIdData.end(), material.shaderAssetId.begin());
-                    }
-
-                    for (auto propReader : matReader.getProperties()) {
-                        MaterialPropertyData prop;
-                        prop.name = propReader.getName().cStr();
-                        prop.value = deserializePropertyValue(propReader.getValue());
-                        material.properties.push_back(std::move(prop));
-                    }
-
-                    for (auto kw : matReader.getEnabledKeywords()) {
-                        material.enabledKeywords.push_back(kw.cStr());
-                    }
-
-                    material.renderQueue = matReader.getRenderQueue();
-                    material.castsShadows = matReader.getCastsShadows();
-                    material.receivesShadows = matReader.getReceivesShadows();
-                    material.depthWrite = matReader.getDepthWrite();
-                    material.creatorSessionId = matReader.getCreatorSessionId();
-                    material.version = matReader.getVersion();
-                    material.modifiedAt = matReader.getModifiedAt();
-                    material.appId = matReader.getAppId().cStr();
-
-                    if (matReader.hasSamplerOverrides()) {
-                        for (auto override : matReader.getSamplerOverrides()) {
-                            NetworkSession::SamplerOverrideData overrideData;
-                            overrideData.slotName = override.getSlotName().cStr();
-                            auto assetIdData = override.getSamplerAssetId();
-                            if (assetIdData.size() == 32) {
-                                std::memcpy(overrideData.samplerAssetId.data(), assetIdData.begin(), 32);
-                            }
-                            material.samplerOverrides.push_back(std::move(overrideData));
-                        }
-                    }
+                    deserializeMaterialAssetData(resolved.getMaterial(), material);
                 }
 
                 _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
