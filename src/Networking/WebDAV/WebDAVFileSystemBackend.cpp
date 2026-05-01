@@ -7,25 +7,26 @@
  * This file is part of the Entropy Networking project.
  */
 #include "Networking/WebDAV/WebDAVFileSystemBackend.h"
-#include "Networking/WebDAV/WebDAVReadStream.h"
-
-#include <stdexcept>
-#include <sstream>
-#include <thread>
-#include <mutex>
-#include <queue>
-#include <condition_variable>
-#include <functional>
-#include <vector>
-#include <atomic>
 
 #include <VirtualFileSystem/FileStream.h>
 #include <VirtualFileSystem/VirtualFileSystem.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <sstream>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+
+#include "Networking/WebDAV/WebDAVReadStream.h"
 
 using namespace EntropyEngine::Core::IO;
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 static bool hasParentTraversal(std::string_view p) {
     return p.find("../") != std::string_view::npos || p.find("..\\") != std::string_view::npos;
@@ -69,16 +70,34 @@ std::string WebDAVFileSystemBackend::buildUrl(const std::string& path) const {
 
 FileError WebDAVFileSystemBackend::mapHttpStatus(int sc) {
     switch (sc) {
-        case 200: case 201: case 204: case 206: case 207: return FileError::None;
-        case 401: case 403: return FileError::AccessDenied;
-        case 404: return FileError::FileNotFound;
-        case 405: return FileError::InvalidPath; // Method not allowed
-        case 409: return FileError::Conflict;
-        case 413: return FileError::DiskFull;
-        case 416: return FileError::InvalidPath; // Range not satisfiable (treat as invalid for now)
-        case 423: return FileError::AccessDenied; // Locked
-        case 507: return FileError::DiskFull; // Insufficient Storage
-        case 500: case 502: case 503: case 504: return FileError::NetworkError;
+        case 200:
+        case 201:
+        case 204:
+        case 206:
+        case 207:
+            return FileError::None;
+        case 401:
+        case 403:
+            return FileError::AccessDenied;
+        case 404:
+            return FileError::FileNotFound;
+        case 405:
+            return FileError::InvalidPath;  // Method not allowed
+        case 409:
+            return FileError::Conflict;
+        case 413:
+            return FileError::DiskFull;
+        case 416:
+            return FileError::InvalidPath;  // Range not satisfiable (treat as invalid for now)
+        case 423:
+            return FileError::AccessDenied;  // Locked
+        case 507:
+            return FileError::DiskFull;  // Insufficient Storage
+        case 500:
+        case 502:
+        case 503:
+        case 504:
+            return FileError::NetworkError;
         default:
             if (sc >= 400 && sc < 500) return FileError::InvalidPath;
             return FileError::NetworkError;
@@ -97,9 +116,8 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
     }
 
     // Construct lambda fully before passing to submit() to avoid race during functor construction
-    auto operation = [client, cfg, options](FileOperationHandle::OpState& s,
-                                              const std::string& p,
-                                              const ExecContext& /*ctx*/){
+    auto operation = [client, cfg, options](FileOperationHandle::OpState& s, const std::string& p,
+                                            const ExecContext& /*ctx*/) {
         try {
             // Build URL inline since we can't call buildUrl() without 'this'
             if (p.find("..") != std::string::npos) {
@@ -146,8 +164,7 @@ FileOperationHandle WebDAVFileSystemBackend::readFile(const std::string& path, R
     return _vfs->submit(path, std::move(operation));
 }
 
-FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::string& path,
-                                                      const std::string& etag) {
+FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::string& path, const std::string& etag) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
     std::shared_ptr<HTTP::HttpClient> client;
@@ -158,9 +175,8 @@ FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::stri
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg, etag](FileOperationHandle::OpState& s,
-                                           const std::string& p,
-                                           const ExecContext& /*ctx*/){
+    auto operation = [client, cfg, etag](FileOperationHandle::OpState& s, const std::string& p,
+                                         const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -203,8 +219,7 @@ FileOperationHandle WebDAVFileSystemBackend::readFileIfNoneMatch(const std::stri
     return _vfs->submit(path, std::move(operation));
 }
 
-FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
-                                                       std::span<const uint8_t> data,
+FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path, std::span<const uint8_t> data,
                                                        WriteOptions /*options*/) {
     if (!_vfs) return FileOperationHandle::immediate(FileOpStatus::Failed);
 
@@ -220,8 +235,7 @@ FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path,
     }
 
     auto operation = [client, cfg, dataCopy = std::move(dataCopy)](FileOperationHandle::OpState& s,
-                                           const std::string& p,
-                                           const ExecContext& /*ctx*/){
+                                                                   const std::string& p, const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -274,9 +288,7 @@ FileOperationHandle WebDAVFileSystemBackend::deleteFile(const std::string& path)
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg](FileOperationHandle::OpState& s,
-                                     const std::string& p,
-                                     const ExecContext& /*ctx*/){
+    auto operation = [client, cfg](FileOperationHandle::OpState& s, const std::string& p, const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -321,9 +333,7 @@ FileOperationHandle WebDAVFileSystemBackend::createFile(const std::string& path)
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg](FileOperationHandle::OpState& s,
-                                     const std::string& p,
-                                     const ExecContext& /*ctx*/){
+    auto operation = [client, cfg](FileOperationHandle::OpState& s, const std::string& p, const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -370,9 +380,7 @@ FileOperationHandle WebDAVFileSystemBackend::createDirectory(const std::string& 
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg](FileOperationHandle::OpState& s,
-                                     const std::string& p,
-                                     const ExecContext& /*ctx*/){
+    auto operation = [client, cfg](FileOperationHandle::OpState& s, const std::string& p, const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -417,9 +425,7 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg](FileOperationHandle::OpState& s,
-                                     const std::string& p,
-                                     const ExecContext& /*ctx*/){
+    auto operation = [client, cfg](FileOperationHandle::OpState& s, const std::string& p, const ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -452,7 +458,9 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
             if (r.statusCode != 200 && r.statusCode != 207) {
                 auto fe = mapHttpStatus(r.statusCode);
                 if (fe == FileError::FileNotFound) {
-                    FileMetadata meta; meta.path = p; meta.exists = false;
+                    FileMetadata meta;
+                    meta.path = p;
+                    meta.exists = false;
                     s.metadata = std::move(meta);
                     s.complete(FileOpStatus::Complete);
                     return;
@@ -464,7 +472,9 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
 
             auto infos = parsePropfindXml(r.body);
             if (infos.empty()) {
-                FileMetadata meta; meta.path = p; meta.exists = false;
+                FileMetadata meta;
+                meta.path = p;
+                meta.exists = false;
                 s.metadata = std::move(meta);
                 s.complete(FileOpStatus::Complete);
                 return;
@@ -475,12 +485,15 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
             for (const auto& ri : infos) {
                 if (Utils::normalizeHrefForCompare(ri.href) == want ||
                     Utils::normalizeHrefForCompare(ri.href, /*ensureTrailingSlashIfCollection=*/true) == want) {
-                    self = &ri; break;
+                    self = &ri;
+                    break;
                 }
             }
 
             if (!self) {
-                FileMetadata meta; meta.path = p; meta.exists = false;
+                FileMetadata meta;
+                meta.path = p;
+                meta.exists = false;
                 s.metadata = std::move(meta);
                 s.complete(FileOpStatus::Complete);
                 return;
@@ -492,7 +505,9 @@ FileOperationHandle WebDAVFileSystemBackend::getMetadata(const std::string& path
             meta.isDirectory = self->isCollection;
             meta.isRegularFile = !self->isCollection;
             meta.size = self->contentLength;
-            meta.readable = true; meta.writable = false; meta.executable = false;
+            meta.readable = true;
+            meta.writable = false;
+            meta.executable = false;
             meta.lastModified = self->lastModified;
             if (self->contentType) meta.mimeType = *self->contentType;
 
@@ -558,9 +573,8 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg, options](FileOperationHandle::OpState& s,
-                                              const std::string& p,
-                                              const ExecContext& /*ctx*/){
+    auto operation = [client, cfg, options](FileOperationHandle::OpState& s, const std::string& p,
+                                            const ExecContext& /*ctx*/) {
         try {
             // Ensure trailing slash for directory
             std::string pathForUrl = p;
@@ -568,7 +582,8 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
             if (pathForUrl.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
             }
-            const std::string url = cfg.baseUrl + (pathForUrl.empty() || pathForUrl[0] == '/' ? pathForUrl : "/" + pathForUrl);
+            const std::string url =
+                cfg.baseUrl + (pathForUrl.empty() || pathForUrl[0] == '/' ? pathForUrl : "/" + pathForUrl);
 
             const std::string bodyXml =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
@@ -608,27 +623,30 @@ FileOperationHandle WebDAVFileSystemBackend::listDirectory(const std::string& pa
             entries.reserve(infos.size());
 
             for (const auto& ri : infos) {
-                std::string norm = Utils::normalizeHrefForCompare(ri.href, /*ensureTrailingSlashIfCollection=*/ri.isCollection);
-                if (norm == selfNorm) continue; // skip self
+                std::string norm =
+                    Utils::normalizeHrefForCompare(ri.href, /*ensureTrailingSlashIfCollection=*/ri.isCollection);
+                if (norm == selfNorm) continue;  // skip self
 
                 auto vfsPathOpt = hrefToVfsPath(ri.href, cfg.baseUrl);
-                if (!vfsPathOpt) continue; // out-of-scope
+                if (!vfsPathOpt) continue;  // out-of-scope
                 std::string vfsPath = *vfsPathOpt;
 
                 DirectoryEntry de;
                 de.fullPath = vfsPath;
                 std::string name = vfsPath;
-                if (!name.empty() && name.back()=='/' && ri.isCollection) name.pop_back();
+                if (!name.empty() && name.back() == '/' && ri.isCollection) name.pop_back();
                 auto slash = name.find_last_of('/');
                 de.name = (slash == std::string::npos) ? name : name.substr(slash + 1);
 
                 FileMetadata meta;
                 meta.path = vfsPath;
                 meta.exists = true;
-                meta.isDirectory   = ri.isCollection;
+                meta.isDirectory = ri.isCollection;
                 meta.isRegularFile = !ri.isCollection;
                 meta.size = ri.contentLength;
-                meta.readable = true; meta.writable = false; meta.executable = false;
+                meta.readable = true;
+                meta.writable = false;
+                meta.executable = false;
                 meta.lastModified = ri.lastModified;
                 if (ri.contentType) meta.mimeType = *ri.contentType;
                 de.metadata = std::move(meta);
@@ -684,18 +702,22 @@ std::unique_ptr<FileStream> WebDAVFileSystemBackend::openStream(const std::strin
 }
 
 FileOperationHandle WebDAVFileSystemBackend::readLine(const std::string& path, size_t lineNumber) {
-    (void)path; (void)lineNumber;
+    (void)path;
+    (void)lineNumber;
     return FileOperationHandle::immediate(FileOpStatus::Failed);
 }
 
-FileOperationHandle WebDAVFileSystemBackend::writeLine(const std::string& path, size_t lineNumber, std::string_view line) {
-    (void)path; (void)lineNumber; (void)line;
+FileOperationHandle WebDAVFileSystemBackend::writeLine(const std::string& path, size_t lineNumber,
+                                                       std::string_view line) {
+    (void)path;
+    (void)lineNumber;
+    (void)line;
     return FileOperationHandle::immediate(FileOpStatus::Failed);
 }
 
 BackendCapabilities WebDAVFileSystemBackend::getCapabilities() const {
     BackendCapabilities caps;
-    caps.supportsStreaming = true; // streaming via openStream
+    caps.supportsStreaming = true;  // streaming via openStream
     caps.supportsRandomAccess = false;
     caps.supportsDirectories = true;
     caps.supportsMetadata = true;
@@ -707,11 +729,8 @@ BackendCapabilities WebDAVFileSystemBackend::getCapabilities() const {
 }
 
 // == MOVE/COPY operations ==
-Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
-    const std::string& srcPath,
-    const std::string& dstPath,
-    bool overwrite,
-    std::optional<std::string> ifMatchETag) {
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(const std::string& srcPath, const std::string& dstPath,
+                                                            bool overwrite, std::optional<std::string> ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
     std::shared_ptr<HTTP::HttpClient> client;
@@ -723,8 +742,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
     }
 
     auto operation = [client, cfg, srcPath, dstPath, overwrite, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
-                                                                                  const std::string& /*p*/,
-                                                                                  const Core::IO::ExecContext& /*ctx*/) {
+                                                                             const std::string& /*p*/,
+                                                                             const Core::IO::ExecContext& /*ctx*/) {
         try {
             if (srcPath.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected in source");
@@ -743,7 +762,7 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
             if (!cfg.authHeader.empty()) {
                 req.headers["Authorization"] = cfg.authHeader;
             }
-            req.headers["Destination"] = dstUrl; // absolute-path OK for MiniDavServer
+            req.headers["Destination"] = dstUrl;  // absolute-path OK for MiniDavServer
             req.headers["Overwrite"] = overwrite ? "T" : "F";
             if (ifMatchETag && !ifMatchETag->empty()) {
                 req.headers["If-Match"] = *ifMatchETag;
@@ -766,11 +785,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::move(
     return _vfs->submit(srcPath, std::move(operation));
 }
 
-Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
-    const std::string& srcPath,
-    const std::string& dstPath,
-    bool overwrite,
-    bool depth0) {
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(const std::string& srcPath, const std::string& dstPath,
+                                                            bool overwrite, bool depth0) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
     std::shared_ptr<HTTP::HttpClient> client;
@@ -782,8 +798,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
     }
 
     auto operation = [client, cfg, srcPath, dstPath, overwrite, depth0](Core::IO::FileOperationHandle::OpState& s,
-                                                                             const std::string& /*p*/,
-                                                                             const Core::IO::ExecContext& /*ctx*/) {
+                                                                        const std::string& /*p*/,
+                                                                        const Core::IO::ExecContext& /*ctx*/) {
         try {
             if (srcPath.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected in source");
@@ -823,11 +839,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::copy(
     return _vfs->submit(srcPath, std::move(operation));
 }
 
-
-Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
-    const std::string& path,
-    std::span<const uint8_t> data,
-    const std::string& ifMatchETag) {
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(const std::string& path, std::span<const uint8_t> data,
+                                                                 const std::string& ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
     // Copy data to vector for safe capture
@@ -841,9 +854,9 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg, dataCopy = std::move(dataCopy), ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
-                                                        const std::string& p,
-                                                        const Core::IO::ExecContext& /*ctx*/){
+    auto operation = [client, cfg, dataCopy = std::move(dataCopy), ifMatchETag](
+                         Core::IO::FileOperationHandle::OpState& s, const std::string& p,
+                         const Core::IO::ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -885,9 +898,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::writeFile(
     return _vfs->submit(path, std::move(operation));
 }
 
-Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
-    const std::string& path,
-    const std::string& ifMatchETag) {
+Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(const std::string& path,
+                                                                         const std::string& ifMatchETag) {
     if (!_vfs) return Core::IO::FileOperationHandle::immediate(Core::IO::FileOpStatus::Failed);
 
     std::shared_ptr<HTTP::HttpClient> client;
@@ -898,9 +910,8 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
         cfg = _cfg;
     }
 
-    auto operation = [client, cfg, ifMatchETag](Core::IO::FileOperationHandle::OpState& s,
-                                                  const std::string& p,
-                                                  const Core::IO::ExecContext& /*ctx*/){
+    auto operation = [client, cfg, ifMatchETag](Core::IO::FileOperationHandle::OpState& s, const std::string& p,
+                                                const Core::IO::ExecContext& /*ctx*/) {
         try {
             if (p.find("..") != std::string::npos) {
                 throw std::invalid_argument("Path traversal detected");
@@ -936,5 +947,4 @@ Core::IO::FileOperationHandle WebDAVFileSystemBackend::deleteFileIfMatch(
     return _vfs->submit(path, std::move(operation));
 }
 
-} // namespace EntropyEngine::Networking::WebDAV
-
+}  // namespace EntropyEngine::Networking::WebDAV

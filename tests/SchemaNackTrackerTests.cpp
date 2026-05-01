@@ -8,10 +8,12 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Core/SchemaNackTracker.h"
-#include "../src/Networking/Core/SchemaNackPolicy.h"
-#include <thread>
+
 #include <chrono>
+#include <thread>
+
+#include "../src/Networking/Core/SchemaNackPolicy.h"
+#include "../src/Networking/Core/SchemaNackTracker.h"
 
 using namespace EntropyEngine::Networking;
 

@@ -431,7 +431,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=Debug
           -DBUILD_TESTS=ON
           -DBUILD_EXAMPLES=OFF
-          -DENABLE_SANITIZERS=ON
           -DENABLE_TSAN=ON
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 

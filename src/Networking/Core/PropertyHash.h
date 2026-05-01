@@ -10,13 +10,15 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 #include <functional>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief 128-bit property hash for per-instance property identification
@@ -30,9 +32,10 @@ namespace Networking {
  * Example: Entity 42's Transform.position has a different hash than
  * Entity 99's Transform.position.
  */
-struct PropertyHash {
-    uint64_t high{0};   ///< High 64 bits of hash
-    uint64_t low{0};    ///< Low 64 bits of hash
+struct PropertyHash
+{
+    uint64_t high{0};  ///< High 64 bits of hash
+    uint64_t low{0};   ///< Low 64 bits of hash
 
     PropertyHash() = default;
     PropertyHash(uint64_t h, uint64_t l) : high(h), low(l) {}
@@ -103,11 +106,7 @@ using ComponentTypeHash = PropertyHash;
  * // hash != hash2 (different entity IDs)
  * @endcode
  */
-PropertyHash computePropertyHash(
-    uint64_t entityId,
-    ComponentTypeHash componentType,
-    const std::string& propertyName
-);
+PropertyHash computePropertyHash(uint64_t entityId, ComponentTypeHash componentType, const std::string& propertyName);
 
 /**
  * @brief Convert PropertyHash to string for logging/diagnostics
@@ -116,54 +115,54 @@ PropertyHash computePropertyHash(
  */
 inline std::string toString(const PropertyHash& hash) {
     std::ostringstream oss;
-    oss << std::hex << std::setfill('0') << std::setw(16) << hash.high
-        << ':' << std::setw(16) << hash.low;
+    oss << std::hex << std::setfill('0') << std::setw(16) << hash.high << ':' << std::setw(16) << hash.low;
     return oss.str();
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine
 
 // Hash function for std::unordered_map support
-namespace std {
-    template<>
-    struct hash<EntropyEngine::Networking::PropertyHash> {
-        // SplitMix64 mixing constants - chosen for optimal avalanche properties
-        // These specific values ensure good bit distribution across all output bits
-        static constexpr uint64_t GOLDEN_RATIO_64 = 0x9e3779b97f4a7c15ull;  // φ * 2^64
-        static constexpr uint64_t SPLITMIX64_MIX1 = 0xbf58476d1ce4e5b9ull;  // First mixing multiplier
-        static constexpr uint64_t SPLITMIX64_MIX2 = 0x94d049bb133111ebull;  // Second mixing multiplier
+namespace std
+{
+template <>
+struct hash<EntropyEngine::Networking::PropertyHash>
+{
+    // SplitMix64 mixing constants - chosen for optimal avalanche properties
+    // These specific values ensure good bit distribution across all output bits
+    static constexpr uint64_t GOLDEN_RATIO_64 = 0x9e3779b97f4a7c15ull;  // φ * 2^64
+    static constexpr uint64_t SPLITMIX64_MIX1 = 0xbf58476d1ce4e5b9ull;  // First mixing multiplier
+    static constexpr uint64_t SPLITMIX64_MIX2 = 0x94d049bb133111ebull;  // Second mixing multiplier
 
-        /**
-         * @brief SplitMix64 hash mixing function
-         *
-         * High-quality 64-bit hash finalizer from the SplitMix64 PRNG algorithm.
-         * Used to distribute combined hash bits uniformly across the hash space.
-         *
-         * The constants and bit operations provide excellent avalanche properties,
-         * ensuring small changes in input produce large changes in output.
-         *
-         * @param x Input value to mix
-         * @return Mixed 64-bit hash value with good distribution
-         * @see https://xorshift.di.unimi.it/splitmix64.c
-         */
-        static inline uint64_t splitmix64(uint64_t x) {
-            x += GOLDEN_RATIO_64;
-            x = (x ^ (x >> 30)) * SPLITMIX64_MIX1;
-            x = (x ^ (x >> 27)) * SPLITMIX64_MIX2;
-            return x ^ (x >> 31);
-        }
-        size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
-            // Use h.high directly (used only twice)
+    /**
+     * @brief SplitMix64 hash mixing function
+     *
+     * High-quality 64-bit hash finalizer from the SplitMix64 PRNG algorithm.
+     * Used to distribute combined hash bits uniformly across the hash space.
+     *
+     * The constants and bit operations provide excellent avalanche properties,
+     * ensuring small changes in input produce large changes in output.
+     *
+     * @param x Input value to mix
+     * @return Mixed 64-bit hash value with good distribution
+     * @see https://xorshift.di.unimi.it/splitmix64.c
+     */
+    static inline uint64_t splitmix64(uint64_t x) {
+        x += GOLDEN_RATIO_64;
+        x = (x ^ (x >> 30)) * SPLITMIX64_MIX1;
+        x = (x ^ (x >> 27)) * SPLITMIX64_MIX2;
+        return x ^ (x >> 31);
+    }
+    size_t operator()(const EntropyEngine::Networking::PropertyHash& h) const noexcept {
+        // Use h.high directly (used only twice)
 
+        // Combine high and low using boost::hash_combine-inspired formula
+        // Uses golden ratio for optimal bit distribution
+        // Bit shifts (<<6, >>2) and XOR provide avalanche properties:
+        // small input changes cascade to large output changes
+        uint64_t combined = h.high ^ (h.low + GOLDEN_RATIO_64 + (h.high << 6) + (h.high >> 2));
 
-            // Combine high and low using boost::hash_combine-inspired formula
-            // Uses golden ratio for optimal bit distribution
-            // Bit shifts (<<6, >>2) and XOR provide avalanche properties:
-            // small input changes cascade to large output changes
-            uint64_t combined = h.high ^ (h.low + GOLDEN_RATIO_64 + (h.high << 6) + (h.high >> 2));
-
-            return static_cast<size_t>(splitmix64(combined));
-        }
-    };
-}
+        return static_cast<size_t>(splitmix64(combined));
+    }
+};
+}  // namespace std

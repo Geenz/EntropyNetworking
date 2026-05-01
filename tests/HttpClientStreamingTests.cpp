@@ -1,15 +1,18 @@
 #include <gtest/gtest.h>
-#include "MiniDavServer.h"
-#include "DavTree.h"
-#include "Networking/HTTP/HttpClient.h"
-#include <thread>
-#include <chrono>
+
 #include <atomic>
+#include <chrono>
 #include <random>
+#include <thread>
+
+#include "DavTree.h"
+#include "MiniDavServer.h"
+#include "Networking/HTTP/HttpClient.h"
 
 using namespace EntropyEngine::Networking::HTTP;
 
-class HttpClientStreamingFixture : public ::testing::Test {
+class HttpClientStreamingFixture : public ::testing::Test
+{
 protected:
     void SetUp() override {
         tree.addDir("/");
@@ -34,10 +37,10 @@ TEST_F(HttpClientStreamingFixture, StreamingBackpressure_PauseResume) {
     req.scheme = "http";
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
-    req.headers["X-Stream-Chunked"] = "1"; // force chunked streaming from server
+    req.headers["X-Stream-Chunked"] = "1";  // force chunked streaming from server
 
     StreamOptions opts;
-    opts.bufferBytes = 4; // extremely small to force pause
+    opts.bufferBytes = 4;  // extremely small to force pause
     opts.connectTimeout = std::chrono::milliseconds(5000);
 
     auto handle = client.executeStream(req, opts);
@@ -69,9 +72,10 @@ TEST_F(HttpClientStreamingFixture, Streaming_EarlyError_HeadersReady404) {
     req.method = HttpMethod::GET;
     req.scheme = "http";
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
-    req.path = "/dav/missing.txt"; // server returns 404 with empty body
+    req.path = "/dav/missing.txt";  // server returns 404 with empty body
 
-    StreamOptions opts; opts.bufferBytes = 64;
+    StreamOptions opts;
+    opts.bufferBytes = 64;
     auto handle = client.executeStream(req, opts);
 
     // Should get headers quickly
@@ -83,7 +87,7 @@ TEST_F(HttpClientStreamingFixture, Streaming_EarlyError_HeadersReady404) {
     // Should complete quickly with no data
     std::vector<uint8_t> buf(16);
     size_t n = handle.read(buf.data(), buf.size());
-    (void)n; // may be 0
+    (void)n;  // may be 0
     // Either done or failed (404 is not treated as failure in low-level stream)
     EXPECT_TRUE(handle.isDone());
 }
@@ -99,7 +103,8 @@ TEST_F(HttpClientStreamingFixture, Streaming_Cancel_MidTransfer) {
     req.path = "/dav/hello.txt";
     req.headers["X-Stream-Chunked"] = "1";
 
-    StreamOptions opts; opts.bufferBytes = 64;
+    StreamOptions opts;
+    opts.bufferBytes = 64;
     auto handle = client.executeStream(req, opts);
 
     // Wait for headers then cancel
@@ -113,7 +118,10 @@ TEST_F(HttpClientStreamingFixture, Streaming_Cancel_MidTransfer) {
     bool failed = false;
     while (std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
         (void)handle.read(buf.data(), buf.size());
-        if (handle.failed()) { failed = true; break; }
+        if (handle.failed()) {
+            failed = true;
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     EXPECT_TRUE(failed) << "stream did not fail after cancel";
@@ -123,13 +131,18 @@ TEST_F(HttpClientStreamingFixture, Streaming_Cancel_MidTransfer) {
 TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_KnownLength_StatusCodes) {
     HttpClient client;
 
-    const size_t totalSize = 64 * 1024; // 64KB
+    const size_t totalSize = 64 * 1024;  // 64KB
     std::vector<uint8_t> data(totalSize);
     // Fill with deterministic pattern
     for (size_t i = 0; i < totalSize; ++i) data[i] = static_cast<uint8_t>(i & 0xFF);
 
     // Prepare a read cursor that serves small chunks to exercise callback multiple times
-    struct Cursor { const uint8_t* p; size_t n; size_t off = 0; } cur{data.data(), data.size(), 0};
+    struct Cursor
+    {
+        const uint8_t* p;
+        size_t n;
+        size_t off = 0;
+    } cur{data.data(), data.size(), 0};
     std::atomic<int> calls{0};
 
     RequestOptions opts;
@@ -138,7 +151,7 @@ TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_KnownLength_StatusCodes) 
     opts.uploadRead = [&cur, &calls](char* dst, size_t max) -> size_t {
         ++calls;
         size_t remain = cur.n - cur.off;
-        if (remain == 0) return 0; // EOF
+        if (remain == 0) return 0;  // EOF
         size_t take = std::min(max, remain);
         std::memcpy(dst, cur.p + cur.off, take);
         cur.off += take;
@@ -158,13 +171,13 @@ TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_KnownLength_StatusCodes) 
 
     // Second PUT to same path should be 204 (overwrite)
     // Reset cursor
-    cur.off = 0; calls = 0;
+    cur.off = 0;
+    calls = 0;
     auto resp2 = client.execute(req, opts);
     EXPECT_TRUE(resp2.statusCode == 201 || resp2.statusCode == 204);
 
     EXPECT_GT(calls.load(), 1) << "uploadRead should be called multiple times";
 }
-
 
 // Aggregated GET follows redirect by default (302 -> 200)
 TEST_F(HttpClientStreamingFixture, AggregatedGet_FollowsRedirectByDefault) {
@@ -175,7 +188,7 @@ TEST_F(HttpClientStreamingFixture, AggregatedGet_FollowsRedirectByDefault) {
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/redirect";
 
-    RequestOptions opts; // defaults: redirects enabled for safe methods
+    RequestOptions opts;  // defaults: redirects enabled for safe methods
     auto resp = client.execute(req, opts);
     EXPECT_EQ(resp.statusCode, 200);
     std::string body(resp.body.begin(), resp.body.end());
@@ -214,7 +227,8 @@ TEST_F(HttpClientStreamingFixture, StreamingGet_FollowsRedirectByDefault) {
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/redirect";
 
-    StreamOptions sopts; sopts.bufferBytes = 64; // small buffer ok
+    StreamOptions sopts;
+    sopts.bufferBytes = 64;  // small buffer ok
     auto handle = client.executeStream(req, sopts);
     ASSERT_TRUE(handle.waitForHeaders(std::chrono::milliseconds(2000)));
     EXPECT_EQ(handle.getStatusCode(), 200);
@@ -238,14 +252,13 @@ TEST_F(HttpClientStreamingFixture, AggregatedGet_RetryOnTransientFailure) {
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/flaky";
 
-    RequestOptions opts; // retries enabled by default for idempotent
+    RequestOptions opts;  // retries enabled by default for idempotent
     opts.totalDeadline = std::chrono::milliseconds(10000);
     auto resp = client.execute(req, opts);
     EXPECT_EQ(resp.statusCode, 200);
     std::string body(resp.body.begin(), resp.body.end());
     EXPECT_EQ(body, std::string("ok"));
 }
-
 
 // Additional happy-path streaming test with a normal (64 KiB) buffer
 TEST_F(HttpClientStreamingFixture, StreamingHappyPath_Normal64KiBBuffer) {
@@ -255,17 +268,21 @@ TEST_F(HttpClientStreamingFixture, StreamingHappyPath_Normal64KiBBuffer) {
     tree.addFile("/big.bin", big, "application/octet-stream");
 
     HttpClient client;
-    HttpRequest req; req.method = HttpMethod::GET; req.scheme = "http";
+    HttpRequest req;
+    req.method = HttpMethod::GET;
+    req.scheme = "http";
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/big.bin";
 
-    StreamOptions sopts; sopts.bufferBytes = 64 * 1024; // 64 KiB normal buffer
+    StreamOptions sopts;
+    sopts.bufferBytes = 64 * 1024;  // 64 KiB normal buffer
     auto handle = client.executeStream(req, sopts);
     ASSERT_TRUE(handle.waitForHeaders(std::chrono::milliseconds(2000)));
     EXPECT_EQ(handle.getStatusCode(), 200);
 
     std::vector<uint8_t> buf(32 * 1024);
-    std::string accum; accum.reserve(big.size());
+    std::string accum;
+    accum.reserve(big.size());
     while (!handle.isDone() && !handle.failed()) {
         size_t n = handle.read(buf.data(), buf.size());
         if (n > 0) accum.append(reinterpret_cast<const char*>(buf.data()), n);
@@ -275,16 +292,20 @@ TEST_F(HttpClientStreamingFixture, StreamingHappyPath_Normal64KiBBuffer) {
     EXPECT_EQ(accum, big);
 }
 
-
 // Unknown-length (chunked) streaming upload: PUT without contentLength
 TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_UnknownLength_Chunked) {
     HttpClient client;
 
-    const size_t totalSize = 64 * 1024; // 64KB
+    const size_t totalSize = 64 * 1024;  // 64KB
     std::vector<uint8_t> data(totalSize);
     for (size_t i = 0; i < totalSize; ++i) data[i] = static_cast<uint8_t>(i & 0xFF);
 
-    struct Cursor { const uint8_t* p; size_t n; size_t off = 0; } cur{data.data(), data.size(), 0};
+    struct Cursor
+    {
+        const uint8_t* p;
+        size_t n;
+        size_t off = 0;
+    } cur{data.data(), data.size(), 0};
     std::atomic<int> calls{0};
 
     RequestOptions opts;
@@ -293,8 +314,8 @@ TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_UnknownLength_Chunked) {
     opts.uploadRead = [&cur, &calls](char* dst, size_t max) -> size_t {
         ++calls;
         size_t remain = cur.n - cur.off;
-        if (remain == 0) return 0; // EOF
-        size_t take = std::min<size_t>(remain, std::min<size_t>(max, 4096)); // up to 4KiB per call
+        if (remain == 0) return 0;                                            // EOF
+        size_t take = std::min<size_t>(remain, std::min<size_t>(max, 4096));  // up to 4KiB per call
         std::memcpy(dst, cur.p + cur.off, take);
         cur.off += take;
         return take;
@@ -310,19 +331,21 @@ TEST_F(HttpClientStreamingFixture, StreamingUpload_Put_UnknownLength_Chunked) {
     EXPECT_TRUE(resp1.statusCode == 201 || resp1.statusCode == 204) << "status=" << resp1.statusCode;
 
     // Second PUT should typically be 204 (overwrite) from status-only server
-    cur.off = 0; calls = 0;
+    cur.off = 0;
+    calls = 0;
     auto resp2 = client.execute(req, opts);
     EXPECT_TRUE(resp2.statusCode == 201 || resp2.statusCode == 204) << "status=" << resp2.statusCode;
     EXPECT_GT(calls.load(), 1);
 }
-
 
 // If-Match precondition tests (server returns 412 on mismatch)
 TEST_F(HttpClientStreamingFixture, AggregatedPut_IfMatch_PreconditionFailed) {
     HttpClient client;
 
     // First, fetch current ETag of existing resource
-    HttpRequest getReq; getReq.method = HttpMethod::GET; getReq.scheme = "http";
+    HttpRequest getReq;
+    getReq.method = HttpMethod::GET;
+    getReq.scheme = "http";
     getReq.host = std::string("127.0.0.1:") + std::to_string(server->port());
     getReq.path = "/dav/hello.txt";
     auto getResp = client.execute(getReq);
@@ -332,8 +355,9 @@ TEST_F(HttpClientStreamingFixture, AggregatedPut_IfMatch_PreconditionFailed) {
     std::string goodETag = it->second;
 
     // Prepare PUT to same path with mismatched If-Match
-    HttpRequest putReq = getReq; putReq.method = HttpMethod::PUT;
-    putReq.headers["If-Match"] = "\"999\""; // deliberately wrong
+    HttpRequest putReq = getReq;
+    putReq.method = HttpMethod::PUT;
+    putReq.headers["If-Match"] = "\"999\"";  // deliberately wrong
     std::string payload = "payload";
     putReq.headers["Content-Type"] = "application/octet-stream";
     putReq.body.assign(payload.begin(), payload.end());
@@ -351,15 +375,18 @@ TEST_F(HttpClientStreamingFixture, AggregatedDelete_IfMatch_PreconditionFailed) 
     HttpClient client;
 
     // Obtain ETag of existing resource
-    HttpRequest getReq; getReq.method = HttpMethod::GET; getReq.scheme = "http";
+    HttpRequest getReq;
+    getReq.method = HttpMethod::GET;
+    getReq.scheme = "http";
     getReq.host = std::string("127.0.0.1:") + std::to_string(server->port());
     getReq.path = "/dav/hello.txt";
     auto getResp = client.execute(getReq);
     ASSERT_EQ(getResp.statusCode, 200);
 
     // DELETE with mismatched If-Match should return 412
-    HttpRequest delReq = getReq; delReq.method = HttpMethod::DELETE_;
-    delReq.path = "/dav/hello.txt"; // delete existing file from this fixture
+    HttpRequest delReq = getReq;
+    delReq.method = HttpMethod::DELETE_;
+    delReq.path = "/dav/hello.txt";  // delete existing file from this fixture
     delReq.headers["If-Match"] = "\"does-not-match\"";
     auto delResp = client.execute(delReq);
     EXPECT_EQ(delResp.statusCode, 412);

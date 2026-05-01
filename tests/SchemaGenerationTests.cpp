@@ -7,10 +7,11 @@
  * This file is part of the Entropy Networking project.
  */
 
-#include <gtest/gtest.h>
-#include "../src/Networking/Core/SchemaGeneration.h"
-#include <TypeSystem/Reflection.h>
 #include <Logging/Logger.h>
+#include <TypeSystem/Reflection.h>
+#include <gtest/gtest.h>
+
+#include "../src/Networking/Core/SchemaGeneration.h"
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Core::TypeSystem;
@@ -18,25 +19,27 @@ using namespace EntropyEngine::Core::TypeSystem;
 /**
  * @brief Test component using EntropyCore reflection
  */
-struct TestTransform {
+struct TestTransform
+{
     ENTROPY_REGISTER_TYPE(TestTransform);
 
-    ENTROPY_FIELD(Vec3, position) = {0.0f, 0.0f, 0.0f};
-    ENTROPY_FIELD(Quat, rotation) = {0.0f, 0.0f, 0.0f, 1.0f};
-    ENTROPY_FIELD(Vec3, scale) = {1.0f, 1.0f, 1.0f};
+    ENTROPY_FIELD(Vec3, position) = { 0.0f, 0.0f, 0.0f };
+    ENTROPY_FIELD(Quat, rotation) = { 0.0f, 0.0f, 0.0f, 1.0f };
+    ENTROPY_FIELD(Vec3, scale) = { 1.0f, 1.0f, 1.0f };
 };
 
 /**
  * @brief Test component with various property types
  */
-struct TestComponent {
+struct TestComponent
+{
     ENTROPY_REGISTER_TYPE(TestComponent);
 
     ENTROPY_FIELD(int32_t, id) = 0;
     ENTROPY_FIELD(float, value) = 0.0f;
     ENTROPY_FIELD(bool, enabled) = true;
     ENTROPY_FIELD(std::string, name) = "";
-    ENTROPY_FIELD(Vec2, position2d) = {0.0f, 0.0f};
+    ENTROPY_FIELD(Vec2, position2d) = { 0.0f, 0.0f };
 };
 
 /**
@@ -105,8 +108,8 @@ TEST(SchemaGenerationTests, GenerateSchema_Offsets) {
     // Verify offsets are correctly extracted from reflection
     for (const auto& prop : schema.properties) {
         // Offsets should be valid (0 or positive)
-        EXPECT_GE(prop.offset, 0u);                        // Should be valid offset
-        EXPECT_GT(prop.size, 0u);                          // Should have non-zero size
+        EXPECT_GE(prop.offset, 0u);  // Should be valid offset
+        EXPECT_GT(prop.size, 0u);    // Should have non-zero size
     }
 }
 
@@ -195,7 +198,9 @@ TEST(SchemaGenerationTests, RuntimeMapping_VectorTypes) {
 
 TEST(SchemaGenerationTests, RuntimeMapping_UnknownType) {
     // Create a TypeID for an unmapped type
-    struct UnmappedType {};
+    struct UnmappedType
+    {
+    };
     auto result = mapTypeIdToPropertyType(createTypeId<UnmappedType>());
 
     EXPECT_FALSE(result.has_value());

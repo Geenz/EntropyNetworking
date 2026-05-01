@@ -5,11 +5,13 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Transport/LocalServer.h"
-#include <thread>
+
 #include <atomic>
 #include <chrono>
+#include <thread>
+
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/LocalServer.h"
 
 using namespace EntropyEngine::Networking;
 
@@ -24,14 +26,12 @@ TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
     ASSERT_TRUE(server->listen().success());
 
     std::atomic<bool> serverAccepted{false};
-    std::thread serverThread([&]{
+    std::thread serverThread([&] {
         auto conn = server->accept();
         if (!conn.valid()) return;
         serverAccepted = true;
         // Echo back any payloads
-        conn.setMessageCallback([conn](const std::vector<uint8_t>& data) mutable {
-            (void)conn.send(data);
-        });
+        conn.setMessageCallback([conn](const std::vector<uint8_t>& data) mutable { (void)conn.send(data); });
         while (conn.isConnected()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
@@ -45,15 +45,15 @@ TEST(ManagerMetricsTests, LocalIpcMetricsAndTrySendWouldBlock) {
     // Connect client
     ASSERT_TRUE(client.connect().success());
     // Wait up to 1s to be connected
-    for (int i=0; i<100 && !client.isConnected(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    for (int i = 0; i < 100 && !client.isConnected(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ASSERT_TRUE(client.isConnected());
 
     // Ensure server accepted
-    for (int i=0; i<100 && !serverAccepted.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    for (int i = 0; i < 100 && !serverAccepted.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ASSERT_TRUE(serverAccepted.load());
 
     // Send a message
-    std::vector<uint8_t> payload{'p','i','n','g'};
+    std::vector<uint8_t> payload{'p', 'i', 'n', 'g'};
     ASSERT_TRUE(client.send(payload).success());
 
     // Give it a moment for echo and metric increments

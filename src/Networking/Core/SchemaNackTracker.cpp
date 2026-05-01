@@ -8,15 +8,15 @@
  */
 
 #include "SchemaNackTracker.h"
+
 #include <algorithm>
 
-namespace EntropyEngine {
-namespace Networking {
-
-SchemaNackTracker::SchemaNackTracker(const Config& config)
-    : _config(config)
+namespace EntropyEngine
 {
-}
+namespace Networking
+{
+
+SchemaNackTracker::SchemaNackTracker(const Config& config) : _config(config) {}
 
 bool SchemaNackTracker::shouldSendNack(const ComponentTypeHash& typeHash) {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -29,9 +29,7 @@ bool SchemaNackTracker::shouldSendNack(const ComponentTypeHash& typeHash) {
 
     // Check if enough time has passed since last NACK
     auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - it->second.lastNackTime
-    );
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.lastNackTime);
 
     return elapsed >= _config.minInterval;
 }
@@ -92,10 +90,7 @@ void SchemaNackTracker::pruneOldRecords() {
     }
 
     // Sort by timestamp (oldest first)
-    std::sort(records.begin(), records.end(),
-              [](const auto& a, const auto& b) {
-                  return a.second < b.second;
-              });
+    std::sort(records.begin(), records.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
 
     // Remove oldest entries
     size_t toRemove = records.size() - targetSize;
@@ -104,5 +99,5 @@ void SchemaNackTracker::pruneOldRecords() {
     }
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

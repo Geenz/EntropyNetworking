@@ -7,9 +7,11 @@
  * This file is part of the Entropy Networking project.
  */
 #include "Networking/WebDAV/WebDAVReadStream.h"
+
 #include <cstdlib>
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 WebDAVReadStream::WebDAVReadStream(HTTP::StreamHandle handle, std::string url)
     : _handle(std::move(handle)), _url(std::move(url)) {
@@ -60,8 +62,12 @@ Core::IO::IoResult WebDAVReadStream::write(std::span<const uint8_t>) {
     return {0, false, Core::IO::FileError::InvalidPath};
 }
 
-bool WebDAVReadStream::seek(int64_t, std::ios_base::seekdir) { return false; }
-int64_t WebDAVReadStream::tell() const { return -1; }
+bool WebDAVReadStream::seek(int64_t, std::ios_base::seekdir) {
+    return false;
+}
+int64_t WebDAVReadStream::tell() const {
+    return -1;
+}
 
 bool WebDAVReadStream::good() const {
     return !_closed && !_handle.failed() && _handle.getStatusCode() < 400;
@@ -109,4 +115,4 @@ std::optional<std::string> WebDAVReadStream::contentType() const {
     return it->second;
 }
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

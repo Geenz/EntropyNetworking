@@ -15,10 +15,11 @@
  * to automatically create ComponentSchema definitions from EntropyCore reflection.
  */
 
-#include <Networking/Core/SchemaGeneration.h>
-#include <Networking/Core/ComponentSchemaRegistry.h>
-#include <TypeSystem/Reflection.h>
 #include <Logging/Logger.h>
+#include <Networking/Core/ComponentSchemaRegistry.h>
+#include <Networking/Core/SchemaGeneration.h>
+#include <TypeSystem/Reflection.h>
+
 #include <format>
 
 using namespace EntropyEngine::Networking;
@@ -31,12 +32,13 @@ using namespace EntropyEngine::Core::TypeSystem;
 /**
  * @brief Transform component using built-in Vec3 and Quat types
  */
-struct Transform {
+struct Transform
+{
     ENTROPY_REGISTER_TYPE(Transform);
 
-    ENTROPY_FIELD(Vec3, position) = {0.0f, 0.0f, 0.0f};
-    ENTROPY_FIELD(Quat, rotation) = {0.0f, 0.0f, 0.0f, 1.0f};
-    ENTROPY_FIELD(Vec3, scale) = {1.0f, 1.0f, 1.0f};
+    ENTROPY_FIELD(Vec3, position) = { 0.0f, 0.0f, 0.0f };
+    ENTROPY_FIELD(Quat, rotation) = { 0.0f, 0.0f, 0.0f, 1.0f };
+    ENTROPY_FIELD(Vec3, scale) = { 1.0f, 1.0f, 1.0f };
 };
 
 // ============================================================================
@@ -46,14 +48,15 @@ struct Transform {
 /**
  * @brief Player component demonstrating multiple property types
  */
-struct Player {
+struct Player
+{
     ENTROPY_REGISTER_TYPE(Player);
 
     ENTROPY_FIELD(int32_t, id) = 0;
     ENTROPY_FIELD(std::string, name) = "Player";
     ENTROPY_FIELD(float, health) = 100.0f;
     ENTROPY_FIELD(bool, isAlive) = true;
-    ENTROPY_FIELD(Vec3, velocity) = {0.0f, 0.0f, 0.0f};
+    ENTROPY_FIELD(Vec3, velocity) = { 0.0f, 0.0f, 0.0f };
 };
 
 // ============================================================================
@@ -63,7 +66,8 @@ struct Player {
 /**
  * @brief Light type enumeration
  */
-enum class LightType : uint32_t {
+enum class LightType : uint32_t
+{
     Point = 0,
     Directional = 1,
     Spot = 2
@@ -72,21 +76,25 @@ enum class LightType : uint32_t {
 /**
  * @brief Light component with enum field
  */
-struct Light {
+struct Light
+{
     ENTROPY_REGISTER_TYPE(Light);
 
     ENTROPY_FIELD(LightType, lightType) = LightType::Point;
-    ENTROPY_FIELD(Vec3, color) = {1.0f, 1.0f, 1.0f};
+    ENTROPY_FIELD(Vec3, color) = { 1.0f, 1.0f, 1.0f };
     ENTROPY_FIELD(float, intensity) = 1.0f;
     ENTROPY_FIELD(float, range) = 10.0f;
 };
 
 // Register enum mapping (required for enums)
-namespace EntropyEngine::Networking {
-    template<> struct TypeToPropertyType<LightType> {
-        static constexpr PropertyType value = PropertyType::Int32;
-    };
-}
+namespace EntropyEngine::Networking
+{
+template <>
+struct TypeToPropertyType<LightType>
+{
+    static constexpr PropertyType value = PropertyType::Int32;
+};
+}  // namespace EntropyEngine::Networking
 
 // ============================================================================
 // Example 4: Custom type mapping extension
@@ -132,20 +140,15 @@ namespace EntropyEngine::Networking {
 // ============================================================================
 
 void printSchema(const ComponentSchema& schema) {
-    ENTROPY_LOG_INFO(std::format("{}.{} v{} (size: {} bytes, public: {})",
-                             schema.appId, schema.componentName,
-                             schema.schemaVersion, schema.totalSize,
-                             schema.isPublic ? "yes" : "no"));
+    ENTROPY_LOG_INFO(std::format("{}.{} v{} (size: {} bytes, public: {})", schema.appId, schema.componentName,
+                                 schema.schemaVersion, schema.totalSize, schema.isPublic ? "yes" : "no"));
 
     ENTROPY_LOG_INFO(std::format("Type Hash: {}:{}", schema.typeHash.high, schema.typeHash.low));
     ENTROPY_LOG_INFO("Properties:");
 
     for (const auto& prop : schema.properties) {
-        ENTROPY_LOG_INFO(std::format("  - {} ({}) @ offset {} (size: {} bytes)",
-                                 prop.name,
-                                 propertyTypeToString(prop.type),
-                                 prop.offset,
-                                 prop.size));
+        ENTROPY_LOG_INFO(std::format("  - {} ({}) @ offset {} (size: {} bytes)", prop.name,
+                                     propertyTypeToString(prop.type), prop.offset, prop.size));
     }
 }
 
@@ -223,10 +226,7 @@ int main() {
     ENTROPY_LOG_INFO(std::format("Found {} public schemas:", publicSchemas.size()));
 
     for (const auto& schema : publicSchemas) {
-        ENTROPY_LOG_INFO(std::format("  - {}.{} v{}",
-                                 schema.appId,
-                                 schema.componentName,
-                                 schema.schemaVersion));
+        ENTROPY_LOG_INFO(std::format("  - {}.{} v{}", schema.appId, schema.componentName, schema.schemaVersion));
     }
 
     // ========================================================================
@@ -241,13 +241,12 @@ int main() {
     if (transformV2Result.success()) {
         // Same structural hash (same fields)
         bool structurallyCompatible = transformResult.value.isStructurallyCompatible(transformV2Result.value);
-        ENTROPY_LOG_INFO(std::format("Transform v1 and v2 structurally compatible: {}",
-                                 structurallyCompatible ? "yes" : "no"));
+        ENTROPY_LOG_INFO(
+            std::format("Transform v1 and v2 structurally compatible: {}", structurallyCompatible ? "yes" : "no"));
 
         // Different type hashes (different versions)
         bool sameTypeHash = (transformResult.value.typeHash == transformV2Result.value.typeHash);
-        ENTROPY_LOG_INFO(std::format("Transform v1 and v2 same type hash: {}",
-                                 sameTypeHash ? "yes" : "no"));
+        ENTROPY_LOG_INFO(std::format("Transform v1 and v2 same type hash: {}", sameTypeHash ? "yes" : "no"));
     }
 
     // ========================================================================
@@ -260,8 +259,7 @@ int main() {
     std::vector<PropertyDefinition> manualProps = {
         {"position", PropertyType::Vec3, offsetof(Transform, position), sizeof(Vec3)},
         {"rotation", PropertyType::Quat, offsetof(Transform, rotation), sizeof(Quat)},
-        {"scale", PropertyType::Vec3, offsetof(Transform, scale), sizeof(Vec3)}
-    };
+        {"scale", PropertyType::Vec3, offsetof(Transform, scale), sizeof(Vec3)}};
 
     auto manualResult = ComponentSchema::create("ExampleApp", "Transform", 1, manualProps, sizeof(Transform), true);
 
@@ -271,8 +269,7 @@ int main() {
 
         // Should produce same structural hash
         bool sameStructure = (manualResult.value.structuralHash == transformResult.value.structuralHash);
-        ENTROPY_LOG_INFO(std::format("Schemas structurally identical: {}",
-                                 sameStructure ? "yes" : "no"));
+        ENTROPY_LOG_INFO(std::format("Schemas structurally identical: {}", sameStructure ? "yes" : "no"));
     }
 
     ENTROPY_LOG_INFO("=== Example complete ===");

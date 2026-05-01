@@ -9,11 +9,13 @@
 
 #pragma once
 
-#include "LocalServer.h"
-#include <string>
 #include <atomic>
+#include <string>
 
-namespace EntropyEngine::Networking {
+#include "LocalServer.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Unix domain socket server implementation
@@ -21,7 +23,8 @@ namespace EntropyEngine::Networking {
  * Provides server-side Unix socket functionality for Linux/macOS.
  * Handles socket creation, binding, listening, and accepting connections.
  */
-class UnixSocketServer : public LocalServer {
+class UnixSocketServer : public LocalServer
+{
 public:
     UnixSocketServer(ConnectionManager* connMgr, std::string socketPath);
     UnixSocketServer(ConnectionManager* connMgr, std::string socketPath, LocalServerConfig config);
@@ -31,10 +34,14 @@ public:
     Result<void> listen() override;
     ConnectionHandle accept() override;
     Result<void> close() override;
-    bool isListening() const override { return _listening.load(std::memory_order_acquire); }
+    bool isListening() const override {
+        return _listening.load(std::memory_order_acquire);
+    }
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "UnixSocketServer"; }
+    const char* className() const noexcept override {
+        return "UnixSocketServer";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -46,4 +53,4 @@ private:
     LocalServerConfig _config{};
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

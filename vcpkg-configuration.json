@@ -2,14 +2,18 @@
   "default-registry": {
     "kind": "git",
     "repository": "https://github.com/microsoft/vcpkg",
-    "baseline": "271a5b8850aa50f9a40269cbf3cf414b36e333d6"
+    "baseline": "b2f068faf45a3f04145bec0f52a66526ad590227"
   },
   "registries": [
     {
       "kind": "git",
       "repository": "https://github.com/Geenz/EntropyRegistry",
-      "baseline": "448888e50e70264e9007542ec0f101ae365b0dd3",
+      "baseline": "2f7cb543275e75ea979ceef2ebdaffba4d96eb40",
       "packages": ["entropycore"]
     }
+  ],
+  "overlay-ports": [
+    "./vcpkg-overlays/capnproto",
+    "./vcpkg-overlays/libdatachannel"
   ]
 }

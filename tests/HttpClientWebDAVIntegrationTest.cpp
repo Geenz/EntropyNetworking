@@ -8,11 +8,13 @@
  */
 
 #include <gtest/gtest.h>
-#include "MiniDavServer.h"
-#include "DavTree.h"
-#include "Networking/HTTP/HttpClient.h"
+
 #include <string>
 #include <thread>
+
+#include "DavTree.h"
+#include "MiniDavServer.h"
+#include "Networking/HTTP/HttpClient.h"
 
 using namespace EntropyEngine::Networking::HTTP;
 
@@ -22,7 +24,8 @@ using namespace EntropyEngine::Networking::HTTP;
  * These tests verify that HttpClient can successfully communicate with
  * a local WebDAV server (MiniDavServer) for WebDAV operations.
  */
-class HttpClientWebDAVIntegration : public ::testing::Test {
+class HttpClientWebDAVIntegration : public ::testing::Test
+{
 protected:
     void SetUp() override {
         // Build test tree with various file types
@@ -56,8 +59,7 @@ TEST_F(HttpClientWebDAVIntegration, SimpleGet) {
 
     auto resp = client.execute(req);
 
-    ASSERT_TRUE(resp.isSuccess()) << "Status: " << resp.statusCode
-                                   << ", Message: " << resp.statusMessage;
+    ASSERT_TRUE(resp.isSuccess()) << "Status: " << resp.statusCode << ", Message: " << resp.statusMessage;
     EXPECT_EQ(resp.statusCode, 200);
 
     std::string body(resp.body.begin(), resp.body.end());
@@ -181,8 +183,7 @@ TEST_F(HttpClientWebDAVIntegration, RangeRequest) {
     auto resp = client.execute(req);
 
     // MiniDavServer now supports Range requests
-    ASSERT_EQ(resp.statusCode, 206) << "Status: " << resp.statusCode
-                                     << ", Message: " << resp.statusMessage;
+    ASSERT_EQ(resp.statusCode, 206) << "Status: " << resp.statusCode << ", Message: " << resp.statusMessage;
 
     std::string body(resp.body.begin(), resp.body.end());
     EXPECT_EQ(body, "hello");  // "hello world" -> first 5 bytes = "hello"

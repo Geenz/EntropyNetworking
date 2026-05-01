@@ -8,10 +8,12 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Transport/WebRTCConnection.h"
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include <thread>
+
 #include <chrono>
+#include <thread>
+
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/WebRTCConnection.h"
 
 using namespace EntropyEngine::Networking;
 

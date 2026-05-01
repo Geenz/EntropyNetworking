@@ -18,30 +18,32 @@
 
 #pragma once
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <memory>
-#include <optional>
 #include <vector>
 
 // VFS (from EntropyCore)
-#include <VirtualFileSystem/VirtualFileSystem.h>
-#include <VirtualFileSystem/FileHandle.h>
 #include <VirtualFileSystem/DirectoryHandle.h>
+#include <VirtualFileSystem/FileHandle.h>
+#include <VirtualFileSystem/VirtualFileSystem.h>
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Minimal HTTP request representation for WebDAV operations
  *
  * Lightweight HTTP request type avoiding dependencies on external HTTP libraries.
  */
-struct HttpRequestLite {
-    std::string method;                 ///< HTTP method (e.g. "GET", "HEAD", "PROPFIND", "OPTIONS")
-    std::string urlPath;                ///< Decoded server-relative path (e.g. "/dav/assets/foo.bin")
-    std::unordered_map<std::string, std::string> headers; ///< HTTP headers (case-insensitive matching not enforced)
-    std::string body;                   ///< Optional request body (e.g., PROPFIND XML)
+struct HttpRequestLite
+{
+    std::string method;   ///< HTTP method (e.g. "GET", "HEAD", "PROPFIND", "OPTIONS")
+    std::string urlPath;  ///< Decoded server-relative path (e.g. "/dav/assets/foo.bin")
+    std::unordered_map<std::string, std::string> headers;  ///< HTTP headers (case-insensitive matching not enforced)
+    std::string body;                                      ///< Optional request body (e.g., PROPFIND XML)
 };
 
 /**
@@ -49,10 +51,11 @@ struct HttpRequestLite {
  *
  * Lightweight HTTP response type avoiding dependencies on external HTTP libraries.
  */
-struct HttpResponseLite {
-    int status = 500;                   ///< HTTP status code (default 500 Internal Server Error)
-    std::unordered_map<std::string, std::string> headers; ///< HTTP response headers
-    std::string body;                   ///< Response body (empty for HEAD, populated for GET/PROPFIND)
+struct HttpResponseLite
+{
+    int status = 500;                                      ///< HTTP status code (default 500 Internal Server Error)
+    std::unordered_map<std::string, std::string> headers;  ///< HTTP response headers
+    std::string body;  ///< Response body (empty for HEAD, populated for GET/PROPFIND)
 };
 
 /**
@@ -119,7 +122,8 @@ struct HttpResponseLite {
  * // PROPFIND http://localhost/dav/config/ Depth:1 -> lists config directory
  * @endcode
  */
-class WebDavAdapter {
+class WebDavAdapter
+{
 public:
     /**
      * @brief Constructs WebDAV adapter with VFS and mount prefix
@@ -225,8 +229,8 @@ private:
      */
     static std::string buildMinimalMultistatus(const std::string& selfHref);
 
-    std::shared_ptr<Vfs> _vfs;          ///< VirtualFileSystem instance to expose over WebDAV
-    std::string _mountPrefix;           ///< URL path prefix for WebDAV operations (e.g., "/dav/")
+    std::shared_ptr<Vfs> _vfs;  ///< VirtualFileSystem instance to expose over WebDAV
+    std::string _mountPrefix;   ///< URL path prefix for WebDAV operations (e.g., "/dav/")
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

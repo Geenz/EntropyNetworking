@@ -18,14 +18,18 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "../Transport/ConnectionHandle.h"
-#include "../Core/PropertyRegistry.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
+
 #include <cstdint>
 #include <string>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ErrorCodes.h"
+#include "../Core/PropertyRegistry.h"
+#include "../Transport/ConnectionHandle.h"
+#include "NetworkSession.h"
+
+namespace EntropyEngine::Networking
+{
 
 // Forward declaration
 class SessionManager;
@@ -62,7 +66,8 @@ class SessionManager;
  * sess.sendEntityCreated(entityId, appId, typeName, parentId);
  * @endcode
  */
-class SessionHandle : public Core::EntropyObject {
+class SessionHandle : public Core::EntropyObject
+{
 private:
     friend class SessionManager;
 
@@ -78,10 +83,8 @@ public:
     // Copy constructor: create a new handle object stamped with the same identity
     SessionHandle(const SessionHandle& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -89,10 +92,8 @@ public:
     SessionHandle& operator=(const SessionHandle& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -103,10 +104,8 @@ public:
     // Move constructor
     SessionHandle(SessionHandle&& other) noexcept {
         if (other.hasHandle()) {
-            Core::HandleAccess::set(*this,
-                              const_cast<void*>(other.handleOwner()),
-                              other.handleIndex(),
-                              other.handleGeneration());
+            Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                    other.handleGeneration());
         }
     }
 
@@ -114,10 +113,8 @@ public:
     SessionHandle& operator=(SessionHandle&& other) noexcept {
         if (this != &other) {
             if (other.hasHandle()) {
-                Core::HandleAccess::set(*this,
-                                  const_cast<void*>(other.handleOwner()),
-                                  other.handleIndex(),
-                                  other.handleGeneration());
+                Core::HandleAccess::set(*this, const_cast<void*>(other.handleOwner()), other.handleIndex(),
+                                        other.handleGeneration());
             } else {
                 Core::HandleAccess::clear(*this);
             }
@@ -135,14 +132,15 @@ public:
      * @param appId Application identifier
      * @param typeName Entity type name
      * @param parentId Parent entity ID (0 for root)
+     * @param components Component groups with their properties
+     * @param targetSceneId Scene to add entity to (0 = use session's default scene)
+     * @param entityName Flecs entity name for client-side identification
      * @return Result indicating success or failure
      */
-    Result<void> sendEntityCreated(
-        uint64_t entityId,
-        const std::string& appId,
-        const std::string& typeName,
-        uint64_t parentId
-    ) const;
+    Result<void> sendEntityCreated(uint64_t entityId, const std::string& appId, const std::string& typeName,
+                                   uint64_t parentId,
+                                   const std::vector<NetworkSession::ComponentGroupData>& components = {},
+                                   uint64_t targetSceneId = 0, const std::string& entityName = "") const;
 
     /**
      * @brief Sends EntityDestroyed protocol message
@@ -154,6 +152,26 @@ public:
     Result<void> sendEntityDestroyed(uint64_t entityId) const;
 
     /**
+     * @brief Sends ComponentAdded protocol message
+     *
+     * Notifies remote peer that a component was added to an entity.
+     * @param entityId Entity that received the component
+     * @param component Component data including type hash and properties
+     * @return Result indicating success or failure
+     */
+    Result<void> sendComponentAdded(uint64_t entityId, const NetworkSession::ComponentGroupData& component) const;
+
+    /**
+     * @brief Sends ComponentRemoved protocol message
+     *
+     * Notifies remote peer that a component was removed from an entity.
+     * @param entityId Entity that lost the component
+     * @param typeHash Type hash of the removed component
+     * @return Result indicating success or failure
+     */
+    Result<void> sendComponentRemoved(uint64_t entityId, ComponentTypeHash typeHash) const;
+
+    /**
      * @brief Sends single property update
      *
      * Sends individual property change. For bulk updates, use sendPropertyUpdateBatch().
@@ -162,11 +180,7 @@ public:
      * @param value Property value
      * @return Result indicating success or failure
      */
-    Result<void> sendPropertyUpdate(
-        PropertyHash hash,
-        PropertyType type,
-        const PropertyValue& value
-    ) const;
+    Result<void> sendPropertyUpdate(PropertyHash hash, PropertyType type, const PropertyValue& value) const;
 
     /**
      * @brief Sends batched property updates
@@ -185,6 +199,221 @@ public:
      * @return Result indicating success or failure
      */
     Result<void> sendSceneSnapshot(const std::vector<uint8_t>& snapshotData) const;
+
+    /**
+     * @brief Sends heartbeat message
+     *
+     * Sends a heartbeat to the remote peer. The peer will respond with
+     * a HeartbeatResponse. Used for connection liveness detection.
+     * @return Result indicating success or failure
+     */
+    Result<void> sendHeartbeat() const;
+
+    // Asset protocol operations
+
+    /**
+     * @brief Sends AssetAdvertise request
+     * @param appId Application identifier
+     * @param entries Asset entries to advertise
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetAdvertise(const std::string& appId,
+                                    const std::vector<NetworkSession::AssetEntryData>& entries,
+                                    uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetWithdraw request
+     * @param assetIds Asset IDs to withdraw
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetWithdraw(const std::vector<std::array<uint8_t, 32>>& assetIds, uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetWithdrawAll request
+     * @param appId Application identifier
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetWithdrawAll(const std::string& appId, uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetResolve request
+     * @param assetId Asset ID to resolve
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetResolve(const std::array<uint8_t, 32>& assetId, uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetResolveBatch request
+     * @param assetIds Asset IDs to resolve
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetResolveBatch(const std::vector<std::array<uint8_t, 32>>& assetIds,
+                                       uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetProvideKey request
+     * @param assetId Asset ID
+     * @param key 32-byte encryption key
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetProvideKey(const std::array<uint8_t, 32>& assetId, const std::array<uint8_t, 32>& key,
+                                     uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetUpload request
+     * @param appId Application identifier
+     * @param data Asset data
+     * @param contentType Content type
+     * @param persistent Whether asset survives app disconnect
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                                 bool persistent, uint64_t requestId = 0) const;
+
+    /**
+     * @brief Sends AssetUpload request with metadata
+     * @param appId Application identifier
+     * @param data Asset data
+     * @param contentType Content type
+     * @param persistent Whether asset survives app disconnect
+     * @param requestId Request ID for response correlation
+     * @param metadata Type-specific metadata (shader, texture, etc.)
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUpload(const std::string& appId, const std::vector<uint8_t>& data, uint8_t contentType,
+                                 bool persistent, uint64_t requestId,
+                                 const NetworkSession::AssetMetadataData& metadata) const;
+
+    /**
+     * @brief Sends AssetFetch request (for WebRTC delivery)
+     * @param assetId Asset ID to fetch
+     * @param requestId Request ID for response correlation
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetFetch(const std::array<uint8_t, 32>& assetId, uint64_t requestId = 0) const;
+
+    // Chunked upload operations
+
+    /**
+     * @brief Begins a chunked upload session
+     * @param data Upload parameters
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUploadBegin(const NetworkSession::AssetUploadBeginData& data) const;
+
+    /**
+     * @brief Sends a chunk of data during chunked upload
+     * @param data Chunk data with upload ID, offset, and payload
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUploadChunk(const NetworkSession::AssetUploadChunkData& data) const;
+
+    /**
+     * @brief Completes a chunked upload session
+     * @param data Completion data with upload ID and total chunks
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUploadComplete(const NetworkSession::AssetUploadCompleteData& data) const;
+
+    /**
+     * @brief Cancels an in-progress chunked upload
+     * @param uploadId 16-byte upload session ID
+     * @return Result indicating success or failure
+     */
+    Result<void> sendAssetUploadCancel(const std::array<uint8_t, 16>& uploadId) const;
+
+    // Multi-channel support
+
+    /**
+     * @brief Check if connection supports multiple data channels
+     * @return true if WebRTC-style multi-channel is available
+     */
+    bool supportsMultipleChannels() const;
+
+    /**
+     * @brief Open a named data channel for bulk data transfer
+     *
+     * For WebRTC connections, creates a dedicated data channel.
+     * For other backends, this is a no-op.
+     *
+     * @param channel Channel name (use NetworkConnection::CHANNEL_* constants)
+     * @return Result indicating success or failure
+     */
+    Result<void> openChannel(const std::string& channel) const;
+
+    // Permission system operations
+
+    /**
+     * @brief Sends PermissionRequest to remote peer
+     * @param requestId Correlation ID for this request
+     * @param requestingSessionId Session originating the request
+     * @param appId Human-readable name of the requesting application
+     * @param key Permission category/permission pair
+     * @param reason Human-readable reason shown to user
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRequest(uint64_t requestId, uint64_t requestingSessionId, const std::string& appId,
+                                       PermissionKey key, const std::string& reason) const;
+
+    /**
+     * @brief Sends PermissionResponse to remote peer
+     * @param requestId Correlates to the original PermissionRequest
+     * @param respondingSessionId Session that is responding (portal)
+     * @param key Permission key being responded to
+     * @param granted User's decision
+     * @return Result indicating success or failure
+     */
+    Result<void> sendHeadPosePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false) const;
+
+    Result<void> sendIdentityPermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& identityHash = "") const;
+
+    Result<void> sendUsernamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& username = "") const;
+
+    Result<void> sendHostnamePermissionResponse(uint64_t requestId, uint64_t respondingSessionId, bool granted,
+                                                uint64_t grantToken = 0, bool isNewGrant = false,
+                                                const std::string& hostname = "") const;
+
+    /**
+     * @brief Sends PermissionRevoked notification
+     * @param portalSessionId Portal that disconnected
+     * @param key Which permission is revoked
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRevoked(uint64_t portalSessionId, PermissionKey key) const;
+
+    /**
+     * @brief Sends PermissionRequestCancelled notification
+     * @param requestId Which request was cancelled
+     * @param key Which permission
+     * @return Result indicating success or failure
+     */
+    Result<void> sendPermissionRequestCancelled(uint64_t requestId, PermissionKey key) const;
+
+    // Spatial anchoring operations
+
+    Result<void> sendRegisterLandmarkRequest(uint64_t requestId, const std::vector<uint8_t>& definitionMsgData) const;
+    Result<void> sendRegisterLandmarkResponse(uint64_t requestId, bool success, uint64_t landmarkId,
+                                              const std::string& errorMessage = "") const;
+    Result<void> sendLandmarkObservation(uint64_t landmarkId, uint64_t observerSessionId, bool detected,
+                                         const LandmarkPose& pose, float confidence, uint64_t timestamp) const;
+    Result<void> sendLandmarkStateUpdate(uint64_t landmarkId, uint8_t state, const LandmarkPose& pose,
+                                         uint16_t observerCount) const;
+    Result<void> sendUnregisterLandmarkRequest(uint64_t requestId, uint64_t landmarkId) const;
+    Result<void> sendUnregisterLandmarkResponse(uint64_t requestId, bool success,
+                                                const std::string& errorMessage = "") const;
+    Result<void> sendLandmarkSnapshot(const std::vector<uint8_t>& snapshotData) const;
 
     // Handshake operations
 
@@ -261,7 +490,9 @@ public:
     bool valid() const;
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "SessionHandle"; }
+    const char* className() const noexcept override {
+        return "SessionHandle";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -269,4 +500,4 @@ private:
     SessionManager* manager() const;
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

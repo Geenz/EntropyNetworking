@@ -16,20 +16,25 @@
 
 #pragma once
 
-#include "NetworkTypes.h"
+#include <string>
 #include <variant>
 #include <vector>
-#include <string>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "AssetId.h"
+#include "NetworkTypes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Property type enumeration
  *
  * Matches the PropertyType enum in entropy.capnp
  */
-enum class PropertyType {
+enum class PropertyType
+{
     Int32,
     Int64,
     Float32,
@@ -50,7 +55,26 @@ enum class PropertyType {
     Vec2Array,
     Vec3Array,
     Vec4Array,
-    QuatArray
+    QuatArray,
+
+    // Asset reference
+    AssetId,
+    AssetIdArray,
+
+    // Matrix types
+    Mat3,
+    Mat4,
+
+    // Texture types (values are AssetId references)
+    Texture1D,
+    Texture2D,
+    Texture3D,
+    TextureCube,
+    Texture2DArray,
+    TextureCubeArray,
+
+    // Sampler type
+    Sampler
 };
 
 /**
@@ -59,29 +83,18 @@ enum class PropertyType {
  * Holds any of the supported property types in a type-safe manner.
  * Includes scalar types and array types.
  */
-using PropertyValue = std::variant<
-    int32_t,
-    int64_t,
-    float,
-    double,
-    Vec2,
-    Vec3,
-    Vec4,
-    Quat,
-    std::string,
-    bool,
-    std::vector<uint8_t>,  // Bytes
+using PropertyValue = std::variant<int32_t, int64_t, float, double, Vec2, Vec3, Vec4, Quat, std::string, bool,
+                                   std::vector<uint8_t>,  // Bytes
 
-    // Array types
-    std::vector<int32_t>,
-    std::vector<int64_t>,
-    std::vector<float>,
-    std::vector<double>,
-    std::vector<Vec2>,
-    std::vector<Vec3>,
-    std::vector<Vec4>,
-    std::vector<Quat>
->;
+                                   // Array types
+                                   std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>,
+                                   std::vector<Vec2>, std::vector<Vec3>, std::vector<Vec4>, std::vector<Quat>,
+
+                                   // Asset reference
+                                   AssetId, std::vector<AssetId>,
+
+                                   // Matrix types
+                                   Mat3, Mat4>;
 
 /**
  * @brief Validate that a property value matches the expected type
@@ -121,6 +134,17 @@ PropertyType getPropertyType(const PropertyValue& value);
 const char* propertyTypeToString(PropertyType type);
 
 /**
+ * @brief Get the minimum required size in bytes for a property type
+ *
+ * Used for safety checks to ensure schema definitions provide enough space
+ * for the data type.
+ *
+ * @param type The property type
+ * @return Size in bytes
+ */
+size_t getPropertySize(PropertyType type);
+
+/**
  * @brief Convert C++ PropertyType to Cap'n Proto PropertyType enum
  *
  * Provides explicit, safe conversion between C++ and Cap'n Proto enum types
@@ -144,5 +168,5 @@ uint16_t toCapnpPropertyType(PropertyType type);
  */
 PropertyType fromCapnpPropertyType(uint16_t capnpType);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

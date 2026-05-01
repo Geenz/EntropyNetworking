@@ -17,14 +17,18 @@
 
 #pragma once
 
+#include <chrono>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
-#include <chrono>
 
-namespace tinyxml2 { class XMLElement; }
+namespace tinyxml2
+{
+class XMLElement;
+}
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 /**
  * @brief Resource information from WebDAV PROPFIND response
@@ -32,12 +36,13 @@ namespace EntropyEngine::Networking::WebDAV {
  * Represents a single resource (file or directory) returned by PROPFIND.
  * Extracted from DAV:response elements in the XML.
  */
-struct DavResourceInfo {
-    std::string href;                                                ///< Raw href from response (may be absolute or relative)
-    bool isCollection = false;                                       ///< true if DAV:resourcetype contains DAV:collection
-    uint64_t contentLength = 0;                                      ///< File size (0 for collections or when property missing)
-    std::optional<std::chrono::system_clock::time_point> lastModified; ///< Last modification time (nullopt if missing)
-    std::optional<std::string> contentType;                          ///< MIME type (nullopt if missing)
+struct DavResourceInfo
+{
+    std::string href;            ///< Raw href from response (may be absolute or relative)
+    bool isCollection = false;   ///< true if DAV:resourcetype contains DAV:collection
+    uint64_t contentLength = 0;  ///< File size (0 for collections or when property missing)
+    std::optional<std::chrono::system_clock::time_point> lastModified;  ///< Last modification time (nullopt if missing)
+    std::optional<std::string> contentType;                             ///< MIME type (nullopt if missing)
 };
 
 /**
@@ -66,4 +71,4 @@ struct DavResourceInfo {
  */
 std::vector<DavResourceInfo> parsePropfindXml(const std::vector<uint8_t>& xmlBytes);
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

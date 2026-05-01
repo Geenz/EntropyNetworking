@@ -15,10 +15,11 @@
 
 #include "EntropyCore.h"
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 static inline void toLowerInPlace(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 }
 
 // llhttp C callbacks (aggregated response mode)
@@ -67,8 +68,7 @@ static int on_body_cb(llhttp_t* p, const char* at, size_t len) {
         pr->failureReason = "Response body exceeds maximum size";
         return (int)HPE_USER;
     }
-    pr->resp.body.insert(pr->resp.body.end(),
-                         reinterpret_cast<const uint8_t*>(at),
+    pr->resp.body.insert(pr->resp.body.end(), reinterpret_cast<const uint8_t*>(at),
                          reinterpret_cast<const uint8_t*>(at) + len);
     return 0;
 }
@@ -179,7 +179,7 @@ WebDAVConnection::WebDAVConnection(std::shared_ptr<EntropyEngine::Networking::Ne
     _streamSettings.on_message_complete = on_stream_message_complete_cb;
 
     // Install permanent callback that feeds data into the parser of the active request
-    _conn->setMessageCallback([this](const std::vector<uint8_t>& bytes){ onDataReceived(bytes); });
+    _conn->setMessageCallback([this](const std::vector<uint8_t>& bytes) { onDataReceived(bytes); });
 }
 
 WebDAVConnection::~WebDAVConnection() {
@@ -198,9 +198,8 @@ WebDAVConnection::~WebDAVConnection() {
     _leftover.clear();
 }
 
-std::string WebDAVConnection::buildRequest(const char* method,
-                                           const std::string& path,
-                                           const std::vector<std::pair<std::string,std::string>>& headers,
+std::string WebDAVConnection::buildRequest(const char* method, const std::string& path,
+                                           const std::vector<std::pair<std::string, std::string>>& headers,
                                            const std::string& body) {
     std::ostringstream o;
     o << method << ' ' << path << " HTTP/1.1\r\n";
@@ -230,9 +229,7 @@ WebDAVConnection::Response WebDAVConnection::sendAndReceive(std::string request)
 
     // Feed any leftover bytes first (rare but possible if a response raced in)
     if (!_leftover.empty()) {
-        auto err = llhttp_execute(&_parser,
-                                  reinterpret_cast<const char*>(_leftover.data()),
-                                  _leftover.size());
+        auto err = llhttp_execute(&_parser, reinterpret_cast<const char*>(_leftover.data()), _leftover.size());
         _leftover.clear();
         if (err != HPE_OK && err != HPE_PAUSED) {
             _active->failed = true;
@@ -255,14 +252,16 @@ WebDAVConnection::Response WebDAVConnection::sendAndReceive(std::string request)
     }
 
     // Wait
-    const bool timedout = !_active->cv.wait_for(lk, _cfg.requestTimeout, [this]{
-        return _active->done || _active->failed; });
+    const bool timedout =
+        !_active->cv.wait_for(lk, _cfg.requestTimeout, [this] { return _active->done || _active->failed; });
 
     Response out;
     if (timedout) {
-        out.statusCode = 0; out.statusMessage = "timeout";
+        out.statusCode = 0;
+        out.statusMessage = "timeout";
     } else if (_active->failed) {
-        out.statusCode = 0; out.statusMessage = _active->failureReason;
+        out.statusCode = 0;
+        out.statusMessage = _active->failureReason;
     } else {
         out = std::move(_active->resp);
     }
@@ -274,9 +273,15 @@ WebDAVConnection::Response WebDAVConnection::sendAndReceive(std::string request)
 void WebDAVConnection::onDataReceived(const std::vector<uint8_t>& bytes) {
     // Guard lifetime across callback execution
     _inCallback.fetch_add(1, std::memory_order_acq_rel);
-    struct Guard { std::atomic<int>& c; ~Guard(){ c.fetch_sub(1, std::memory_order_acq_rel); } } guard{_inCallback};
+    struct Guard
+    {
+        std::atomic<int>& c;
+        ~Guard() {
+            c.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    } guard{_inCallback};
     if (_shuttingDown.load(std::memory_order_acquire)) {
-        return; // ignore incoming data during shutdown
+        return;  // ignore incoming data during shutdown
     }
 
     std::lock_guard<std::mutex> lk(_reqMutex);
@@ -321,7 +326,7 @@ void WebDAVConnection::onDataReceived(const std::vector<uint8_t>& bytes) {
     }
 
     // No active request: accumulate leftover up to a small cap
-    constexpr size_t ABS_CAP = 1u << 20; // 1 MiB
+    constexpr size_t ABS_CAP = 1u << 20;  // 1 MiB
     const size_t cap = std::min<std::size_t>(ABS_CAP, _cfg.maxBodyBytes / 4);
     if (_leftover.size() + bytes.size() > cap) {
         _leftover.clear();
@@ -331,23 +336,21 @@ void WebDAVConnection::onDataReceived(const std::vector<uint8_t>& bytes) {
 }
 
 WebDAVConnection::Response WebDAVConnection::get(const std::string& path,
-                 const std::vector<std::pair<std::string,std::string>>& extraHeaders) {
+                                                 const std::vector<std::pair<std::string, std::string>>& extraHeaders) {
     auto req = buildRequest("GET", path, extraHeaders, {});
     return sendAndReceive(std::move(req));
 }
 
-WebDAVConnection::Response WebDAVConnection::head(const std::string& path,
-                  const std::vector<std::pair<std::string,std::string>>& extraHeaders) {
+WebDAVConnection::Response WebDAVConnection::head(
+    const std::string& path, const std::vector<std::pair<std::string, std::string>>& extraHeaders) {
     auto req = buildRequest("HEAD", path, extraHeaders, {});
     return sendAndReceive(std::move(req));
 }
 
 WebDAVConnection::Response WebDAVConnection::propfind(const std::string& path, int depth, const std::string& bodyXml) {
-    std::vector<std::pair<std::string,std::string>> hdrs{
-        {"Depth", std::to_string(depth)},
-        {"Content-Type", "application/xml; charset=utf-8"},
-        {"Accept", "application/xml, text/xml; q=0.9, */*; q=0.1"}
-    };
+    std::vector<std::pair<std::string, std::string>> hdrs{{"Depth", std::to_string(depth)},
+                                                          {"Content-Type", "application/xml; charset=utf-8"},
+                                                          {"Accept", "application/xml, text/xml; q=0.9, */*; q=0.1"}};
     auto req = buildRequest("PROPFIND", path, hdrs, bodyXml);
     return sendAndReceive(std::move(req));
 }
@@ -396,7 +399,7 @@ WebDAVConnection::StreamHandle WebDAVConnection::openGetStream(const std::string
     }
 
     // Build and send the request without holding the mutex to avoid deadlock with callback
-    std::vector<std::pair<std::string,std::string>> hdrs = cfg.headers; // copy
+    std::vector<std::pair<std::string, std::string>> hdrs = cfg.headers;  // copy
     auto req = buildRequest("GET", path, hdrs, {});
     lk.unlock();
     auto sendResult = _conn->send(std::vector<uint8_t>(req.begin(), req.end()));
@@ -433,7 +436,7 @@ void WebDAVConnection::resumeIfPaused() {
             if (consumed > 0) {
                 _pausedRemainder.erase(_pausedRemainder.begin(), _pausedRemainder.begin() + consumed);
             }
-            _activeStream->parserPaused = true; // still paused
+            _activeStream->parserPaused = true;  // still paused
         } else if (err != HPE_OK) {
             _activeStream->failed = true;
             _activeStream->failureReason = std::string("llhttp error on resume: ") + llhttp_errno_name(err);
@@ -461,4 +464,4 @@ void WebDAVConnection::abortActiveRequest() {
     }
 }
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

@@ -17,17 +17,19 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
-#include <unordered_map>
-
 #include <VirtualFileSystem/FileStream.h>
-#include "Networking/HTTP/HttpClient.h"
-#include <optional>
-#include <cstdint>
 
-namespace EntropyEngine::Networking::WebDAV {
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "Networking/HTTP/HttpClient.h"
+
+namespace EntropyEngine::Networking::WebDAV
+{
 
 /**
  * @brief Read-only FileStream for WebDAV GET operations via HttpClient
@@ -48,7 +50,8 @@ namespace EntropyEngine::Networking::WebDAV {
  * stream->close();
  * @endcode
  */
-class WebDAVReadStream : public Core::IO::FileStream {
+class WebDAVReadStream : public Core::IO::FileStream
+{
 public:
     /**
      * @brief Constructs stream from HttpClient StreamHandle
@@ -129,7 +132,9 @@ public:
      * @brief Gets stream path/URL
      * @return URL being streamed
      */
-    std::string path() const override { return _url; }
+    std::string path() const override {
+        return _url;
+    }
 
     /**
      * @brief Returns HTTP status code of the streaming response (0 if unavailable)
@@ -151,9 +156,9 @@ public:
     std::optional<std::string> contentType() const;
 
 private:
-    HTTP::StreamHandle _handle;    ///< HttpClient stream handle for incremental reading
-    std::string _url;              ///< URL being streamed
-    bool _closed = false;          ///< true if close() called
+    HTTP::StreamHandle _handle;  ///< HttpClient stream handle for incremental reading
+    std::string _url;            ///< URL being streamed
+    bool _closed = false;        ///< true if close() called
 };
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

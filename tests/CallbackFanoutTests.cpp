@@ -8,12 +8,14 @@
  */
 
 #include <gtest/gtest.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/LocalServer.h"
-#include <thread>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
 
 using namespace EntropyEngine::Networking;
 
@@ -28,11 +30,11 @@ TEST(CallbackFanoutTests, StateCallbackBeforeAndAfterConnect) {
     ASSERT_TRUE(server->listen().success());
 
     std::atomic<bool> serverStop{false};
-    std::thread serverThread([&]{
+    std::thread serverThread([&] {
         auto conn = server->accept();
         if (!conn.valid()) return;
         conn.setMessageCallback([conn](const std::vector<uint8_t>& data) mutable {
-            (void)conn.send(data); // echo
+            (void)conn.send(data);  // echo
         });
         while (!serverStop.load(std::memory_order_acquire) && conn.isConnected()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -53,7 +55,7 @@ TEST(CallbackFanoutTests, StateCallbackBeforeAndAfterConnect) {
     int stateCallbacksAfter = 0;
 
     // Set user state callback BEFORE connect
-    h.setStateCallback([&](ConnectionState s){
+    h.setStateCallback([&](ConnectionState s) {
         if (s == ConnectionState::Connected) {
             std::lock_guard<std::mutex> lk(m);
             gotConnected = true;
@@ -75,7 +77,7 @@ TEST(CallbackFanoutTests, StateCallbackBeforeAndAfterConnect) {
     EXPECT_EQ(h.getState(), ConnectionState::Connected);
 
     // Now set another state callback AFTER connect
-    h.setStateCallback([&](ConnectionState s){
+    h.setStateCallback([&](ConnectionState s) {
         if (s == ConnectionState::Disconnected) {
             ++stateCallbacksAfter;
         }

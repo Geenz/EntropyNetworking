@@ -9,13 +9,16 @@
 
 #pragma once
 
-#include "PropertyHash.h"
 #include <chrono>
-#include <unordered_map>
 #include <mutex>
+#include <unordered_map>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "PropertyHash.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Tracks schema NACKs with rate limiting and metrics
@@ -23,20 +26,18 @@ namespace Networking {
  * Simple tracker to prevent NACK spam when encountering unknown schemas.
  * Uses basic time-based rate limiting per schema hash.
  */
-class SchemaNackTracker {
+class SchemaNackTracker
+{
 public:
     /**
      * @brief Configuration for NACK rate limiting
      */
-    struct Config {
+    struct Config
+    {
         std::chrono::milliseconds minInterval;  ///< Minimum interval between NACKs for same schema
         size_t maxTrackedSchemas;               ///< Maximum number of schemas to track
 
-        Config()
-            : minInterval(1000)
-            , maxTrackedSchemas(1000)
-        {
-        }
+        Config() : minInterval(1000), maxTrackedSchemas(1000) {}
     };
 
     explicit SchemaNackTracker(const Config& config = Config());
@@ -76,7 +77,8 @@ public:
     void clear();
 
 private:
-    struct NackRecord {
+    struct NackRecord
+    {
         std::chrono::steady_clock::time_point lastNackTime{};
         size_t count{0};
     };
@@ -89,5 +91,5 @@ private:
     void pruneOldRecords();
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

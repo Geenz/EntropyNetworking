@@ -8,14 +8,16 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Session/NetworkSession.h"
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Transport/LocalServer.h"
-#include "../src/Networking/Transport/ConnectionHandle.h"
-#include <thread>
+
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <atomic>
+#include <thread>
+
+#include "../src/Networking/Session/NetworkSession.h"
+#include "../src/Networking/Transport/ConnectionHandle.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
+#include "../src/Networking/Transport/LocalServer.h"
 
 using namespace EntropyEngine::Networking;
 
@@ -23,7 +25,8 @@ using namespace EntropyEngine::Networking;
  * Tests for NACK and SchemaAdvertisement integration in NetworkSession
  * Uses cross-platform LocalServer for local IPC
  */
-class NetworkSessionNackTests : public ::testing::Test {
+class NetworkSessionNackTests : public ::testing::Test
+{
 protected:
     void SetUp() override {
         endpoint = "/tmp/entropy_nack_test_" + std::to_string(getTestCounter()) + ".sock";
@@ -64,9 +67,7 @@ protected:
 
     bool connectSessions() {
         // Start server accept in background
-        std::thread serverThread([this]() {
-            serverHandle = server->accept();
-        });
+        std::thread serverThread([this]() { serverHandle = server->accept(); });
 
         // Connect client
         clientHandle = clientMgr->openLocalConnection(endpoint);
@@ -244,9 +245,8 @@ TEST_F(NetworkSessionNackTests, NackTrackerIntegration) {
 
     std::atomic<int> nackCount{0};
 
-    serverSession->setSchemaNackCallback([&](ComponentTypeHash, const std::string&, uint64_t) {
-        nackCount.fetch_add(1, std::memory_order_relaxed);
-    });
+    serverSession->setSchemaNackCallback(
+        [&](ComponentTypeHash, const std::string&, uint64_t) { nackCount.fetch_add(1, std::memory_order_relaxed); });
 
     // Try sending multiple NACKs rapidly - rate limiting should prevent spam
     for (int i = 0; i < 5; ++i) {
@@ -261,9 +261,7 @@ TEST_F(NetworkSessionNackTests, NackTrackerIntegration) {
 
 TEST_F(NetworkSessionNackTests, SendNackBeforeConnection_Fails) {
     // Use the existing server from SetUp, but create a new connection
-    std::thread serverThread([this]() {
-        serverHandle = server->accept();
-    });
+    std::thread serverThread([this]() { serverHandle = server->accept(); });
 
     clientHandle = clientMgr->openLocalConnection(endpoint);
     ASSERT_TRUE(clientHandle.valid());

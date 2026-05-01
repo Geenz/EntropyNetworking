@@ -8,24 +8,23 @@
  */
 
 #include <gtest/gtest.h>
-#include "../src/Networking/Core/PropertyRegistry.h"
-#include "../src/Networking/Core/ComponentSchema.h"
+
 #include <chrono>
+
+#include "../src/Networking/Core/ComponentSchema.h"
+#include "../src/Networking/Core/PropertyRegistry.h"
 
 using namespace EntropyEngine::Networking;
 
 static uint64_t getCurrentTimestamp() {
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
+    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+        .count();
 }
 
 // Helper function to create a ComponentTypeHash for testing
 static ComponentTypeHash createTestComponentType(const std::string& appId, const std::string& componentName) {
     // Create a minimal valid schema with one dummy property
-    std::vector<PropertyDefinition> props = {
-        {"dummy", PropertyType::Int32, 0, 4}
-    };
+    std::vector<PropertyDefinition> props = {{"dummy", PropertyType::Int32, 0, 4}};
     auto schemaResult = ComponentSchema::create(appId, componentName, 1, props, 4, false);
     if (schemaResult.success()) {
         return schemaResult.value.typeHash;
@@ -74,7 +73,8 @@ TEST(PropertyRegistryTests, HashCollisionDetection) {
     EXPECT_TRUE(result1.success());
 
     // Attempt to register same hash with different metadata (should fail)
-    PropertyMetadata meta2{hash, 42, typeHash, "velocity", PropertyType::Vec3, getCurrentTimestamp()};  // Different propertyName
+    PropertyMetadata meta2{
+        hash, 42, typeHash, "velocity", PropertyType::Vec3, getCurrentTimestamp()};  // Different propertyName
     auto result2 = registry.registerProperty(meta2);
     EXPECT_TRUE(result2.failed());
     EXPECT_EQ(result2.error, NetworkError::HashCollision);
@@ -269,11 +269,13 @@ TEST(PropertyRegistryTests, Size) {
     auto hash1 = computePropertyHash(1, typeHash, "field1");
     auto hash2 = computePropertyHash(2, typeHash, "field2");
 
-    registry.registerProperty(PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
     EXPECT_EQ(registry.size(), 1);
     EXPECT_FALSE(registry.empty());
 
-    registry.registerProperty(PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Int32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Int32, getCurrentTimestamp()});
     EXPECT_EQ(registry.size(), 2);
 }
 
@@ -284,8 +286,10 @@ TEST(PropertyRegistryTests, Clear) {
     auto hash1 = computePropertyHash(1, typeHash, "field1");
     auto hash2 = computePropertyHash(2, typeHash, "field2");
 
-    registry.registerProperty(PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
-    registry.registerProperty(PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Int32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Int32, getCurrentTimestamp()});
 
     EXPECT_EQ(registry.size(), 2);
 
@@ -303,8 +307,10 @@ TEST(PropertyRegistryTests, GetAllProperties) {
     auto hash1 = computePropertyHash(1, typeHash, "field1");
     auto hash2 = computePropertyHash(2, typeHash, "field2");
 
-    registry.registerProperty(PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
-    registry.registerProperty(PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Float32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash1, 1, typeHash, "field1", PropertyType::Int32, getCurrentTimestamp()});
+    registry.registerProperty(
+        PropertyMetadata{hash2, 2, typeHash, "field2", PropertyType::Float32, getCurrentTimestamp()});
 
     auto all = registry.getAllProperties();
 
@@ -367,7 +373,8 @@ TEST(PropertyRegistryTests, EntityPropertyLimit) {
     // Register properties up to the limit
     for (size_t i = 0; i < PropertyRegistry::MAX_PROPERTIES_PER_ENTITY; ++i) {
         auto hash = computePropertyHash(42, typeHash, "prop" + std::to_string(i));
-        PropertyMetadata meta{hash, 42, typeHash, "prop" + std::to_string(i), PropertyType::Int32, getCurrentTimestamp()};
+        PropertyMetadata meta{
+            hash, 42, typeHash, "prop" + std::to_string(i), PropertyType::Int32, getCurrentTimestamp()};
         auto result = registry.registerProperty(meta);
         EXPECT_TRUE(result.success());
     }

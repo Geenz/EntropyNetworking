@@ -17,20 +17,21 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <span>
-#include <vector>
-#include <optional>
-#include <mutex>
-
 #include <VirtualFileSystem/IFileSystemBackend.h>
+
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "Networking/HTTP/HttpClient.h"
 #include "Networking/WebDAV/WebDAVPropfindParser.h"
 #include "Networking/WebDAV/WebDAVUtils.h"
 
-namespace EntropyEngine::Networking::WebDAV {
+namespace EntropyEngine::Networking::WebDAV
+{
 
 /**
  * @brief Read-only VFS backend for WebDAV servers
@@ -68,12 +69,14 @@ namespace EntropyEngine::Networking::WebDAV {
  * processData(readOp.bytes());
  * @endcode
  */
-class WebDAVFileSystemBackend : public Core::IO::IFileSystemBackend {
+class WebDAVFileSystemBackend : public Core::IO::IFileSystemBackend
+{
 public:
     /**
      * @brief Backend configuration
      */
-    struct Config {
+    struct Config
+    {
         std::string scheme = "https";  ///< HTTP scheme ("http" or "https", defaults to "https")
         std::string host;              ///< Server hostname with optional port (e.g., "example.com:8080")
         std::string baseUrl;           ///< Base URL path on server (e.g., "/dav/assets")
@@ -93,24 +96,20 @@ public:
      * @param options Read options (offset, length for partial reads)
      * @return FileOperationHandle that completes with file bytes
      */
-    Core::IO::FileOperationHandle readFile(const std::string& path,
-                                           Core::IO::ReadOptions options = {}) override;
+    Core::IO::FileOperationHandle readFile(const std::string& path, Core::IO::ReadOptions options = {}) override;
 
     // Backend-specific helper: Conditional GET with If-None-Match; returns Complete with empty body on 304
-    Core::IO::FileOperationHandle readFileIfNoneMatch(const std::string& path,
-                                                      const std::string& etag);
+    Core::IO::FileOperationHandle readFileIfNoneMatch(const std::string& path, const std::string& etag);
 
     /**
      * @brief Write operations not supported (read-only backend)
      * @return Immediate failure handle
      */
-    Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const uint8_t> data,
+    Core::IO::FileOperationHandle writeFile(const std::string& path, std::span<const uint8_t> data,
                                             Core::IO::WriteOptions options = {}) override;
 
     // Backend-specific helper overload: write with If-Match precondition (no EntropyCore API changes)
-    Core::IO::FileOperationHandle writeFile(const std::string& path,
-                                            std::span<const uint8_t> data,
+    Core::IO::FileOperationHandle writeFile(const std::string& path, std::span<const uint8_t> data,
                                             const std::string& ifMatchETag);
 
     /**
@@ -120,8 +119,7 @@ public:
     Core::IO::FileOperationHandle deleteFile(const std::string& path) override;
 
     // Backend-specific helper: delete with If-Match precondition (no EntropyCore API changes)
-    Core::IO::FileOperationHandle deleteFileIfMatch(const std::string& path,
-                                                    const std::string& ifMatchETag);
+    Core::IO::FileOperationHandle deleteFileIfMatch(const std::string& path, const std::string& ifMatchETag);
 
     /**
      * @brief Create operations not supported (read-only backend)
@@ -137,14 +135,10 @@ public:
     Core::IO::FileOperationHandle createDirectory(const std::string& path) override;
 
     // WebDAV MOVE/COPY operations (backend-specific helpers)
-    Core::IO::FileOperationHandle move(const std::string& srcPath,
-                                       const std::string& dstPath,
-                                       bool overwrite = true,
+    Core::IO::FileOperationHandle move(const std::string& srcPath, const std::string& dstPath, bool overwrite = true,
                                        std::optional<std::string> ifMatchETag = {});
 
-    Core::IO::FileOperationHandle copy(const std::string& srcPath,
-                                       const std::string& dstPath,
-                                       bool overwrite = true,
+    Core::IO::FileOperationHandle copy(const std::string& srcPath, const std::string& dstPath, bool overwrite = true,
                                        bool depth0 = false);
 
     /**
@@ -201,19 +195,23 @@ public:
      * @brief Gets backend type identifier
      * @return "WebDAV"
      */
-    std::string getBackendType() const override { return "WebDAV"; }
+    std::string getBackendType() const override {
+        return "WebDAV";
+    }
 
     /**
      * @brief Path normalization for VFS locking (pass-through)
      * @param path Path to normalize
      * @return Path unchanged (WebDAV paths are used as-is)
      */
-    std::string normalizeKey(const std::string& path) const override { return path; }
+    std::string normalizeKey(const std::string& path) const override {
+        return path;
+    }
 
 private:
     const std::shared_ptr<HTTP::HttpClient> _client;  ///< HTTP client for WebDAV operations
-    const Config _cfg;               ///< Backend configuration
-    mutable std::mutex _clientMutex;  ///< Protects _client shared_ptr copy (ref count)
+    const Config _cfg;                                ///< Backend configuration
+    mutable std::mutex _clientMutex;                  ///< Protects _client shared_ptr copy (ref count)
 
     /**
      * @brief Builds full URL from VFS path
@@ -231,4 +229,4 @@ private:
     static Core::IO::FileError mapHttpStatus(int statusCode);
 };
 
-} // namespace EntropyEngine::Networking::WebDAV
+}  // namespace EntropyEngine::Networking::WebDAV

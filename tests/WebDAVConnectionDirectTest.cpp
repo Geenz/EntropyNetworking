@@ -2,13 +2,15 @@
 // WebDAV functionality is tested via WebDAVClientIntegrationTests using real HTTP server.
 #if 0
 
+#include <Concurrency/WorkService.h>
 #include <gtest/gtest.h>
+
+#include <iostream>
+
+#include "DavTree.h"
 #include "HttpNetworkConnection.h"
 #include "MiniDavServer.h"
-#include "DavTree.h"
 #include "Networking/WebDAV/WebDAVConnection.h"
-#include <Concurrency/WorkService.h>
-#include <iostream>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Networking::WebDAV;
@@ -64,4 +66,4 @@ TEST(WebDAVConnectionDirectTest, SimpleGet) {
     server.stop();
 }
 
-#endif // Disabled WebDAVConnectionDirectTest
+#endif  // Disabled WebDAVConnectionDirectTest

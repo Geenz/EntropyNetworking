@@ -12,8 +12,10 @@
 #include <atomic>
 #include <cstdint>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Global, thread-safe policy for schema NACK behavior
@@ -34,7 +36,8 @@ namespace Networking {
  * All operations use atomics for lock-free access in hot paths.
  * Thread-safe: All fields are atomic and can be safely accessed from multiple threads.
  */
-struct SchemaNackPolicy {
+struct SchemaNackPolicy
+{
     /// @brief Enable/disable sending NACK messages (default: false)
     /// When false, unknown schemas are logged and counted but no NACKs are sent
     std::atomic<bool> enabled{false};
@@ -135,5 +138,5 @@ private:
     SchemaNackPolicy() = default;
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine
