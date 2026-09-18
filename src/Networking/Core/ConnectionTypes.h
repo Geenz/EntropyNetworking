@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>

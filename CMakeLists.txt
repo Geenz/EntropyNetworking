@@ -245,6 +245,8 @@ endif()
 if(WIN32)
     # Settings for Windows
     target_compile_definitions(EntropyNetworking PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+    # WaitOnAddress/WakeByAddress* (SharedMemoryPlatformWin32.cpp)
+    target_link_libraries(EntropyNetworking PRIVATE synchronization)
     if(MSVC)
         target_compile_options(EntropyNetworking PRIVATE /W4)
     endif()

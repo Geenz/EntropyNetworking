@@ -41,7 +41,7 @@ namespace EntropyEngine::Networking::SharedMemory
 
 #ifdef _WIN32
 using NativeHandle = HANDLE;
-static constexpr NativeHandle INVALID_HANDLE_VALUE_SHM = INVALID_HANDLE_VALUE;
+static const NativeHandle INVALID_HANDLE_VALUE_SHM = INVALID_HANDLE_VALUE;
 #else
 using NativeHandle = int;
 static constexpr NativeHandle INVALID_HANDLE_VALUE_SHM = -1;
