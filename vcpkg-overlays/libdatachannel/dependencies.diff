@@ -4,7 +4,7 @@ index 8a61757..b35e4b1 100644
 +++ b/CMakeLists.txt
 @@ -234,7 +234,7 @@ set(THREADS_PREFER_PTHREAD_FLAG TRUE)
  find_package(Threads REQUIRED)
-
+ 
  if(USE_SYSTEM_PLOG)
 -	find_package(plog REQUIRED)
 +	find_package(plog CONFIG REQUIRED)
@@ -13,7 +13,7 @@ index 8a61757..b35e4b1 100644
  	add_subdirectory(deps/plog EXCLUDE_FROM_ALL)
 @@ -245,7 +245,8 @@ if(SCTP_DEBUG)
  endif()
-
+ 
  if(USE_SYSTEM_USRSCTP)
 -	find_package(Usrsctp REQUIRED)
 +	find_package(unofficial-usrsctp CONFIG REQUIRED)
@@ -51,5 +51,5 @@ index cb2b884..d0b77ca 100644
 +    find_dependency(LibJuice)
 +endif()
 +
-
+ 
  include("${CMAKE_CURRENT_LIST_DIR}/LibDataChannelTargets.cmake")

@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <climits>
 #include <cstring>
 
 #ifdef __linux__

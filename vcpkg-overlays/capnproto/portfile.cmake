@@ -1,13 +1,18 @@
+# Overlay of the stock vcpkg capnproto port. The only deltas from the registry
+# port are the iOS/Android cross-compile guards: the capnp/capnpc-* code
+# generators cannot run on the target device (and would need BUNDLE DESTINATION
+# on iOS), so mobile builds use EXTERNAL_CAPNP + CAPNP_LITE and skip the tools.
 vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO capnproto/capnproto
     REF "v${VERSION}"
-    SHA512 342f08683e60b8346f7d119242781835889d7804d54fca00348f14abe9f76bcb4572678dd4d3471c638cabe94e5a77aaf7c19b6edf297cb25a319ac544c659e4
+    SHA512 d3072f590212d40010fa7946e000ac9fe927c9058fcda518c14275c7a217207db644d44a124398873d3875bb5f1f8e52dbeccfbc4b4c003e8e35fd83486fc343
     HEAD_REF master
     PATCHES
-        undef-KJ_USE_EPOLL-for-ANDROID_PLATFORM-23.patch
+        001-fix-android.patch
+        002-fix-pkg-config.patch
 )
 
 if(VCPKG_TARGET_IS_WINDOWS AND NOT VCPKG_TARGET_IS_MINGW)
@@ -21,8 +26,9 @@ vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS
         "openssl" OPENSSL_FEATURE
 )
 
-# iOS cross-compilation: skip tools (capnp, capnpc-*)
-# They would need BUNDLE DESTINATION and can't run on device anyway
+# iOS/Android cross-compilation: skip tools (capnp, capnpc-*). They would need
+# BUNDLE DESTINATION and can't run on device anyway; the host-triplet build of
+# this same port supplies the code generators.
 set(EXTERNAL_CAPNP_OPTION "")
 if(VCPKG_TARGET_IS_IOS OR VCPKG_TARGET_IS_ANDROID)
     set(EXTERNAL_CAPNP_OPTION "-DEXTERNAL_CAPNP=ON" "-DCAPNP_LITE=ON")
