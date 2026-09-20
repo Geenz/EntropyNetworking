@@ -8,20 +8,26 @@
  */
 
 #include "WebRTCServer.h"
-#include "WebRTCConnection.h"
-#include <Logging/Logger.h>
-#include <format>
-#include <cstring>
 
-namespace EntropyEngine {
-namespace Networking {
+#include <Logging/Logger.h>
+
+#include <cstring>
+#include <format>
+
+#include "WebRTCConnection.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 // Binary envelope framing for signaling messages (same as in WebRTCConnection.cpp)
 // Format: [Type:1B][Length:4B big-endian][Payload]
 // Type: 0x01=SDP, 0x02=ICE
 // Payload: For SDP: type\0sdp, For ICE: candidate\0mid
 
-enum class SignalingMessageType : uint8_t {
+enum class SignalingMessageType : uint8_t
+{
     SDP = 0x01,
     ICE = 0x02
 };
@@ -36,10 +42,8 @@ static void encodeU32BigEndian(uint32_t value, uint8_t* dest) {
 
 // Decode big-endian bytes to uint32_t
 static uint32_t decodeU32BigEndian(const uint8_t* src) {
-    return (static_cast<uint32_t>(src[0]) << 24) |
-           (static_cast<uint32_t>(src[1]) << 16) |
-           (static_cast<uint32_t>(src[2]) << 8) |
-           static_cast<uint32_t>(src[3]);
+    return (static_cast<uint32_t>(src[0]) << 24) | (static_cast<uint32_t>(src[1]) << 16) |
+           (static_cast<uint32_t>(src[2]) << 8) | static_cast<uint32_t>(src[3]);
 }
 
 // Encode SDP description into binary envelope
@@ -86,8 +90,8 @@ static std::vector<uint8_t> encodeICEMessage(const std::string& candidate, const
 
 // Decode binary envelope message
 // Returns: {type, str1, str2} where for SDP: str1=type, str2=sdp; for ICE: str1=candidate, str2=mid
-static std::optional<std::tuple<SignalingMessageType, std::string, std::string>>
-decodeSignalingMessage(const std::vector<uint8_t>& data) {
+static std::optional<std::tuple<SignalingMessageType, std::string, std::string>> decodeSignalingMessage(
+    const std::vector<uint8_t>& data) {
     // Minimum size: Type(1) + Length(4) = 5 bytes
     if (data.size() < 5) {
         ENTROPY_LOG_ERROR("Signaling message too short");
@@ -99,8 +103,8 @@ decodeSignalingMessage(const std::vector<uint8_t>& data) {
 
     // Verify payload length
     if (data.size() != 5 + payloadLength) {
-        ENTROPY_LOG_ERROR(std::format("Signaling message length mismatch: expected {}, got {}",
-            5 + payloadLength, data.size()));
+        ENTROPY_LOG_ERROR(
+            std::format("Signaling message length mismatch: expected {}, got {}", 5 + payloadLength, data.size()));
         return std::nullopt;
     }
 
@@ -108,8 +112,7 @@ decodeSignalingMessage(const std::vector<uint8_t>& data) {
     const uint8_t* payload = &data[5];
 
     // Find null terminator
-    const uint8_t* nullPos = static_cast<const uint8_t*>(
-        std::memchr(payload, 0, payloadLength));
+    const uint8_t* nullPos = static_cast<const uint8_t*>(std::memchr(payload, 0, payloadLength));
     if (!nullPos) {
         ENTROPY_LOG_ERROR("Signaling message payload missing null terminator");
         return std::nullopt;
@@ -124,16 +127,13 @@ decodeSignalingMessage(const std::vector<uint8_t>& data) {
     }
 
     std::string str1(reinterpret_cast<const char*>(payload), firstStringLen);
-    std::string str2(reinterpret_cast<const char*>(payload + secondStringStart),
-                    payloadLength - secondStringStart);
+    std::string str2(reinterpret_cast<const char*>(payload + secondStringStart), payloadLength - secondStringStart);
 
     return std::make_tuple(msgType, str1, str2);
 }
 
 WebRTCServer::WebRTCServer(ConnectionManager* connMgr, const RemoteServerConfig& config)
-    : _connMgr(connMgr)
-    , _config(config)
-{
+    : _connMgr(connMgr), _config(config) {
     if (!_connMgr) {
         ENTROPY_LOG_ERROR("WebRTCServer: ConnectionManager is null");
     }
@@ -147,17 +147,11 @@ WebRTCServer::~WebRTCServer() {
 
 Result<void> WebRTCServer::listen() {
     if (_listening.load(std::memory_order_acquire)) {
-        return Result<void>::err(
-            NetworkError::AlreadyExists,
-            "Server is already listening"
-        );
+        return Result<void>::err(NetworkError::AlreadyExists, "Server is already listening");
     }
 
     if (!_connMgr) {
-        return Result<void>::err(
-            NetworkError::InvalidParameter,
-            "ConnectionManager is null"
-        );
+        return Result<void>::err(NetworkError::InvalidParameter, "ConnectionManager is null");
     }
 
     try {
@@ -170,9 +164,7 @@ Result<void> WebRTCServer::listen() {
         _wsServer = std::make_unique<rtc::WebSocketServer>(wsConfig);
 
         // Set up client handler
-        _wsServer->onClient([this](std::shared_ptr<rtc::WebSocket> ws) {
-            handleWebSocketClient(ws);
-        });
+        _wsServer->onClient([this](std::shared_ptr<rtc::WebSocket> ws) { handleWebSocketClient(ws); });
 
         _listening.store(true, std::memory_order_release);
 
@@ -181,10 +173,8 @@ Result<void> WebRTCServer::listen() {
         return Result<void>::ok();
 
     } catch (const std::exception& e) {
-        return Result<void>::err(
-            NetworkError::ConnectionClosed,
-            std::format("Failed to start WebSocket server: {}", e.what())
-        );
+        return Result<void>::err(NetworkError::ConnectionClosed,
+                                 std::format("Failed to start WebSocket server: {}", e.what()));
     }
 }
 
@@ -192,9 +182,7 @@ ConnectionHandle WebRTCServer::accept() {
     std::unique_lock<std::mutex> lock(_queueMutex);
 
     // Wait for a connection or shutdown
-    _queueCV.wait(lock, [this] {
-        return !_pendingConnections.empty() || !_listening.load(std::memory_order_acquire);
-    });
+    _queueCV.wait(lock, [this] { return !_pendingConnections.empty() || !_listening.load(std::memory_order_acquire); });
 
     // Check if we're shutting down
     if (!_listening.load(std::memory_order_acquire)) {
@@ -319,9 +307,7 @@ void WebRTCServer::handleWebSocketClient(std::shared_ptr<rtc::WebSocket> ws) {
         }
     });
 
-    ws->onError([](std::string error) {
-        ENTROPY_LOG_ERROR(std::format("WebRTCServer: Signaling error: {}", error));
-    });
+    ws->onError([](std::string error) { ENTROPY_LOG_ERROR(std::format("WebRTCServer: Signaling error: {}", error)); });
 
     // Connect the WebRTC peer
     auto connectResult = conn.connect();
@@ -331,5 +317,5 @@ void WebRTCServer::handleWebSocketClient(std::shared_ptr<rtc::WebSocket> ws) {
     }
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

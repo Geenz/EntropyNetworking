@@ -9,15 +9,19 @@
 
 #pragma once
 
-#include "ConnectionHandle.h"
-#include "WebRTCConnection.h"
 #include <EntropyCore.h>
+
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <cstdint>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ConnectionHandle.h"
+#include "WebRTCConnection.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 // Forward declarations
 class ConnectionManager;
@@ -28,8 +32,9 @@ class ConnectionManager;
  * These settings are specific to WebRTC protocol and nested
  * within RemoteServerConfig for extensibility.
  */
-struct WebRTCServerConfig {
-    bool polite = false;  // Server is typically impolite in perfect negotiation
+struct WebRTCServerConfig
+{
+    bool polite = false;                  // Server is typically impolite in perfect negotiation
     std::vector<std::string> iceServers;  // STUN/TURN server URLs
 };
 
@@ -40,7 +45,8 @@ struct WebRTCServerConfig {
  * settings nested within. This allows future protocols (QUIC, etc.)
  * to be added without changing the base config structure.
  */
-struct RemoteServerConfig {
+struct RemoteServerConfig
+{
     // Generic remote connection settings
     uint16_t port = 8080;
     int backlog = 128;
@@ -83,7 +89,8 @@ struct RemoteServerConfig {
  * - accept() may be called from multiple threads
  * - close() must be safe to call from any thread
  */
-class RemoteServer : public Core::EntropyObject {
+class RemoteServer : public Core::EntropyObject
+{
 public:
     virtual ~RemoteServer() = default;
 
@@ -135,10 +142,7 @@ protected:
  * @param port Port number to listen on (default 8080)
  * @return Unique pointer to RemoteServer instance
  */
-std::unique_ptr<RemoteServer> createRemoteServer(
-    ConnectionManager* connMgr,
-    uint16_t port = 8080
-);
+std::unique_ptr<RemoteServer> createRemoteServer(ConnectionManager* connMgr, uint16_t port = 8080);
 
 /**
  * @brief Create a remote server with custom configuration
@@ -151,10 +155,7 @@ std::unique_ptr<RemoteServer> createRemoteServer(
  * @param config Complete server configuration
  * @return Unique pointer to RemoteServer instance
  */
-std::unique_ptr<RemoteServer> createRemoteServer(
-    ConnectionManager* connMgr,
-    const RemoteServerConfig& config
-);
+std::unique_ptr<RemoteServer> createRemoteServer(ConnectionManager* connMgr, const RemoteServerConfig& config);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

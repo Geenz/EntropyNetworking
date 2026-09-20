@@ -9,18 +9,21 @@
 
 #pragma once
 
-#include "RemoteServer.h"
-#include "ConnectionManager.h"
-#include <rtc/rtc.hpp>
-#include <rtc/track.hpp>
-#include <memory>
 #include <atomic>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <queue>
-#include <condition_variable>
+#include <rtc/rtc.hpp>
+#include <rtc/track.hpp>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ConnectionManager.h"
+#include "RemoteServer.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief WebRTC-based implementation of RemoteServer
@@ -47,7 +50,8 @@ namespace Networking {
  * - Connection adoption handled automatically
  * - Cleanup on close() or destruction
  */
-class WebRTCServer : public RemoteServer {
+class WebRTCServer : public RemoteServer
+{
 public:
     /**
      * @brief Construct WebRTC server with configuration
@@ -124,5 +128,5 @@ private:
     std::atomic<bool> _listening{false};
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

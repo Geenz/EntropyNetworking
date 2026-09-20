@@ -1,27 +1,27 @@
 #pragma once
 
-#include <string>
-#include <thread>
 #include <atomic>
-#include <unordered_map>
-#include <vector>
-#include <optional>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _WIN32
-  #define NOMINMAX
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #pragma comment(lib, "Ws2_32.lib")
+#define NOMINMAX
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
 #else
-  #include <sys/types.h>
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <unistd.h>
-  #include <fcntl.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include "DavTree.h"
@@ -34,18 +34,19 @@
  * limitations with custom HTTP methods like PROPFIND. Cross-platform and suitable
  * for local integration tests.
  */
-class MiniDavServer {
+class MiniDavServer
+{
 public:
-    explicit MiniDavServer(DavTree& tree, std::string mount = "/dav/")
-        : _tree(tree), _base(std::move(mount)) {}
+    explicit MiniDavServer(DavTree& tree, std::string mount = "/dav/") : _tree(tree), _base(std::move(mount)) {}
 
-    ~MiniDavServer() { stop(); }
+    ~MiniDavServer() {
+        stop();
+    }
 
     void start() {
 #ifdef _WIN32
         WSADATA wsaData{};
-        if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0)
-            throw std::runtime_error("WSAStartup failed");
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) throw std::runtime_error("WSAStartup failed");
 #endif
         _running.store(true);
         _listenSock = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -60,16 +61,14 @@ public:
 
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(0); // any available port
+        addr.sin_port = htons(0);  // any available port
 #ifdef _WIN32
         inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 #else
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 #endif
-        if (::bind(_listenSock, (sockaddr*)&addr, sizeof(addr)) < 0)
-            throw std::runtime_error("bind failed");
-        if (::listen(_listenSock, 8) < 0)
-            throw std::runtime_error("listen failed");
+        if (::bind(_listenSock, (sockaddr*)&addr, sizeof(addr)) < 0) throw std::runtime_error("bind failed");
+        if (::listen(_listenSock, 8) < 0) throw std::runtime_error("listen failed");
 
         // Get bound port
         socklen_t len = sizeof(addr);
@@ -77,7 +76,7 @@ public:
             _port = ntohs(addr.sin_port);
         }
 
-        _thr = std::thread([this]{ this->acceptLoop(); });
+        _thr = std::thread([this] { this->acceptLoop(); });
         // Give server time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -105,7 +104,9 @@ public:
         }
     }
 
-    uint16_t port() const { return _port; }
+    uint16_t port() const {
+        return _port;
+    }
 
 private:
     void acceptLoop() {
@@ -141,8 +142,7 @@ private:
 #else
         int
 #endif
-        cs)
-    {
+            cs) {
         std::string req;
         char buf[4096];
         // Read until header end or buffer limit
@@ -155,7 +155,7 @@ private:
             if (n <= 0) break;
             req.append(buf, buf + n);
             if (req.find("\r\n\r\n") != std::string::npos) break;
-            if (req.size() > 64 * 1024) break; // header cap
+            if (req.size() > 64 * 1024) break;  // header cap
         }
         if (req.empty()) return;
 
@@ -170,7 +170,7 @@ private:
         std::string path = req.substr(sp1 + 1, sp2 - (sp1 + 1));
 
         // Parse headers
-        std::unordered_map<std::string,std::string> headers;
+        std::unordered_map<std::string, std::string> headers;
         auto hdrStart = req.find("\r\n") + 2;
         auto hdrEnd = req.find("\r\n\r\n");
         size_t i = hdrStart;
@@ -206,7 +206,7 @@ private:
         std::string body;
         if (isChunked) {
             // Decode chunked body from the socket using the already buffered data in `req`
-            size_t pos = hdrEnd + 4; // start of body within req buffer
+            size_t pos = hdrEnd + 4;  // start of body within req buffer
             auto readMore = [&]() -> bool {
 #ifdef _WIN32
                 int n = ::recv(cs, buf, sizeof(buf), 0);
@@ -239,7 +239,7 @@ private:
 
             for (;;) {
                 std::string sizeLine = readLine();
-                if (sizeLine.empty()) break; // malformed
+                if (sizeLine.empty()) break;  // malformed
                 // sizeLine may include chunk extensions after ';' — strip them
                 auto sc = sizeLine.find(';');
                 if (sc != std::string::npos) sizeLine = sizeLine.substr(0, sc);
@@ -283,13 +283,19 @@ private:
             // Extract leading digits
             size_t i = 0;
             bool neg = false;
-            if (rest[0] == '-') { neg = true; i = 1; }
-            for (; i < rest.size() && std::isdigit((unsigned char)rest[i]); ++i) {}
+            if (rest[0] == '-') {
+                neg = true;
+                i = 1;
+            }
+            for (; i < rest.size() && std::isdigit((unsigned char)rest[i]); ++i) {
+            }
             if (i == (neg ? 1 : 0)) return false;
             try {
                 outVal = std::stoi(rest.substr(0, i));
                 return true;
-            } catch (...) { return false; }
+            } catch (...) {
+                return false;
+            }
         };
 
         // /status/<code>
@@ -311,7 +317,7 @@ private:
                     // Fill with deterministic pattern 'A'..'Z'
                     for (int i = 0; i < nbytes; ++i) body[(size_t)i] = (char)('A' + (i % 26));
                 }
-                std::unordered_map<std::string,std::string> hdrs;
+                std::unordered_map<std::string, std::string> hdrs;
                 hdrs["Content-Length"] = std::to_string((size_t)nbytes);
                 sendRaw(cs, 200, "application/octet-stream", body, hdrs);
                 return;
@@ -379,10 +385,10 @@ private:
         if (method == "PROPFIND") {
             int depth = 0;
             if (auto it = headers.find("depth"); it != headers.end()) {
-                if (it->second == "1") depth = 1;
+                if (it->second == "1")
+                    depth = 1;
                 else if (it->second == "infinity") {
-                    sendRaw(cs, 400, "application/xml; charset=utf-8",
-                           "<error>Depth infinity not supported</error>");
+                    sendRaw(cs, 400, "application/xml; charset=utf-8", "<error>Depth infinity not supported</error>");
                     return;
                 }
             }
@@ -413,7 +419,7 @@ private:
                 return;
             }
 
-            std::unordered_map<std::string,std::string> extraHeaders;
+            std::unordered_map<std::string, std::string> extraHeaders;
             extraHeaders["Accept-Ranges"] = "bytes";
             std::string mime = n->mime.empty() ? "application/octet-stream" : n->mime;
 
@@ -471,7 +477,7 @@ private:
             if (method == "HEAD") {
                 // HEAD: advertise full length, no body
                 extraHeaders["Content-Length"] = std::to_string(n->content.size());
-                sendRaw(cs, 200, mime, /*body*/"", extraHeaders);
+                sendRaw(cs, 200, mime, /*body*/ "", extraHeaders);
                 return;
             }
 
@@ -486,8 +492,9 @@ private:
             std::string bodyOut = n->content;
             if (wantChunked) {
                 // Small chunk size to ensure multiple chunks for small files
-                size_t chunkSize = 5; // 5-byte chunks work well with tests reading small pieces
-                int delayMs = 2; // small inter-chunk delay to allow mid-transfer cancellation tests to observe aborts reliably
+                size_t chunkSize = 5;  // 5-byte chunks work well with tests reading small pieces
+                int delayMs =
+                    2;  // small inter-chunk delay to allow mid-transfer cancellation tests to observe aborts reliably
                 sendChunked(cs, 200, mime, bodyOut, extraHeaders, chunkSize, delayMs);
             } else {
                 extraHeaders["Content-Length"] = std::to_string(bodyOut.size());
@@ -516,7 +523,7 @@ private:
                 }
                 bool ok = false;
                 if (cond == "*") {
-                    ok = true; // any current representation is acceptable
+                    ok = true;  // any current representation is acceptable
                 } else {
                     // Compare against our simple ETag for files (size-based)
                     if (!n->isDir) {
@@ -548,7 +555,7 @@ private:
                 std::string cond = itIfMatch->second;
                 bool ok = false;
                 if (cond == "*") {
-                    ok = true; // any current representation is acceptable
+                    ok = true;  // any current representation is acceptable
                 } else {
                     if (!n->isDir) {
                         std::string etag = "\"" + std::to_string(n->content.size()) + "\"";
@@ -577,11 +584,14 @@ private:
             }
             // Check parent existence
             std::string parent = tpath;
-            if (parent.size()>1 && parent.back()=='/') parent.pop_back();
+            if (parent.size() > 1 && parent.back() == '/') parent.pop_back();
             auto slash = parent.find_last_of('/');
-            if (slash == std::string::npos) parent = "/";
-            else if (slash == 0) parent = "/";
-            else parent = parent.substr(0, slash);
+            if (slash == std::string::npos)
+                parent = "/";
+            else if (slash == 0)
+                parent = "/";
+            else
+                parent = parent.substr(0, slash);
             auto* pn = _tree.find(parent);
             if (!pn || !pn->isDir) {
                 sendSimple(cs, 409);
@@ -595,7 +605,10 @@ private:
         if (method == "MOVE" || method == "COPY") {
             // Destination header is required
             auto itDest = headers.find("destination");
-            if (itDest == headers.end()) { sendSimple(cs, 400); return; }
+            if (itDest == headers.end()) {
+                sendSimple(cs, 400);
+                return;
+            }
             std::string destPath = itDest->second;
             // Extract absolute-path from absolute-URI if necessary
             auto schemePos = destPath.find("://");
@@ -604,7 +617,10 @@ private:
                 if (pathStart != std::string::npos) destPath = destPath.substr(pathStart);
             }
             // Must be under our mount base
-            if (!starts_with(destPath, _base)) { sendSimple(cs, 400); return; }
+            if (!starts_with(destPath, _base)) {
+                sendSimple(cs, 400);
+                return;
+            }
 
             bool overwrite = true;
             if (auto itOw = headers.find("overwrite"); itOw != headers.end()) {
@@ -615,20 +631,32 @@ private:
             std::string dstTree = toTreePath(destPath);
 
             const DavNode* srcNode = _tree.find(srcTree);
-            if (!srcNode) { sendSimple(cs, 404); return; }
+            if (!srcNode) {
+                sendSimple(cs, 404);
+                return;
+            }
 
             // Parent of destination must exist
             std::string parent = dstTree;
-            if (parent.size()>1 && parent.back()=='/') parent.pop_back();
+            if (parent.size() > 1 && parent.back() == '/') parent.pop_back();
             auto slash = parent.find_last_of('/');
-            if (slash == std::string::npos) parent = "/";
-            else if (slash == 0) parent = "/";
-            else parent = parent.substr(0, slash);
+            if (slash == std::string::npos)
+                parent = "/";
+            else if (slash == 0)
+                parent = "/";
+            else
+                parent = parent.substr(0, slash);
             const DavNode* pn = _tree.find(parent);
-            if (!pn || !pn->isDir) { sendSimple(cs, 409); return; }
+            if (!pn || !pn->isDir) {
+                sendSimple(cs, 409);
+                return;
+            }
 
             const DavNode* dstNode = _tree.find(dstTree);
-            if (dstNode && !overwrite) { sendSimple(cs, 412); return; }
+            if (dstNode && !overwrite) {
+                sendSimple(cs, 412);
+                return;
+            }
 
             // Success statuses only (no tree mutation for tests):
             // 201 if created new, 204 if overwrote existing
@@ -637,7 +665,7 @@ private:
         }
 
         // Method not allowed
-        sendSimple(cs, 405, {{"Allow","OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY"}});
+        sendSimple(cs, 405, {{"Allow", "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY"}});
     }
 
     std::string toTreePath(const std::string& reqPath) const {
@@ -666,9 +694,8 @@ private:
 #else
         int
 #endif
-        cs) const
-    {
-        std::unordered_map<std::string,std::string> headers;
+            cs) const {
+        std::unordered_map<std::string, std::string> headers;
         headers["DAV"] = "1,2";
         headers["Allow"] = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY";
         headers["Accept-Ranges"] = "bytes";
@@ -681,8 +708,8 @@ private:
 #else
         int
 #endif
-        cs, const std::string& path, int depth)
-    {
+            cs,
+        const std::string& path, int depth) {
         std::string tpath = toTreePath(path);
         const DavNode* n = _tree.find(tpath);
         if (!n) {
@@ -717,8 +744,7 @@ private:
         };
 
         std::string selfHref = path;
-        if (n->isDir && !selfHref.empty() && selfHref.back() != '/')
-            selfHref.push_back('/');
+        if (n->isDir && !selfHref.empty() && selfHref.back() != '/') selfHref.push_back('/');
         appendResponse(selfHref, *n);
 
         if (depth >= 1 && n->isDir) {
@@ -738,8 +764,8 @@ private:
 #else
         int
 #endif
-        cs, int status, const std::unordered_map<std::string,std::string>& extraHeaders = {})
-    {
+            cs,
+        int status, const std::unordered_map<std::string, std::string>& extraHeaders = {}) {
         sendRaw(cs, status, "text/plain", "", extraHeaders);
     }
 
@@ -749,18 +775,19 @@ private:
 #else
         int
 #endif
-        cs, int status, const std::string& contentType, const std::string& body,
-        std::unordered_map<std::string,std::string> headers = {})
-    {
-        std::string statusText = (status == 200 ? "OK" :
-                                  status == 206 ? "Partial Content" :
-                                  status == 207 ? "Multi-Status" :
-                                  status == 302 ? "Found" :
-                                  status == 307 ? "Temporary Redirect" :
-                                  status == 404 ? "Not Found" :
-                                  status == 405 ? "Method Not Allowed" :
-                                  status == 400 ? "Bad Request" :
-                                  status == 500 ? "Internal Server Error" : "");
+            cs,
+        int status, const std::string& contentType, const std::string& body,
+        std::unordered_map<std::string, std::string> headers = {}) {
+        std::string statusText = (status == 200   ? "OK"
+                                  : status == 206 ? "Partial Content"
+                                  : status == 207 ? "Multi-Status"
+                                  : status == 302 ? "Found"
+                                  : status == 307 ? "Temporary Redirect"
+                                  : status == 404 ? "Not Found"
+                                  : status == 405 ? "Method Not Allowed"
+                                  : status == 400 ? "Bad Request"
+                                  : status == 500 ? "Internal Server Error"
+                                                  : "");
         std::string resp = "HTTP/1.1 " + std::to_string(status) + " " + statusText + "\r\n";
         headers["Content-Type"] = contentType;
         if (headers.find("Content-Length") == headers.end()) {
@@ -782,19 +809,20 @@ private:
 #else
         int
 #endif
-        cs, int status, const std::string& contentType, const std::string& body,
-        std::unordered_map<std::string,std::string> headers = {}, size_t chunkSize = 8192, int delayMs = 0)
-    {
+            cs,
+        int status, const std::string& contentType, const std::string& body,
+        std::unordered_map<std::string, std::string> headers = {}, size_t chunkSize = 8192, int delayMs = 0) {
         if (chunkSize == 0) chunkSize = 8192;
-        std::string statusText = (status == 200 ? "OK" :
-                                  status == 206 ? "Partial Content" :
-                                  status == 207 ? "Multi-Status" :
-                                  status == 302 ? "Found" :
-                                  status == 307 ? "Temporary Redirect" :
-                                  status == 404 ? "Not Found" :
-                                  status == 405 ? "Method Not Allowed" :
-                                  status == 400 ? "Bad Request" :
-                                  status == 500 ? "Internal Server Error" : "");
+        std::string statusText = (status == 200   ? "OK"
+                                  : status == 206 ? "Partial Content"
+                                  : status == 207 ? "Multi-Status"
+                                  : status == 302 ? "Found"
+                                  : status == 307 ? "Temporary Redirect"
+                                  : status == 404 ? "Not Found"
+                                  : status == 405 ? "Method Not Allowed"
+                                  : status == 400 ? "Bad Request"
+                                  : status == 500 ? "Internal Server Error"
+                                                  : "");
         std::string head = "HTTP/1.1 " + std::to_string(status) + " " + statusText + "\r\n";
         headers["Content-Type"] = contentType;
         headers["Transfer-Encoding"] = "chunked";
@@ -833,8 +861,8 @@ private:
 #else
         int
 #endif
-        cs, const char* data, size_t len)
-    {
+            cs,
+        const char* data, size_t len) {
         size_t sent = 0;
         while (sent < len) {
 #ifdef _WIN32
@@ -862,5 +890,5 @@ private:
     std::thread _thr;
     uint16_t _port = 0;
     // Simple per-path hit counters to simulate flaky endpoints
-    std::unordered_map<std::string,int> _hitCounts;
+    std::unordered_map<std::string, int> _hitCounts;
 };

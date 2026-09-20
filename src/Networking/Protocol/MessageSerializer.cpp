@@ -8,11 +8,14 @@
  */
 
 #include "MessageSerializer.h"
-#include <zstd.h>
-#include <kj/array.h>
 
-namespace EntropyEngine {
-namespace Networking {
+#include <kj/array.h>
+#include <zstd.h>
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 Result<std::vector<uint8_t>> serialize(capnp::MessageBuilder& builder) {
     try {
@@ -27,10 +30,8 @@ Result<std::vector<uint8_t>> serialize(capnp::MessageBuilder& builder) {
         return Result<std::vector<uint8_t>>::ok(std::move(result));
 
     } catch (const std::exception& e) {
-        return Result<std::vector<uint8_t>>::err(
-            NetworkError::SerializationFailed,
-            std::string("Serialization failed: ") + e.what()
-        );
+        return Result<std::vector<uint8_t>>::err(NetworkError::SerializationFailed,
+                                                 std::string("Serialization failed: ") + e.what());
     }
 }
 
@@ -38,10 +39,8 @@ Result<kj::Array<capnp::word>> deserialize(const std::vector<uint8_t>& buffer) {
     try {
         // Ensure buffer size is multiple of word size
         if (buffer.size() % sizeof(capnp::word) != 0) {
-            return Result<kj::Array<capnp::word>>::err(
-                NetworkError::DeserializationFailed,
-                "Buffer size not aligned to word boundary"
-            );
+            return Result<kj::Array<capnp::word>>::err(NetworkError::DeserializationFailed,
+                                                       "Buffer size not aligned to word boundary");
         }
 
         // Convert byte buffer to word array
@@ -53,10 +52,8 @@ Result<kj::Array<capnp::word>> deserialize(const std::vector<uint8_t>& buffer) {
         return Result<kj::Array<capnp::word>>::ok(kj::mv(words));
 
     } catch (const std::exception& e) {
-        return Result<kj::Array<capnp::word>>::err(
-            NetworkError::DeserializationFailed,
-            std::string("Deserialization failed: ") + e.what()
-        );
+        return Result<kj::Array<capnp::word>>::err(NetworkError::DeserializationFailed,
+                                                   std::string("Deserialization failed: ") + e.what());
     }
 }
 
@@ -67,20 +64,14 @@ Result<std::vector<uint8_t>> compress(const std::vector<uint8_t>& data, int comp
         std::vector<uint8_t> compressed(maxCompressedSize);
 
         // Compress
-        size_t compressedSize = ZSTD_compress(
-            compressed.data(),
-            compressed.size(),
-            data.data(),
-            data.size(),
-            compressionLevel
-        );
+        size_t compressedSize =
+            ZSTD_compress(compressed.data(), compressed.size(), data.data(), data.size(), compressionLevel);
 
         // Check for errors
         if (ZSTD_isError(compressedSize)) {
             return Result<std::vector<uint8_t>>::err(
                 NetworkError::CompressionFailed,
-                std::string("Compression failed: ") + ZSTD_getErrorName(compressedSize)
-            );
+                std::string("Compression failed: ") + ZSTD_getErrorName(compressedSize));
         }
 
         // Resize to actual compressed size
@@ -88,10 +79,8 @@ Result<std::vector<uint8_t>> compress(const std::vector<uint8_t>& data, int comp
         return Result<std::vector<uint8_t>>::ok(std::move(compressed));
 
     } catch (const std::exception& e) {
-        return Result<std::vector<uint8_t>>::err(
-            NetworkError::CompressionFailed,
-            std::string("Compression failed: ") + e.what()
-        );
+        return Result<std::vector<uint8_t>>::err(NetworkError::CompressionFailed,
+                                                 std::string("Compression failed: ") + e.what());
     }
 }
 
@@ -102,62 +91,45 @@ Result<std::vector<uint8_t>> decompress(const std::vector<uint8_t>& compressedDa
         static constexpr size_t MAX_DECOMPRESSED_SIZE = 64ull * 1024ull * 1024ull;
 
         // Get decompressed size
-        unsigned long long decompressedSize = ZSTD_getFrameContentSize(
-            compressedData.data(),
-            compressedData.size()
-        );
+        unsigned long long decompressedSize = ZSTD_getFrameContentSize(compressedData.data(), compressedData.size());
 
         if (decompressedSize == ZSTD_CONTENTSIZE_ERROR) {
-            return Result<std::vector<uint8_t>>::err(
-                NetworkError::DecompressionFailed,
-                "Not compressed by zstd"
-            );
+            return Result<std::vector<uint8_t>>::err(NetworkError::DecompressionFailed, "Not compressed by zstd");
         }
 
         if (decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-            return Result<std::vector<uint8_t>>::err(
-                NetworkError::DecompressionFailed,
-                "Original size unknown"
-            );
+            return Result<std::vector<uint8_t>>::err(NetworkError::DecompressionFailed, "Original size unknown");
         }
 
         // Protect against decompression bomb attacks
         if (decompressedSize > MAX_DECOMPRESSED_SIZE) {
-            return Result<std::vector<uint8_t>>::err(
-                NetworkError::DecompressionFailed,
-                "Decompressed size (" + std::to_string(decompressedSize) +
-                " bytes) exceeds maximum allowed (" + std::to_string(MAX_DECOMPRESSED_SIZE) + " bytes)"
-            );
+            return Result<std::vector<uint8_t>>::err(NetworkError::DecompressionFailed,
+                                                     "Decompressed size (" + std::to_string(decompressedSize) +
+                                                         " bytes) exceeds maximum allowed (" +
+                                                         std::to_string(MAX_DECOMPRESSED_SIZE) + " bytes)");
         }
 
         // Allocate buffer for decompressed data
         std::vector<uint8_t> decompressed(static_cast<size_t>(decompressedSize));
 
         // Decompress
-        size_t actualSize = ZSTD_decompress(
-            decompressed.data(),
-            decompressed.size(),
-            compressedData.data(),
-            compressedData.size()
-        );
+        size_t actualSize =
+            ZSTD_decompress(decompressed.data(), decompressed.size(), compressedData.data(), compressedData.size());
 
         // Check for errors
         if (ZSTD_isError(actualSize)) {
             return Result<std::vector<uint8_t>>::err(
                 NetworkError::DecompressionFailed,
-                std::string("Decompression failed: ") + ZSTD_getErrorName(actualSize)
-            );
+                std::string("Decompression failed: ") + ZSTD_getErrorName(actualSize));
         }
 
         return Result<std::vector<uint8_t>>::ok(std::move(decompressed));
 
     } catch (const std::exception& e) {
-        return Result<std::vector<uint8_t>>::err(
-            NetworkError::DecompressionFailed,
-            std::string("Decompression failed: ") + e.what()
-        );
+        return Result<std::vector<uint8_t>>::err(NetworkError::DecompressionFailed,
+                                                 std::string("Decompression failed: ") + e.what());
     }
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

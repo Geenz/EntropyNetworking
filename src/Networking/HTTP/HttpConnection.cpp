@@ -8,16 +8,21 @@
  */
 
 #include "Networking/HTTP/HttpConnection.h"
-#include <algorithm>
-#include <sstream>
-#include <cstring>
-#include <openssl/ssl.h>
+
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 
-namespace EntropyEngine::Networking::HTTP {
+#include <algorithm>
+#include <cstring>
+#include <sstream>
 
-namespace {
-struct ParsedResponse {
+namespace EntropyEngine::Networking::HTTP
+{
+
+namespace
+{
+struct ParsedResponse
+{
     int statusCode = 0;
     std::string statusMessage;
     HttpHeaders headers;
@@ -37,7 +42,7 @@ static int on_header_field_cb(llhttp_t* p, const char* at, size_t len) {
     auto* pr = static_cast<ParsedResponse*>(p->data);
     if (!pr->curHeaderField.empty() && !pr->curHeaderValue.empty()) {
         std::string name = pr->curHeaderField;
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return (char)std::tolower(c); });
         pr->headers[name] = pr->curHeaderValue;
         pr->curHeaderField.clear();
         pr->curHeaderValue.clear();
@@ -54,7 +59,7 @@ static int on_headers_complete_cb(llhttp_t* p) {
     auto* pr = static_cast<ParsedResponse*>(p->data);
     if (!pr->curHeaderField.empty()) {
         std::string name = pr->curHeaderField;
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return (char)std::tolower(c); });
         pr->headers[name] = pr->curHeaderValue;
         pr->curHeaderField.clear();
         pr->curHeaderValue.clear();
@@ -64,10 +69,14 @@ static int on_headers_complete_cb(llhttp_t* p) {
 }
 static int on_body_cb(llhttp_t* p, const char* at, size_t len) {
     auto* pr = static_cast<ParsedResponse*>(p->data);
-    pr->body.insert(pr->body.end(), reinterpret_cast<const uint8_t*>(at), reinterpret_cast<const uint8_t*>(at)+len);
+    pr->body.insert(pr->body.end(), reinterpret_cast<const uint8_t*>(at), reinterpret_cast<const uint8_t*>(at) + len);
     return 0;
 }
-static int on_message_complete_cb(llhttp_t* p) { auto* pr = static_cast<ParsedResponse*>(p->data); pr->complete = true; return 0; }
+static int on_message_complete_cb(llhttp_t* p) {
+    auto* pr = static_cast<ParsedResponse*>(p->data);
+    pr->complete = true;
+    return 0;
+}
 
 // Send all bytes, handling partial sends and EWOULDBLOCK/EINTR
 static bool sendAll(int sock, const char* data, size_t len) {
@@ -88,7 +97,7 @@ static bool sendAll(int sock, const char* data, size_t len) {
     }
     return true;
 }
-}
+}  // namespace
 
 HttpConnection::HttpConnection() {
 #ifdef _WIN32
@@ -96,35 +105,46 @@ HttpConnection::HttpConnection() {
     static std::mutex m;
     std::lock_guard<std::mutex> lk(m);
     if (!wsaInit) {
-        WSADATA wsaData; WSAStartup(MAKEWORD(2,2), &wsaData); wsaInit = true;
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        wsaInit = true;
     }
 #endif
 }
 
 std::string HttpConnection::methodToString(HttpMethod m) {
     switch (m) {
-        case HttpMethod::GET: return "GET";
-        case HttpMethod::HEAD: return "HEAD";
-        case HttpMethod::POST: return "POST";
-        case HttpMethod::PUT: return "PUT";
-        case HttpMethod::DELETE_: return "DELETE";
-        case HttpMethod::OPTIONS: return "OPTIONS";
-        case HttpMethod::PATCH: return "PATCH";
-        case HttpMethod::PROPFIND: return "PROPFIND";
-        default: return "GET";
+        case HttpMethod::GET:
+            return "GET";
+        case HttpMethod::HEAD:
+            return "HEAD";
+        case HttpMethod::POST:
+            return "POST";
+        case HttpMethod::PUT:
+            return "PUT";
+        case HttpMethod::DELETE_:
+            return "DELETE";
+        case HttpMethod::OPTIONS:
+            return "OPTIONS";
+        case HttpMethod::PATCH:
+            return "PATCH";
+        case HttpMethod::PROPFIND:
+            return "PROPFIND";
+        default:
+            return "GET";
     }
 }
 
 void HttpConnection::toLowerInPlace(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
 }
 
 bool HttpConnection::executeOnSocket(int sock, const HttpRequest& req, const RequestOptions& opts, HttpResponse& out) {
-    (void)opts; // minimal initial implementation ignores per-request timeouts at the socket level
+    (void)opts;  // minimal initial implementation ignores per-request timeouts at the socket level
 
     // Build request text (origin-form target)
     std::ostringstream o;
-    o << methodToString(req.method) << ' ' << (req.path.empty()? "/" : req.path) << " HTTP/1.1\r\n";
+    o << methodToString(req.method) << ' ' << (req.path.empty() ? "/" : req.path) << " HTTP/1.1\r\n";
     // Host header: use req.host verbatim
     o << "Host: " << req.host << "\r\n";
     // Default UA
@@ -137,7 +157,7 @@ bool HttpConnection::executeOnSocket(int sock, const HttpRequest& req, const Req
 
     // Additional headers
     for (auto& kv : req.headers) {
-        std::string key = kv.first; // assume already lowercase; write as-is
+        std::string key = kv.first;  // assume already lowercase; write as-is
         // Capitalization does not matter on wire; keep as provided
         o << key << ": " << kv.second << "\r\n";
     }
@@ -189,7 +209,7 @@ bool HttpConnection::executeOnSocket(int sock, const HttpRequest& req, const Req
             break;
         }
         if (n < 0) {
-            break; // timeout or error
+            break;  // timeout or error
         }
         total += (size_t)n;
         auto err = llhttp_execute(&parser, reinterpret_cast<const char*>(buf.data()), n);
@@ -211,13 +231,15 @@ bool HttpConnection::executeOnSocket(int sock, const HttpRequest& req, const Req
     bool keep = true;
     auto it = out.headers.find("connection");
     if (it != out.headers.end()) {
-        std::string v = it->second; toLowerInPlace(v);
+        std::string v = it->second;
+        toLowerInPlace(v);
         if (v.find("close") != std::string::npos) keep = false;
     }
     return keep;
 }
 
-namespace {
+namespace
+{
 // Send all bytes over TLS, handling WANT_READ/WANT_WRITE and EINTR
 static bool sendAllSsl(SSL* ssl, const char* data, size_t len) {
     size_t sentTotal = 0;
@@ -236,13 +258,13 @@ static bool sendAllSsl(SSL* ssl, const char* data, size_t len) {
     }
     return true;
 }
-}
+}  // namespace
 
 bool HttpConnection::executeOnSsl(SSL* ssl, const HttpRequest& req, const RequestOptions& opts, HttpResponse& out) {
     (void)opts;
     // Build request text
     std::ostringstream o;
-    o << methodToString(req.method) << ' ' << (req.path.empty()? "/" : req.path) << " HTTP/1.1\r\n";
+    o << methodToString(req.method) << ' ' << (req.path.empty() ? "/" : req.path) << " HTTP/1.1\r\n";
     o << "Host: " << req.host << "\r\n";
     if (req.headers.find("user-agent") == req.headers.end()) {
         o << "User-Agent: EntropyHTTP/1.0\r\n";
@@ -293,7 +315,7 @@ bool HttpConnection::executeOnSsl(SSL* ssl, const HttpRequest& req, const Reques
         if (n < 0) {
             int err = ::SSL_get_error(ssl, n);
             if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                continue; // retry until deadline/timeout
+                continue;  // retry until deadline/timeout
             }
             break;
         }
@@ -313,10 +335,11 @@ bool HttpConnection::executeOnSsl(SSL* ssl, const HttpRequest& req, const Reques
     bool keep = true;
     auto it = out.headers.find("connection");
     if (it != out.headers.end()) {
-        std::string v = it->second; toLowerInPlace(v);
+        std::string v = it->second;
+        toLowerInPlace(v);
         if (v.find("close") != std::string::npos) keep = false;
     }
     return keep;
 }
 
-} // namespace EntropyEngine::Networking::HTTP
+}  // namespace EntropyEngine::Networking::HTTP

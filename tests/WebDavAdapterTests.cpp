@@ -1,17 +1,19 @@
+#include <Concurrency/WorkService.h>
+#include <VirtualFileSystem/VirtualFileSystem.h>
 #include <gtest/gtest.h>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 #include "Networking/Protocol/WebDavAdapter.h"
-#include <VirtualFileSystem/VirtualFileSystem.h>
-#include <Concurrency/WorkService.h>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Core::IO;
 using namespace EntropyEngine::Core::Concurrency;
 
-namespace {
+namespace
+{
 
 static std::string writeTextFile(const std::filesystem::path& p, const std::string& text) {
     std::filesystem::create_directories(p.parent_path());
@@ -29,7 +31,8 @@ static bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
-class WebDavAdapterFixture : public ::testing::Test {
+class WebDavAdapterFixture : public ::testing::Test
+{
 protected:
     void SetUp() override {
         // Create work service and start it
@@ -61,7 +64,7 @@ protected:
     std::shared_ptr<VirtualFileSystem> vfs;
 };
 
-}
+}  // namespace
 
 TEST_F(WebDavAdapterFixture, Propfind_Depth0_File) {
     WebDavAdapter adapter(vfs, "/dav/");
@@ -103,7 +106,7 @@ TEST_F(WebDavAdapterFixture, Propfind_Depth1_Directory) {
 
     HttpRequestLite req;
     req.method = "PROPFIND";
-    req.urlPath = std::string("/dav/") + (root.filename().string()) + "/"; // directory URL ends with '/'
+    req.urlPath = std::string("/dav/") + (root.filename().string()) + "/";  // directory URL ends with '/'
 
     auto res = adapter.handlePropfind(req, 1);
     ASSERT_EQ(res.status, 207);

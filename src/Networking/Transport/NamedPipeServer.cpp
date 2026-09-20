@@ -11,29 +11,26 @@
 
 #ifdef _WIN32
 
-#include "NamedPipeConnection.h"
-#include "ConnectionManager.h"
 #include <Logging/Logger.h>
-#include <chrono>
-#include <string>
 #include <windows.h>
 
-namespace EntropyEngine::Networking {
+#include <chrono>
+#include <string>
+
+#include "ConnectionManager.h"
+#include "NamedPipeConnection.h"
+
+namespace EntropyEngine::Networking
+{
 
 NamedPipeServer::NamedPipeServer(ConnectionManager* connMgr, std::string pipeName)
-    : _connMgr(connMgr)
-    , _pipeName(normalizePipeName(std::move(pipeName)))
-    , _pipeNameWide(toWide(_pipeName))
-{
-}
+    : _connMgr(connMgr), _pipeName(normalizePipeName(std::move(pipeName))), _pipeNameWide(toWide(_pipeName)) {}
 
 NamedPipeServer::NamedPipeServer(ConnectionManager* connMgr, std::string pipeName, LocalServerConfig config)
-    : _connMgr(connMgr)
-    , _pipeName(normalizePipeName(std::move(pipeName)))
-    , _pipeNameWide(toWide(_pipeName))
-    , _config(std::move(config))
-{
-}
+    : _connMgr(connMgr),
+      _pipeName(normalizePipeName(std::move(pipeName))),
+      _pipeNameWide(toWide(_pipeName)),
+      _config(std::move(config)) {}
 
 std::string NamedPipeServer::normalizePipeName(std::string name) const {
     // If already in Windows pipe format, return as-is
@@ -77,16 +74,13 @@ Result<void> NamedPipeServer::listen() {
     }
 
     // Create initial instance with configurable buffer sizes (use cached wide string)
-    _serverPipe = CreateNamedPipeW(
-        _pipeNameWide.c_str(),
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-        PIPE_UNLIMITED_INSTANCES,
-        static_cast<DWORD>(_config.pipeOutBufferSize),
-        static_cast<DWORD>(_config.pipeInBufferSize),
-        0,                // default timeout
-        nullptr           // default security
-    );
+    _serverPipe =
+        CreateNamedPipeW(_pipeNameWide.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
+                         static_cast<DWORD>(_config.pipeOutBufferSize), static_cast<DWORD>(_config.pipeInBufferSize),
+                         0,       // default timeout
+                         nullptr  // default security
+        );
 
     if (_serverPipe == INVALID_HANDLE_VALUE) {
         DWORD err = GetLastError();
@@ -137,7 +131,7 @@ ConnectionHandle NamedPipeServer::accept() {
                     connected = TRUE;
                     break;
                 } else if (wr == WAIT_TIMEOUT) {
-                    continue; // poll again
+                    continue;  // poll again
                 } else {
                     // WAIT_FAILED or abandoned
                     ENTROPY_LOG_WARNING("WaitForSingleObject failed in accept");
@@ -168,16 +162,10 @@ ConnectionHandle NamedPipeServer::accept() {
 
     // Prepare next instance for future accepts if still listening (use cached wide string)
     if (_listening.load(std::memory_order_acquire)) {
-        HANDLE next = CreateNamedPipeW(
-            _pipeNameWide.c_str(),
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            PIPE_UNLIMITED_INSTANCES,
-            static_cast<DWORD>(_config.pipeOutBufferSize),
-            static_cast<DWORD>(_config.pipeInBufferSize),
-            0,
-            nullptr
-        );
+        HANDLE next = CreateNamedPipeW(_pipeNameWide.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
+                                       static_cast<DWORD>(_config.pipeOutBufferSize),
+                                       static_cast<DWORD>(_config.pipeInBufferSize), 0, nullptr);
         if (next == INVALID_HANDLE_VALUE) {
             DWORD err = GetLastError();
             ENTROPY_LOG_WARNING("Failed to create next pipe instance: " + std::to_string(err));
@@ -211,35 +199,25 @@ Result<void> NamedPipeServer::close() {
 }
 
 uint64_t NamedPipeServer::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<NamedPipeServer>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<NamedPipeServer>().id);
     return hash;
 }
 
 std::string NamedPipeServer::toString() const {
-    return std::string(className()) + "@" +
-           std::to_string(reinterpret_cast<uintptr_t>(this)) +
-           "(name=" + _pipeName +
+    return std::string(className()) + "@" + std::to_string(reinterpret_cast<uintptr_t>(this)) + "(name=" + _pipeName +
            ", listening=" + (isListening() ? "true" : "false") + ")";
 }
 
 // Factory function implementation for Windows
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint
-) {
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint) {
     return std::make_unique<NamedPipeServer>(connMgr, endpoint);
 }
 
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint,
-    const LocalServerConfig& config
-) {
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint,
+                                               const LocalServerConfig& config) {
     return std::make_unique<NamedPipeServer>(connMgr, endpoint, config);
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // _WIN32
+#endif  // _WIN32

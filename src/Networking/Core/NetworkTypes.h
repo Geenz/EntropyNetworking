@@ -18,12 +18,14 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <string>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Unique identifier for entities in the scene
@@ -73,5 +75,15 @@ using Vec4 = glm::vec4;
  */
 using Quat = glm::quat;
 
-} // namespace Networking
-} // namespace EntropyEngine
+/**
+ * @brief 3x3 matrix type (GLM, column-major)
+ */
+using Mat3 = glm::mat3;
+
+/**
+ * @brief 4x4 matrix type (GLM, column-major)
+ */
+using Mat4 = glm::mat4;
+
+}  // namespace Networking
+}  // namespace EntropyEngine

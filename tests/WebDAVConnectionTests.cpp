@@ -3,6 +3,7 @@
 #if 0
 
 #include <gtest/gtest.h>
+
 #include "MockHttpConnection.h"
 #include "Networking/WebDAV/WebDAVConnection.h"
 
@@ -113,4 +114,4 @@ TEST(WebDAVConnection, GetBodySizeExceeded) {
     ASSERT_FALSE(r.statusMessage.empty());
 }
 
-#endif // Disabled WebDAVConnectionTests
+#endif  // Disabled WebDAVConnectionTests

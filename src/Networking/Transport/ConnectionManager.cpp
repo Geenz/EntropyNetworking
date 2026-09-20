@@ -8,28 +8,30 @@
  */
 
 #include "ConnectionManager.h"
+
 #include "WebRTCConnection.h"
 
 #if defined(__APPLE__)
-#include "XPCConnection.h"
 #include <TargetConditionals.h>
+
+#include "XPCConnection.h"
 #endif
 
 #if defined(_WIN32)
 #include "NamedPipeConnection.h"
 #elif defined(__unix__) || defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
+#if !TARGET_OS_IPHONE
 #include "UnixSocketConnection.h"
+#endif
 #endif
 
 #include <format>
 #include <stdexcept>
 
-namespace EntropyEngine::Networking {
-
-ConnectionManager::ConnectionManager(size_t capacity)
-    : _capacity(capacity)
-    , _connectionSlots(capacity)
+namespace EntropyEngine::Networking
 {
+
+ConnectionManager::ConnectionManager(size_t capacity) : _capacity(capacity), _connectionSlots(capacity) {
     // Initialize lock-free free list
     if (_capacity == 0) {
         // Set free list head to INVALID_INDEX to indicate no available slots
@@ -77,9 +79,7 @@ uint32_t ConnectionManager::allocateSlot() {
         }
         uint32_t next = _connectionSlots[idx].nextFree.load(std::memory_order_acquire);
         uint64_t newHead = packHead(next, headTag(head) + 1);
-        if (_freeListHead.compare_exchange_weak(head, newHead,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(head, newHead, std::memory_order_acq_rel, std::memory_order_acquire)) {
             _activeCount.fetch_add(1, std::memory_order_acq_rel);
             return idx;
         }
@@ -95,6 +95,12 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
     // Clear user callbacks BEFORE destroying connection to prevent race with in-flight callbacks
     std::atomic_store(&slot.userMessageCb, std::shared_ptr<std::function<void(const std::vector<uint8_t>&)>>());
     std::atomic_store(&slot.userStateCb, std::shared_ptr<std::function<void(ConnectionState)>>());
+
+    // Clear pending message queue
+    {
+        std::lock_guard<std::mutex> lock(slot.pendingMsgMutex);
+        slot.pendingMessages.clear();
+    }
 
     // Clear backend callbacks to break captures into this manager
     if (slot.connection) {
@@ -122,9 +128,7 @@ void ConnectionManager::returnSlotToFreeList(uint32_t index) {
         uint32_t oldIdx = headIndex(old);
         slot.nextFree.store(oldIdx, std::memory_order_release);
         uint64_t newH = packHead(index, headTag(old) + 1);
-        if (_freeListHead.compare_exchange_weak(old, newH,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
+        if (_freeListHead.compare_exchange_weak(old, newH, std::memory_order_acq_rel, std::memory_order_acquire)) {
             break;
         }
     }
@@ -139,12 +143,10 @@ void ConnectionManager::handleStatePublish(uint32_t index, ConnectionState newSt
     for (;;) {
         ConnectionState prev = slot.lastPublishedState.load(std::memory_order_acquire);
         if (prev == newState) {
-            return; // no change
+            return;  // no change
         }
-        if (slot.lastPublishedState.compare_exchange_weak(
-                prev, newState,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
+        if (slot.lastPublishedState.compare_exchange_weak(prev, newState, std::memory_order_acq_rel,
+                                                          std::memory_order_acquire)) {
             switch (newState) {
                 case ConnectionState::Connected:
                     _metrics.connectionsOpened.fetch_add(1, std::memory_order_relaxed);
@@ -167,13 +169,13 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
     if (config.backend == ConnectionBackend::Auto) {
         // Automatic platform detection
 #if defined(__APPLE__)
-        #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
-            // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
-            return std::make_unique<XPCConnection>(config.endpoint, &config);
-        #else
-            // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
-            return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
-        #endif
+#if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+        // iOS family - use XPC (Unix sockets unavailable due to sandboxing)
+        return std::make_unique<XPCConnection>(config.endpoint, &config);
+#else
+        // macOS - prefer Unix sockets for simplicity (XPC available via explicit backend)
+        return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
+#endif
 #elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
         // Linux/Android - use Unix sockets
         return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
@@ -186,7 +188,7 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 
     switch (config.backend) {
         case ConnectionBackend::UnixSocket:
-#if defined(__unix__) || defined(__APPLE__)
+#if (defined(__unix__) || defined(__APPLE__)) && !TARGET_OS_IPHONE
             return std::make_unique<UnixSocketConnection>(config.endpoint, &config);
 #else
             throw std::runtime_error("Unix sockets not supported on this platform");
@@ -212,12 +214,9 @@ std::unique_ptr<NetworkConnection> ConnectionManager::createLocalBackend(const C
 }
 
 std::unique_ptr<NetworkConnection> ConnectionManager::createRemoteBackend(const ConnectionConfig& config) {
-    return std::make_unique<WebRTCConnection>(
-        config.webrtcConfig,
-        config.signalingCallbacks,
-        config.endpoint,  // Signaling server URL for client mode
-        config.dataChannelLabel
-    );
+    return std::make_unique<WebRTCConnection>(config.webrtcConfig, config.signalingCallbacks,
+                                              config.endpoint,  // Signaling server URL for client mode
+                                              config.dataChannelLabel);
 }
 
 ConnectionHandle ConnectionManager::openLocalConnection(const std::string& endpoint) {
@@ -231,17 +230,14 @@ ConnectionHandle ConnectionManager::openRemoteConnection(const std::string& sign
     ConnectionConfig config;
     config.type = ConnectionType::Remote;
     config.backend = ConnectionBackend::WebRTC;
-    config.endpoint = signalingUrl;  // WebSocket URL for client-side signaling
+    config.endpoint = signalingUrl;     // WebSocket URL for client-side signaling
     config.webrtcConfig.polite = true;  // Client is polite peer
     // signalingCallbacks left empty - WebRTCConnection will create internal WebSocket
     return openConnection(config);
 }
 
-ConnectionHandle ConnectionManager::openRemoteConnection(
-    const std::string& signalingServer,
-    WebRTCConfig config,
-    SignalingCallbacks callbacks
-) {
+ConnectionHandle ConnectionManager::openRemoteConnection(const std::string& signalingServer, WebRTCConfig config,
+                                                         SignalingCallbacks callbacks) {
     ConnectionConfig connConfig;
     connConfig.type = ConnectionType::Remote;
     connConfig.endpoint = signalingServer;
@@ -311,7 +307,7 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
         }
     });
 
-    // Manager-owned message callback: increment metrics and fan out to user callback
+    // Manager-owned message callback: queue if no user callback, else fan out
     slot.connection->setMessageCallback([this, index, gen = generation](const std::vector<uint8_t>& data) noexcept {
         // Generation guard: ignore callbacks for recycled slots
         if (_connectionSlots[index].generation.load(std::memory_order_acquire) != gen) {
@@ -319,9 +315,16 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
         }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
+
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
         if (cbptr && *cbptr) {
+            // Hot path: callback set, invoke directly
             (*cbptr)(data);
+        } else {
+            // Cold path: no callback yet, queue for later drain
+            // TODO(future): Add optional message type filter here for memory efficiency
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].pendingMsgMutex);
+            _connectionSlots[index].pendingMessages.push_back(data);
         }
     });
 
@@ -334,6 +337,10 @@ ConnectionHandle ConnectionManager::adoptConnection(std::unique_ptr<NetworkConne
             (*cbptr2)(st);
         }
     }
+
+    // Start receive thread - messages will queue until callback is registered
+    // This is safe now because the message callback above queues early messages
+    slot.connection->startReceiving();
 
     return ConnectionHandle(this, index, generation);
 }
@@ -393,9 +400,16 @@ Result<void> ConnectionManager::connect(const ConnectionHandle& handle) {
         }
         _metrics.totalBytesReceived.fetch_add(data.size(), std::memory_order_relaxed);
         _metrics.totalMessagesReceived.fetch_add(1, std::memory_order_relaxed);
+
         auto cbptr = std::atomic_load(&_connectionSlots[index].userMessageCb);
         if (cbptr && *cbptr) {
+            // Hot path: callback set, invoke directly
             (*cbptr)(data);
+        } else {
+            // Cold path: no callback yet, queue for later drain
+            // TODO(future): Add optional message type filter here for memory efficiency
+            std::lock_guard<std::mutex> lock(_connectionSlots[index].pendingMsgMutex);
+            _connectionSlots[index].pendingMessages.push_back(data);
         }
     });
 
@@ -547,18 +561,38 @@ NetworkConnection* ConnectionManager::getConnectionPointer(const ConnectionHandl
     return _connectionSlots[index].connection.get();
 }
 
-void ConnectionManager::setMessageCallback(const ConnectionHandle& handle, std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
+void ConnectionManager::setMessageCallback(const ConnectionHandle& handle,
+                                           std::function<void(const std::vector<uint8_t>&)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
     auto& slot = _connectionSlots[index];
 
-    // Store user callback; backend remains bound to manager-owned fan-out
+    // Drain pending messages BEFORE setting callback to ensure ordering
+    // This implements the late-subscriber pattern: new callbacks receive buffered history
+    std::vector<std::vector<uint8_t>> toDeliver;
+    {
+        std::lock_guard<std::mutex> lock(slot.pendingMsgMutex);
+        toDeliver = std::move(slot.pendingMessages);
+        slot.pendingMessages.clear();
+    }
+
+    // Set the callback
     auto sp = std::make_shared<std::function<void(const std::vector<uint8_t>&)>>(std::move(callback));
     std::atomic_store(&slot.userMessageCb, std::move(sp));
+
+    // Now deliver queued messages (callback is set, so new messages go direct)
+    // TODO(future): For event sourcing, also persist toDeliver to replay log
+    auto cbptr = std::atomic_load(&slot.userMessageCb);
+    if (cbptr && *cbptr) {
+        for (const auto& msg : toDeliver) {
+            (*cbptr)(msg);
+        }
+    }
 }
 
-void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::function<void(ConnectionState)> callback) noexcept {
+void ConnectionManager::setStateCallback(const ConnectionHandle& handle,
+                                         std::function<void(ConnectionState)> callback) noexcept {
     if (!validateHandle(handle)) return;
 
     uint32_t index = handle.handleIndex();
@@ -570,17 +604,12 @@ void ConnectionManager::setStateCallback(const ConnectionHandle& handle, std::fu
 }
 
 uint64_t ConnectionManager::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<ConnectionManager>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<ConnectionManager>().id);
     return hash;
 }
 
 std::string ConnectionManager::toString() const {
-    return std::format("{}@{}(cap={}, active={})",
-                       className(),
-                       static_cast<const void*>(this),
-                       _capacity,
+    return std::format("{}@{}(cap={}, active={})", className(), static_cast<const void*>(this), _capacity,
                        _activeCount.load(std::memory_order_relaxed));
 }
 
@@ -621,5 +650,4 @@ Result<void> ConnectionManager::trySend(const ConnectionHandle& handle, const st
     return r;
 }
 
-} // namespace EntropyEngine::Networking
-
+}  // namespace EntropyEngine::Networking

@@ -11,10 +11,12 @@
 
 #include "../Core/ComponentSchema.h"
 #include "../Core/ErrorCodes.h"
-#include "src/Networking/Protocol/entropy.capnp.h"
+#include "Networking/Protocol/entropy.capnp.h"
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Serialization helpers for ComponentSchema ↔ Cap'n Proto
@@ -23,15 +25,34 @@ namespace Networking {
  * and Cap'n Proto ComponentSchemaData messages.
  */
 
+// Type alias for Cap'n Proto generated PropertyValue to avoid collision
+// with EntropyEngine::Networking::PropertyValue
+using CapnpPropertyValue = Protocol::PropertyValue;
+
+/**
+ * @brief Deserialize a PropertyValue from Cap'n Proto
+ *
+ * @param reader Cap'n Proto reader for PropertyValue
+ * @return PropertyValue The deserialized C++ variant
+ */
+PropertyValue deserializePropertyValue(CapnpPropertyValue::Reader reader);
+
+/**
+ * @brief Serialize a PropertyValue to Cap'n Proto
+ *
+ * @param value The C++ PropertyValue to serialize
+ * @param builder Cap'n Proto builder for PropertyValue
+ */
+void serializePropertyValue(const PropertyValue& value, CapnpPropertyValue::Builder builder);
+
 /**
  * @brief Serialize a PropertyDefinition to Cap'n Proto
  *
  * @param definition The C++ PropertyDefinition to serialize
  * @param builder Cap'n Proto builder for PropertyDefinitionData
  */
-void serializePropertyDefinition(
-    const PropertyDefinition& definition,
-    PropertyDefinitionData::Builder builder);
+void serializePropertyDefinition(const PropertyDefinition& definition,
+                                 Protocol::PropertyDefinitionData::Builder builder);
 
 /**
  * @brief Deserialize a PropertyDefinition from Cap'n Proto
@@ -39,8 +60,7 @@ void serializePropertyDefinition(
  * @param reader Cap'n Proto reader for PropertyDefinitionData
  * @return PropertyDefinition The deserialized C++ structure
  */
-PropertyDefinition deserializePropertyDefinition(
-    PropertyDefinitionData::Reader reader);
+PropertyDefinition deserializePropertyDefinition(Protocol::PropertyDefinitionData::Reader reader);
 
 /**
  * @brief Serialize a ComponentSchema to Cap'n Proto
@@ -48,9 +68,7 @@ PropertyDefinition deserializePropertyDefinition(
  * @param schema The C++ ComponentSchema to serialize
  * @param builder Cap'n Proto builder for ComponentSchemaData
  */
-void serializeComponentSchema(
-    const ComponentSchema& schema,
-    ComponentSchemaData::Builder builder);
+void serializeComponentSchema(const ComponentSchema& schema, Protocol::ComponentSchemaData::Builder builder);
 
 /**
  * @brief Deserialize a ComponentSchema from Cap'n Proto
@@ -58,8 +76,7 @@ void serializeComponentSchema(
  * @param reader Cap'n Proto reader for ComponentSchemaData
  * @return Result<ComponentSchema> The deserialized schema or error
  */
-Result<ComponentSchema> deserializeComponentSchema(
-    ComponentSchemaData::Reader reader);
+Result<ComponentSchema> deserializeComponentSchema(Protocol::ComponentSchemaData::Reader reader);
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

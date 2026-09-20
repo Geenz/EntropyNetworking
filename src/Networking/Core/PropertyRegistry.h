@@ -24,18 +24,21 @@
 
 #pragma once
 
-#include "PropertyHash.h"
-#include "PropertyTypes.h"
-#include "NetworkTypes.h"
-#include "ErrorCodes.h"
+#include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <optional>
-#include <shared_mutex>
 
-namespace EntropyEngine {
-namespace Networking {
+#include "ErrorCodes.h"
+#include "NetworkTypes.h"
+#include "PropertyHash.h"
+#include "PropertyTypes.h"
+
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Metadata for a registered property instance
@@ -43,29 +46,24 @@ namespace Networking {
  * Each property instance on each entity gets its own unique hash and metadata.
  * The hash is computed once and stored - never recomputed.
  */
-struct PropertyMetadata {
-    PropertyHash hash;              ///< Unique 128-bit identifier (computed once)
-    uint64_t entityId;              ///< Owner entity ID
-    ComponentTypeHash componentType; ///< Component type hash from ComponentSchema
-    std::string propertyName;       ///< Property name (e.g., "position", "health")
-    PropertyType type;              ///< Property type (e.g., Vec3, Float32)
-    uint64_t registeredAt;          ///< Timestamp when registered (microseconds since epoch)
+struct PropertyMetadata
+{
+    PropertyHash hash;                ///< Unique 128-bit identifier (computed once)
+    uint64_t entityId;                ///< Owner entity ID
+    ComponentTypeHash componentType;  ///< Component type hash from ComponentSchema
+    std::string propertyName;         ///< Property name (e.g., "position", "health")
+    PropertyType type;                ///< Property type (e.g., Vec3, Float32)
+    uint64_t registeredAt;            ///< Timestamp when registered (microseconds since epoch)
 
     PropertyMetadata() = default;
-    PropertyMetadata(
-        PropertyHash h,
-        uint64_t entity,
-        ComponentTypeHash component,
-        std::string prop,
-        PropertyType t,
-        uint64_t timestamp
-    ) : hash(h)
-      , entityId(entity)
-      , componentType(component)
-      , propertyName(std::move(prop))
-      , type(t)
-      , registeredAt(timestamp)
-    {}
+    PropertyMetadata(PropertyHash h, uint64_t entity, ComponentTypeHash component, std::string prop, PropertyType t,
+                     uint64_t timestamp)
+        : hash(h),
+          entityId(entity),
+          componentType(component),
+          propertyName(std::move(prop)),
+          type(t),
+          registeredAt(timestamp) {}
 
     /**
      * @brief Check if metadata matches another instance (for idempotent registration)
@@ -73,11 +71,8 @@ struct PropertyMetadata {
      * Compares all fields except registeredAt.
      */
     bool matches(const PropertyMetadata& other) const {
-        return hash == other.hash &&
-               entityId == other.entityId &&
-               componentType == other.componentType &&
-               propertyName == other.propertyName &&
-               type == other.type;
+        return hash == other.hash && entityId == other.entityId && componentType == other.componentType &&
+               propertyName == other.propertyName && type == other.type;
     }
 };
 
@@ -119,7 +114,8 @@ struct PropertyMetadata {
  * auto removedHashes = registry.unregisterEntity(42);
  * @endcode
  */
-class PropertyRegistry {
+class PropertyRegistry
+{
 public:
     // Resource limits (configurable)
     static constexpr size_t MAX_PROPERTIES_PER_ENTITY = 1000;
@@ -309,5 +305,5 @@ private:
     std::unordered_map<uint64_t, std::unordered_set<PropertyHash>> _entityProperties;
 };
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

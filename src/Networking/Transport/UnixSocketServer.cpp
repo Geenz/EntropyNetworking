@@ -8,8 +8,9 @@
  */
 
 #include "UnixSocketServer.h"
-#include "UnixSocketConnection.h"
+
 #include "ConnectionManager.h"
+#include "UnixSocketConnection.h"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -19,31 +20,26 @@
 #endif
 
 #if defined(__unix__) || defined(__APPLE__)
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
+#include <Logging/Logger.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <cstring>
-#include <cstddef>
-#include <cerrno>
+#include <sys/socket.h>
 #include <sys/stat.h>
-#include <Logging/Logger.h>
+#include <sys/un.h>
+#include <unistd.h>
 
-namespace EntropyEngine::Networking {
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
+
+namespace EntropyEngine::Networking
+{
 
 UnixSocketServer::UnixSocketServer(ConnectionManager* connMgr, std::string socketPath)
-    : _connMgr(connMgr)
-    , _socketPath(std::move(socketPath))
-{
-}
+    : _connMgr(connMgr), _socketPath(std::move(socketPath)) {}
 
 UnixSocketServer::UnixSocketServer(ConnectionManager* connMgr, std::string socketPath, LocalServerConfig config)
-    : _connMgr(connMgr)
-    , _socketPath(std::move(socketPath))
-    , _config(std::move(config))
-{
-}
+    : _connMgr(connMgr), _socketPath(std::move(socketPath)), _config(std::move(config)) {}
 
 UnixSocketServer::~UnixSocketServer() {
     close();
@@ -69,7 +65,7 @@ Result<void> UnixSocketServer::listen() {
     if (_serverSocket < 0) {
         ENTROPY_LOG_ERROR(std::string("Failed to create server socket: ") + strerror(errno));
         return Result<void>::err(NetworkError::ConnectionClosed,
-            std::string("Failed to create server socket: ") + strerror(errno));
+                                 std::string("Failed to create server socket: ") + strerror(errno));
     }
 
 #if !defined(SOCK_NONBLOCK) || !defined(SOCK_CLOEXEC)
@@ -93,9 +89,7 @@ Result<void> UnixSocketServer::listen() {
     std::strncpy(addr.sun_path, _socketPath.c_str(), sizeof(addr.sun_path) - 1);
 
     // Use BSD-portable sockaddr length
-    socklen_t addrlen = static_cast<socklen_t>(
-        offsetof(sockaddr_un, sun_path) + std::strlen(addr.sun_path)
-    );
+    socklen_t addrlen = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + std::strlen(addr.sun_path));
 
     // Bind
     if (::bind(_serverSocket, reinterpret_cast<sockaddr*>(&addr), addrlen) < 0) {
@@ -202,32 +196,25 @@ Result<void> UnixSocketServer::close() {
 }
 
 uint64_t UnixSocketServer::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<UnixSocketServer>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<UnixSocketServer>().id);
     return hash;
 }
 
 std::string UnixSocketServer::toString() const {
-    return std::string(className()) + "@" +
-           std::to_string(reinterpret_cast<uintptr_t>(this)) +
-           "(path=" + _socketPath +
+    return std::string(className()) + "@" + std::to_string(reinterpret_cast<uintptr_t>(this)) + "(path=" + _socketPath +
            ", listening=" + (isListening() ? "true" : "false") + ")";
 }
 
 // Factory function implementation
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint
-) {
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint) {
 #if defined(__APPLE__)
-    #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
-        // iOS family - use XPC (Unix sockets unavailable)
-        return std::make_unique<XPCServer>(connMgr, endpoint);
-    #else
-        // macOS - use Unix sockets
-        return std::make_unique<UnixSocketServer>(connMgr, endpoint);
-    #endif
+#if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+    // iOS family - use XPC (Unix sockets unavailable)
+    return std::make_unique<XPCServer>(connMgr, endpoint);
+#else
+    // macOS - use Unix sockets
+    return std::make_unique<UnixSocketServer>(connMgr, endpoint);
+#endif
 #elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
     // Linux/Android - use Unix sockets
     return std::make_unique<UnixSocketServer>(connMgr, endpoint);
@@ -238,20 +225,17 @@ std::unique_ptr<LocalServer> createLocalServer(
 #endif
 }
 
-std::unique_ptr<LocalServer> createLocalServer(
-    ConnectionManager* connMgr,
-    const std::string& endpoint,
-    const LocalServerConfig& config
-) {
+std::unique_ptr<LocalServer> createLocalServer(ConnectionManager* connMgr, const std::string& endpoint,
+                                               const LocalServerConfig& config) {
 #if defined(__APPLE__)
-    #if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
-        // iOS family - XPC server does not currently consume LocalServerConfig; ignore config
-        (void)config;
-        return std::make_unique<XPCServer>(connMgr, endpoint);
-    #else
-        // macOS - use Unix sockets with config
-        return std::make_unique<UnixSocketServer>(connMgr, endpoint, config);
-    #endif
+#if TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_WATCH || TARGET_OS_VISION
+    // iOS family - XPC server does not currently consume LocalServerConfig; ignore config
+    (void)config;
+    return std::make_unique<XPCServer>(connMgr, endpoint);
+#else
+    // macOS - use Unix sockets with config
+    return std::make_unique<UnixSocketServer>(connMgr, endpoint, config);
+#endif
 #elif defined(__unix__) || defined(__linux__) || defined(__ANDROID__)
     // Linux/Android - use Unix sockets with config
     return std::make_unique<UnixSocketServer>(connMgr, endpoint, config);
@@ -264,6 +248,6 @@ std::unique_ptr<LocalServer> createLocalServer(
 #endif
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // defined(__unix__) || defined(__APPLE__)
+#endif  // defined(__unix__) || defined(__APPLE__)

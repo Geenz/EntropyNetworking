@@ -9,19 +9,21 @@
 
 #pragma once
 
-#include "NetworkConnection.h"
-#include "../Core/ConnectionTypes.h"
-#include <string>
-#include <thread>
 #include <atomic>
 #include <chrono>
+#include <string>
+#include <thread>
+
+#include "../Core/ConnectionTypes.h"
+#include "NetworkConnection.h"
 
 #if defined(__APPLE__)
-#include <xpc/xpc.h>
 #include <dispatch/dispatch.h>
+#include <xpc/xpc.h>
 #endif
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 #if defined(__APPLE__)
 
@@ -53,7 +55,8 @@ namespace EntropyEngine::Networking {
  * - All callbacks invoked on private serial queue
  * - Thread-safe from external callers
  */
-class XPCConnection : public NetworkConnection {
+class XPCConnection : public NetworkConnection
+{
 public:
     /**
      * @brief Client-side constructor: connects to named XPC service
@@ -82,17 +85,20 @@ public:
     Result<void> send(const std::vector<uint8_t>& data) override;
     Result<void> sendUnreliable(const std::vector<uint8_t>& data) override;
     ConnectionState getState() const override;
-    ConnectionType getType() const override { return ConnectionType::Local; }
+    ConnectionType getType() const override {
+        return ConnectionType::Local;
+    }
     ConnectionStats getStats() const override;
 
     // XPC-specific request/response API (Apple-only)
 #if defined(__APPLE__)
-    Result<std::vector<uint8_t>> sendWithReply(const std::vector<uint8_t>& data,
-                                               std::chrono::milliseconds timeout);
+    Result<std::vector<uint8_t>> sendWithReply(const std::vector<uint8_t>& data, std::chrono::milliseconds timeout);
 #endif
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "XPCConnection"; }
+    const char* className() const noexcept override {
+        return "XPCConnection";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -123,6 +129,6 @@ private:
     void setState(ConnectionState newState);
 };
 
-#endif // __APPLE__
+#endif  // __APPLE__
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

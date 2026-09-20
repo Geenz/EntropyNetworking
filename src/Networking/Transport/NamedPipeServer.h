@@ -9,14 +9,16 @@
 
 #pragma once
 
-#include "LocalServer.h"
-#include <string>
 #include <atomic>
+#include <string>
+
+#include "LocalServer.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Windows named pipe server implementation
@@ -24,7 +26,8 @@ namespace EntropyEngine::Networking {
  * Provides server-side Named Pipe functionality for Windows.
  * Handles pipe creation, listening (ConnectNamedPipe), and accepting connections.
  */
-class NamedPipeServer : public LocalServer {
+class NamedPipeServer : public LocalServer
+{
 public:
     NamedPipeServer(ConnectionManager* connMgr, std::string pipeName);
     NamedPipeServer(ConnectionManager* connMgr, std::string pipeName, LocalServerConfig config);
@@ -34,10 +37,14 @@ public:
     Result<void> listen() override;
     ConnectionHandle accept() override;
     Result<void> close() override;
-    bool isListening() const override { return _listening.load(std::memory_order_acquire); }
+    bool isListening() const override {
+        return _listening.load(std::memory_order_acquire);
+    }
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "NamedPipeServer"; }
+    const char* className() const noexcept override {
+        return "NamedPipeServer";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -55,4 +62,4 @@ private:
     LocalServerConfig _config{};
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

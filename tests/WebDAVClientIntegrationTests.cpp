@@ -1,15 +1,17 @@
-#include <gtest/gtest.h>
-#include "DavTree.h"
-#include "MiniDavServer.h"
-#include "Networking/WebDAV/WebDAVFileSystemBackend.h"
-#include "Networking/WebDAV/WebDAVReadStream.h"
-#include "Networking/HTTP/HttpClient.h"
 #include <Concurrency/WorkService.h>
 #include <VirtualFileSystem/VirtualFileSystem.h>
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
-#include <span>
 #include <cstring>
+#include <span>
+
+#include "DavTree.h"
+#include "MiniDavServer.h"
+#include "Networking/HTTP/HttpClient.h"
+#include "Networking/WebDAV/WebDAVFileSystemBackend.h"
+#include "Networking/WebDAV/WebDAVReadStream.h"
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Networking::WebDAV;
@@ -19,9 +21,11 @@ using namespace EntropyEngine::Core::Concurrency;
 // Integration tests for WebDAV client (WebDAVConnection + WebDAVFileSystemBackend)
 // against a real HTTP server (MiniDavServer)
 
-namespace {
+namespace
+{
 
-class WebDAVClientIntegrationFixture : public ::testing::Test {
+class WebDAVClientIntegrationFixture : public ::testing::Test
+{
 protected:
     void SetUp() override {
         // Build test tree
@@ -78,7 +82,7 @@ protected:
     std::shared_ptr<WebDAVFileSystemBackend> backend;
 };
 
-} // namespace
+}  // namespace
 
 // ============================================================================
 // WebDAVFileSystemBackend Integration Tests (against MiniDavServer)
@@ -122,10 +126,10 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_ConcurrentReads) {
         EXPECT_EQ(h.status(), FileOpStatus::Complete);
     }
 
-    std::string content0(reinterpret_cast<const char*>(handles[0].contentsBytes().data()), handles[0].contentsBytes().size());
+    std::string content0(reinterpret_cast<const char*>(handles[0].contentsBytes().data()),
+                         handles[0].contentsBytes().size());
     EXPECT_EQ(content0, "hello world");
 }
-
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_Exists) {
     EXPECT_TRUE(backend->exists("/hello.txt"));
@@ -230,7 +234,10 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_MoveCopy_StatusMapping) {
 }
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_SmallChunks) {
-    StreamOptions so; so.mode = StreamOptions::Read; so.buffered = false; so.bufferSize = 1024;
+    StreamOptions so;
+    so.mode = StreamOptions::Read;
+    so.buffered = false;
+    so.bufferSize = 1024;
     auto stream = backend->openStream("/hello.txt", so);
     ASSERT_NE(stream, nullptr);
 
@@ -256,7 +263,9 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_SmallChunks) {
 TEST_F(WebDAVClientIntegrationFixture, Backend_ReadFile_Conditional_IfNoneMatch304) {
     // Acquire current ETag using HttpClient, then ask backend helper with If-None-Match
     HTTP::HttpClient hc;
-    HTTP::HttpRequest req; req.method = HTTP::HttpMethod::GET; req.scheme = "http";
+    HTTP::HttpRequest req;
+    req.method = HTTP::HttpMethod::GET;
+    req.scheme = "http";
     req.host = std::string("127.0.0.1:") + std::to_string(server->port());
     req.path = "/dav/hello.txt";
     auto resp = hc.execute(req);
@@ -273,7 +282,10 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_ReadFile_Conditional_IfNoneMatch3
 }
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_HeaderHelpers) {
-    StreamOptions so; so.mode = StreamOptions::Read; so.buffered = false; so.bufferSize = 1024;
+    StreamOptions so;
+    so.mode = StreamOptions::Read;
+    so.buffered = false;
+    so.bufferSize = 1024;
     auto streamBase = backend->openStream("/binary.bin", so);
     ASSERT_NE(streamBase, nullptr);
 
@@ -282,7 +294,8 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_HeaderHelpers) {
     ASSERT_NE(davStream, nullptr);
 
     // Wait until headers are ready by attempting a tiny read
-    std::array<uint8_t, 1> tmp{}; (void)streamBase->read(tmp);
+    std::array<uint8_t, 1> tmp{};
+    (void)streamBase->read(tmp);
 
     auto cl = davStream->contentLength();
     auto et = davStream->etag();
@@ -297,7 +310,6 @@ TEST_F(WebDAVClientIntegrationFixture, Backend_StreamRead_HeaderHelpers) {
 
     streamBase->close();
 }
-
 
 TEST_F(WebDAVClientIntegrationFixture, Backend_WriteFile_IfMatch_Precondition) {
     const char* payload = "abc";

@@ -9,15 +9,18 @@
 
 #pragma once
 
-#include "../src/Networking/Transport/WebRTCConnection.h"
-#include "../src/Networking/Core/ConnectionTypes.h"
-#include <memory>
-#include <mutex>
-#include <atomic>
 #include <EntropyCore.h>
 #include <Logging/Logger.h>
 
-namespace EntropyEngine::Networking::Testing {
+#include <atomic>
+#include <memory>
+#include <mutex>
+
+#include "../src/Networking/Core/ConnectionTypes.h"
+#include "../src/Networking/Transport/WebRTCConnection.h"
+
+namespace EntropyEngine::Networking::Testing
+{
 
 /**
  * @brief Helper for in-process WebRTC signaling between two peers
@@ -40,7 +43,8 @@ namespace EntropyEngine::Networking::Testing {
  * // Signaling exchanged automatically
  * @endcode
  */
-class InProcessSignaling {
+class InProcessSignaling
+{
 public:
     InProcessSignaling() = default;
 
@@ -85,7 +89,9 @@ public:
     /**
      * @brief Get whether peer1 should be polite
      */
-    bool isPeer1Polite() const { return _politeFirst; }
+    bool isPeer1Polite() const {
+        return _politeFirst;
+    }
 
     /**
      * @brief Get number of descriptions exchanged
@@ -173,13 +179,13 @@ private:
 // Hermetic local WebRTC config for CI: loopback-only, ICE-TCP enabled, bounded port range
 inline WebRTCConfig localHermeticRtcConfig(bool polite = false) {
     WebRTCConfig cfg;
-    cfg.iceServers = {};               // No external STUN
-    cfg.bindAddress = "127.0.0.1";   // Loopback only
-    cfg.enableIceTcp = true;           // Robust on CI/Windows
-    cfg.portRangeBegin = 40000;        // Predictable narrow range
-    cfg.portRangeEnd   = 40100;
-    cfg.maxMessageSize = 256 * 1024;   // Match default
-    cfg.polite = polite;               // Perfect negotiation role
+    cfg.iceServers = {};            // No external STUN
+    cfg.bindAddress = "127.0.0.1";  // Loopback only
+    cfg.enableIceTcp = true;        // Robust on CI/Windows
+    cfg.portRangeBegin = 40000;     // Predictable narrow range
+    cfg.portRangeEnd = 40100;
+    cfg.maxMessageSize = 256 * 1024;  // Match default
+    cfg.polite = polite;              // Perfect negotiation role
     return cfg;
 }
 
@@ -188,4 +194,4 @@ inline std::pair<WebRTCConfig, WebRTCConfig> localHermeticRtcConfigPair(bool pol
     return {localHermeticRtcConfig(politeFirst), localHermeticRtcConfig(!politeFirst)};
 }
 
-} // namespace EntropyEngine::Networking::Testing
+}  // namespace EntropyEngine::Networking::Testing

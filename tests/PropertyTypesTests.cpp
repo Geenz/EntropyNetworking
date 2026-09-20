@@ -7,8 +7,11 @@
  * This file is part of the Entropy Networking project.
  */
 
+#include <capnp/message.h>
 #include <gtest/gtest.h>
+
 #include "../src/Networking/Core/PropertyTypes.h"
+#include "../src/Networking/Protocol/ComponentSchemaSerializer.h"
 
 using namespace EntropyEngine::Networking;
 
@@ -103,22 +106,67 @@ TEST(PropertyTypesTests, QuaternionIdentity) {
     EXPECT_EQ(identity.w, 1.0f);
 }
 
+TEST(PropertyTypesTests, GetPropertyTypeMat3) {
+    Mat3 m = Mat3(1.0f);  // Identity matrix
+    PropertyValue val = m;
+    EXPECT_EQ(getPropertyType(val), PropertyType::Mat3);
+}
+
+TEST(PropertyTypesTests, GetPropertyTypeMat4) {
+    Mat4 m = Mat4(1.0f);  // Identity matrix
+    PropertyValue val = m;
+    EXPECT_EQ(getPropertyType(val), PropertyType::Mat4);
+}
+
+TEST(PropertyTypesTests, Mat3Identity) {
+    Mat3 identity{1.0f};  // Identity matrix
+    EXPECT_EQ(identity[0][0], 1.0f);
+    EXPECT_EQ(identity[1][1], 1.0f);
+    EXPECT_EQ(identity[2][2], 1.0f);
+    EXPECT_EQ(identity[0][1], 0.0f);
+    EXPECT_EQ(identity[1][0], 0.0f);
+}
+
+TEST(PropertyTypesTests, Mat4Identity) {
+    Mat4 identity{1.0f};  // Identity matrix
+    EXPECT_EQ(identity[0][0], 1.0f);
+    EXPECT_EQ(identity[1][1], 1.0f);
+    EXPECT_EQ(identity[2][2], 1.0f);
+    EXPECT_EQ(identity[3][3], 1.0f);
+    EXPECT_EQ(identity[0][1], 0.0f);
+    EXPECT_EQ(identity[3][0], 0.0f);
+}
+
+TEST(PropertyTypesTests, Mat3Equality) {
+    Mat3 m1{1.0f};
+    Mat3 m2{1.0f};
+    Mat3 m3{2.0f};  // Scaled identity
+
+    EXPECT_EQ(m1, m2);
+    EXPECT_NE(m1, m3);
+}
+
+TEST(PropertyTypesTests, Mat4Equality) {
+    Mat4 m1{1.0f};
+    Mat4 m2{1.0f};
+    Mat4 m3{2.0f};  // Scaled identity
+
+    EXPECT_EQ(m1, m2);
+    EXPECT_NE(m1, m3);
+}
+
+TEST(PropertyTypesTests, PropertyTypeToString_MatrixTypes) {
+    EXPECT_STREQ(propertyTypeToString(PropertyType::Mat3), "Mat3");
+    EXPECT_STREQ(propertyTypeToString(PropertyType::Mat4), "Mat4");
+}
+
 // Round-trip tests: verify all PropertyType enums can be converted to Cap'n Proto and back
 TEST(PropertyTypesTests, RoundTrip_ScalarTypes) {
     // Test all scalar types
-    std::vector<PropertyType> scalarTypes = {
-        PropertyType::Int32,
-        PropertyType::Int64,
-        PropertyType::Float32,
-        PropertyType::Float64,
-        PropertyType::Vec2,
-        PropertyType::Vec3,
-        PropertyType::Vec4,
-        PropertyType::Quat,
-        PropertyType::String,
-        PropertyType::Bool,
-        PropertyType::Bytes
-    };
+    std::vector<PropertyType> scalarTypes = {PropertyType::Int32,   PropertyType::Int64, PropertyType::Float32,
+                                             PropertyType::Float64, PropertyType::Vec2,  PropertyType::Vec3,
+                                             PropertyType::Vec4,    PropertyType::Quat,  PropertyType::String,
+                                             PropertyType::Bool,    PropertyType::Bytes};
 
     for (auto type : scalarTypes) {
         uint16_t capnpType = toCapnpPropertyType(type);
@@ -130,17 +178,21 @@ TEST(PropertyTypesTests, RoundTrip_ScalarTypes) {
 TEST(PropertyTypesTests, RoundTrip_ArrayTypes) {
     // Test all array types
     std::vector<PropertyType> arrayTypes = {
-        PropertyType::Int32Array,
-        PropertyType::Int64Array,
-        PropertyType::Float32Array,
-        PropertyType::Float64Array,
-        PropertyType::Vec2Array,
-        PropertyType::Vec3Array,
-        PropertyType::Vec4Array,
-        PropertyType::QuatArray
-    };
+        PropertyType::Int32Array, PropertyType::Int64Array, PropertyType::Float32Array, PropertyType::Float64Array,
+        PropertyType::Vec2Array,  PropertyType::Vec3Array,  PropertyType::Vec4Array,    PropertyType::QuatArray};
 
     for (auto type : arrayTypes) {
+        uint16_t capnpType = toCapnpPropertyType(type);
+        PropertyType roundTrip = fromCapnpPropertyType(capnpType);
+        EXPECT_EQ(type, roundTrip) << "Round-trip failed for " << propertyTypeToString(type);
+    }
+}
+
+TEST(PropertyTypesTests, RoundTrip_MatrixTypes) {
+    // Test matrix types
+    std::vector<PropertyType> matrixTypes = {PropertyType::Mat3, PropertyType::Mat4};
+
+    for (auto type : matrixTypes) {
         uint16_t capnpType = toCapnpPropertyType(type);
         PropertyType roundTrip = fromCapnpPropertyType(capnpType);
         EXPECT_EQ(type, roundTrip) << "Round-trip failed for " << propertyTypeToString(type);
@@ -150,26 +202,12 @@ TEST(PropertyTypesTests, RoundTrip_ArrayTypes) {
 TEST(PropertyTypesTests, RoundTrip_AllTypes) {
     // Comprehensive test of all types
     std::vector<PropertyType> allTypes = {
-        PropertyType::Int32,
-        PropertyType::Int64,
-        PropertyType::Float32,
-        PropertyType::Float64,
-        PropertyType::Vec2,
-        PropertyType::Vec3,
-        PropertyType::Vec4,
-        PropertyType::Quat,
-        PropertyType::String,
-        PropertyType::Bool,
-        PropertyType::Bytes,
-        PropertyType::Int32Array,
-        PropertyType::Int64Array,
-        PropertyType::Float32Array,
-        PropertyType::Float64Array,
-        PropertyType::Vec2Array,
-        PropertyType::Vec3Array,
-        PropertyType::Vec4Array,
-        PropertyType::QuatArray
-    };
+        PropertyType::Int32,      PropertyType::Int64,        PropertyType::Float32,      PropertyType::Float64,
+        PropertyType::Vec2,       PropertyType::Vec3,         PropertyType::Vec4,         PropertyType::Quat,
+        PropertyType::String,     PropertyType::Bool,         PropertyType::Bytes,        PropertyType::Int32Array,
+        PropertyType::Int64Array, PropertyType::Float32Array, PropertyType::Float64Array, PropertyType::Vec2Array,
+        PropertyType::Vec3Array,  PropertyType::Vec4Array,    PropertyType::QuatArray,    PropertyType::Mat3,
+        PropertyType::Mat4};
 
     for (auto type : allTypes) {
         // Convert to Cap'n Proto
@@ -196,4 +234,111 @@ TEST(PropertyTypesTests, CapnpMapping_UnknownValue_FailsClosed) {
 
     // Should fall back to Int32 (safe default)
     EXPECT_EQ(result, PropertyType::Int32);
+}
+
+// Serialization round-trip tests using Cap'n Proto
+TEST(PropertyTypesTests, SerializationRoundTrip_Mat3) {
+    // Create a non-trivial Mat3
+    Mat3 original{1.0f};
+    original[0][1] = 2.0f;
+    original[1][2] = 3.0f;
+    original[2][0] = 4.0f;
+
+    PropertyValue originalVal = original;
+
+    // Serialize to Cap'n Proto
+    ::capnp::MallocMessageBuilder builder;
+    auto propBuilder = builder.initRoot<Protocol::PropertyValue>();
+    serializePropertyValue(originalVal, propBuilder);
+
+    // Deserialize from Cap'n Proto
+    auto reader = builder.getRoot<Protocol::PropertyValue>();
+    PropertyValue roundTrip = deserializePropertyValue(reader);
+
+    // Verify round-trip
+    ASSERT_TRUE(std::holds_alternative<Mat3>(roundTrip));
+    Mat3 result = std::get<Mat3>(roundTrip);
+
+    // Compare all matrix elements
+    for (int col = 0; col < 3; ++col) {
+        for (int row = 0; row < 3; ++row) {
+            EXPECT_FLOAT_EQ(result[col][row], original[col][row]) << "Mismatch at [" << col << "][" << row << "]";
+        }
+    }
+}
+
+TEST(PropertyTypesTests, SerializationRoundTrip_Mat4) {
+    // Create a non-trivial Mat4 (like a translation matrix)
+    Mat4 original{1.0f};
+    original[3][0] = 10.0f;  // Translation X
+    original[3][1] = 20.0f;  // Translation Y
+    original[3][2] = 30.0f;  // Translation Z
+    original[0][1] = 0.5f;   // Some rotation component
+
+    PropertyValue originalVal = original;
+
+    // Serialize to Cap'n Proto
+    ::capnp::MallocMessageBuilder builder;
+    auto propBuilder = builder.initRoot<Protocol::PropertyValue>();
+    serializePropertyValue(originalVal, propBuilder);
+
+    // Deserialize from Cap'n Proto
+    auto reader = builder.getRoot<Protocol::PropertyValue>();
+    PropertyValue roundTrip = deserializePropertyValue(reader);
+
+    // Verify round-trip
+    ASSERT_TRUE(std::holds_alternative<Mat4>(roundTrip));
+    Mat4 result = std::get<Mat4>(roundTrip);
+
+    // Compare all matrix elements
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            EXPECT_FLOAT_EQ(result[col][row], original[col][row]) << "Mismatch at [" << col << "][" << row << "]";
+        }
+    }
+}
+
+TEST(PropertyTypesTests, SerializationRoundTrip_Mat3Identity) {
+    Mat3 identity{1.0f};  // Identity matrix
+    PropertyValue originalVal = identity;
+
+    ::capnp::MallocMessageBuilder builder;
+    auto propBuilder = builder.initRoot<Protocol::PropertyValue>();
+    serializePropertyValue(originalVal, propBuilder);
+
+    auto reader = builder.getRoot<Protocol::PropertyValue>();
+    PropertyValue roundTrip = deserializePropertyValue(reader);
+
+    ASSERT_TRUE(std::holds_alternative<Mat3>(roundTrip));
+    Mat3 result = std::get<Mat3>(roundTrip);
+
+    // Verify identity matrix
+    EXPECT_FLOAT_EQ(result[0][0], 1.0f);
+    EXPECT_FLOAT_EQ(result[1][1], 1.0f);
+    EXPECT_FLOAT_EQ(result[2][2], 1.0f);
+    EXPECT_FLOAT_EQ(result[0][1], 0.0f);
+    EXPECT_FLOAT_EQ(result[1][0], 0.0f);
+}
+
+TEST(PropertyTypesTests, SerializationRoundTrip_Mat4Identity) {
+    Mat4 identity{1.0f};  // Identity matrix
+    PropertyValue originalVal = identity;
+
+    ::capnp::MallocMessageBuilder builder;
+    auto propBuilder = builder.initRoot<Protocol::PropertyValue>();
+    serializePropertyValue(originalVal, propBuilder);
+
+    auto reader = builder.getRoot<Protocol::PropertyValue>();
+    PropertyValue roundTrip = deserializePropertyValue(reader);
+
+    ASSERT_TRUE(std::holds_alternative<Mat4>(roundTrip));
+    Mat4 result = std::get<Mat4>(roundTrip);
+
+    // Verify identity matrix
+    EXPECT_FLOAT_EQ(result[0][0], 1.0f);
+    EXPECT_FLOAT_EQ(result[1][1], 1.0f);
+    EXPECT_FLOAT_EQ(result[2][2], 1.0f);
+    EXPECT_FLOAT_EQ(result[3][3], 1.0f);
+    EXPECT_FLOAT_EQ(result[0][1], 0.0f);
+    EXPECT_FLOAT_EQ(result[3][0], 0.0f);
 }

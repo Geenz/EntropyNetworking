@@ -18,17 +18,23 @@
 #pragma once
 
 #include <EntropyCore.h>
-#include "../Core/NetworkTypes.h"
-#include "../Core/ConnectionTypes.h"
-#include "../Core/ErrorCodes.h"
-#include <vector>
-#include <functional>
+
 #include <atomic>
+#include <format>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
-namespace EntropyEngine::Networking {
+#include "../Core/ConnectionTypes.h"
+#include "../Core/ErrorCodes.h"
+#include "../Core/NetworkTypes.h"
+
+namespace EntropyEngine::Networking
+{
 
 /**
  * @brief Abstract base interface for network connections
@@ -46,10 +52,17 @@ namespace EntropyEngine::Networking {
  * Thread Safety: All methods are thread-safe unless documented otherwise.
  * Callbacks are invoked with reference-counted guards to prevent use-after-free.
  */
-class NetworkConnection : public Core::EntropyObject {
+class NetworkConnection : public Core::EntropyObject
+{
 public:
     using MessageCallback = std::function<void(const std::vector<uint8_t>&)>;  ///< Callback for received messages
     using StateCallback = std::function<void(ConnectionState)>;                ///< Callback for state changes
+    using ChannelMessageCallback = std::function<void(const std::string& channel, const std::vector<uint8_t>&)>;
+
+    /// Well-known channel names
+    static constexpr const char* CHANNEL_CONTROL = "control";                ///< Default control/protocol channel
+    static constexpr const char* CHANNEL_ASSET_UPLOAD = "asset-upload";      ///< Bulk asset uploads
+    static constexpr const char* CHANNEL_ASSET_DOWNLOAD = "asset-download";  ///< Bulk asset downloads
 
     virtual ~NetworkConnection() = default;
 
@@ -106,6 +119,74 @@ public:
         return Result<void>::err(NetworkError::InvalidParameter, "trySend not supported by this backend");
     }
 
+    // =========================================================================
+    // Named Channel Support (for bulk data isolation)
+    // =========================================================================
+
+    /**
+     * @brief Sends data on a named channel
+     *
+     * For backends that support multiple channels (WebRTC), this sends on the
+     * specified channel. For single-channel backends (Unix socket, named pipe),
+     * this falls back to the default channel.
+     *
+     * @param channel Channel name (use CHANNEL_* constants)
+     * @param data Bytes to send
+     * @return Result indicating success or failure
+     */
+    virtual Result<void> sendOnChannel(const std::string& channel, const std::vector<uint8_t>& data) {
+        (void)channel;
+        return send(data);  // Default: fall back to main channel
+    }
+
+    /**
+     * @brief Checks if a named channel is open and ready for data
+     *
+     * @param channel Channel name
+     * @return true if channel is open (or backend doesn't support channels)
+     */
+    virtual bool isChannelOpen(const std::string& channel) const {
+        (void)channel;
+        return isConnected();  // Default: channel is open if connection is open
+    }
+
+    /**
+     * @brief Opens a named channel (creates if needed)
+     *
+     * For WebRTC, this creates a new data channel. For other backends,
+     * this is a no-op since they use a single channel.
+     *
+     * @param channel Channel name
+     * @return Result indicating success or failure
+     */
+    virtual Result<void> openChannel(const std::string& channel) {
+        (void)channel;
+        return Result<void>::ok();  // Default: no-op
+    }
+
+    /**
+     * @brief Sets callback for messages received on a specific channel
+     *
+     * @param channel Channel name
+     * @param callback Function called when messages arrive on this channel
+     */
+    virtual void setChannelMessageCallback(const std::string& channel, MessageCallback callback) {
+        std::lock_guard<std::mutex> lock(_cbMutex);
+        if (callback) {
+            _channelCallbacks[channel] = std::move(callback);
+        } else {
+            _channelCallbacks.erase(channel);
+        }
+    }
+
+    /**
+     * @brief Checks if this backend supports multiple channels
+     * @return true if sendOnChannel uses separate channels
+     */
+    virtual bool supportsMultipleChannels() const {
+        return false;  // Most backends are single-channel
+    }
+
     /**
      * @brief Gets current connection state
      * @return Connection state (Disconnected, Connecting, Connected, etc.)
@@ -123,6 +204,19 @@ public:
      * @return Stats with bytes/messages sent/received
      */
     virtual ConnectionStats getStats() const = 0;
+
+    /**
+     * @brief Starts the receive thread for adopted connections
+     *
+     * For connections created via accept(), the receive thread must NOT start
+     * in the constructor. Instead, ConnectionManager calls this after setting
+     * up callbacks to avoid race conditions where messages arrive before
+     * handlers are registered.
+     *
+     * For client-side connections (via connect()), receive thread starts
+     * automatically in connect() - this method is a no-op.
+     */
+    virtual void startReceiving() {}
 
     /**
      * @brief Sets callback for incoming messages
@@ -176,26 +270,30 @@ protected:
 
         // Increment active callback counter (RAII guard ensures decrement)
         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
-        struct CallbackGuard {
+        struct CallbackGuard
+        {
             std::atomic<int>& counter;
-            ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
         bool shutdown2 = _callbacksShutdown.load(std::memory_order_acquire);
         if (shutdown2) {
-            ENTROPY_LOG_DEBUG("NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
-            return; // Bail early if shutting down
+            ENTROPY_LOG_DEBUG(
+                "NetworkConnection::onMessageReceived: Ignoring message (shutdown flag set after increment)");
+            return;  // Bail early if shutting down
         }
 
         MessageCallback cb;
         {
             std::lock_guard<std::mutex> lock(_cbMutex);
-            cb = _messageCallback; // copy under lock
+            cb = _messageCallback;  // copy under lock
         }
 
         if (cb) {
-            cb(data); // invoke outside lock
+            cb(data);  // invoke outside lock
         }
 
         // Counter decrements here via RAII, ensuring destructor waits
@@ -217,28 +315,76 @@ protected:
 
         // Increment active callback counter (RAII guard ensures decrement)
         _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
-        struct CallbackGuard {
+        struct CallbackGuard
+        {
             std::atomic<int>& counter;
-            ~CallbackGuard() { counter.fetch_sub(1, std::memory_order_release); }
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
         } guard{_activeCallbacks};
 
         // Double-check shutdown flag after incrementing counter
         if (_callbacksShutdown.load(std::memory_order_acquire)) {
-            return; // Bail early if shutting down
+            return;  // Bail early if shutting down
         }
 
         StateCallback cb;
         {
             std::lock_guard<std::mutex> lock(_cbMutex);
-            cb = _stateCallback; // copy under lock
+            cb = _stateCallback;  // copy under lock
         }
 
         if (cb) {
-            cb(state); // invoke outside lock
+            cb(state);  // invoke outside lock
         }
 
         // Counter decrements here via RAII, ensuring destructor waits
         // until we're completely done with the mutex
+    }
+
+    /**
+     * @brief Invokes channel-specific message callback with lifetime guards
+     *
+     * Called by derived classes when messages arrive on named channels.
+     * @param channel Channel name the message arrived on
+     * @param data Received message bytes
+     */
+    void onChannelMessageReceived(const std::string& channel, const std::vector<uint8_t>& data) noexcept {
+        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        _activeCallbacks.fetch_add(1, std::memory_order_relaxed);
+        struct CallbackGuard
+        {
+            std::atomic<int>& counter;
+            ~CallbackGuard() {
+                counter.fetch_sub(1, std::memory_order_release);
+            }
+        } guard{_activeCallbacks};
+
+        if (_callbacksShutdown.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        MessageCallback cb;
+        {
+            std::lock_guard<std::mutex> lock(_cbMutex);
+            auto it = _channelCallbacks.find(channel);
+            if (it != _channelCallbacks.end()) {
+                cb = it->second;
+            }
+        }
+
+        if (cb) {
+            ENTROPY_LOG_DEBUG(
+                std::format("onChannelMessageReceived: Dispatching '{}' ({} bytes) to callback", channel, data.size()));
+            cb(data);
+        } else {
+            ENTROPY_LOG_WARNING(
+                std::format("onChannelMessageReceived: No callback registered for channel '{}' ({} bytes dropped)",
+                            channel, data.size()));
+        }
     }
 
     /**
@@ -259,11 +405,12 @@ protected:
     }
 
 private:
-    mutable std::mutex _cbMutex;                         ///< Protects callback access
-    MessageCallback _messageCallback;                    ///< User message callback
-    StateCallback _stateCallback;                        ///< User state callback
-    std::atomic<int> _activeCallbacks{0};                ///< Count of active callback invocations
-    std::atomic<bool> _callbacksShutdown{false};         ///< Shutdown flag for destructor
+    mutable std::mutex _cbMutex;                                         ///< Protects callback access
+    MessageCallback _messageCallback;                                    ///< User message callback
+    StateCallback _stateCallback;                                        ///< User state callback
+    std::unordered_map<std::string, MessageCallback> _channelCallbacks;  ///< Per-channel callbacks
+    std::atomic<int> _activeCallbacks{0};                                ///< Count of active callback invocations
+    std::atomic<bool> _callbacksShutdown{false};                         ///< Shutdown flag for destructor
 };
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -9,20 +9,22 @@
 
 #pragma once
 
-#include "LocalServer.h"
-#include <string>
 #include <atomic>
-#include <queue>
-#include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <mutex>
+#include <queue>
+#include <string>
+
+#include "LocalServer.h"
 
 #if defined(__APPLE__)
-#include <xpc/xpc.h>
 #include <dispatch/dispatch.h>
+#include <xpc/xpc.h>
 #endif
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 #if defined(__APPLE__)
 
@@ -62,7 +64,8 @@ namespace EntropyEngine::Networking {
  * });
  * @endcode
  */
-class XPCServer : public LocalServer {
+class XPCServer : public LocalServer
+{
 public:
     /**
      * @brief Creates XPC server for named Mach service
@@ -77,7 +80,9 @@ public:
     Result<void> listen() override;
     ConnectionHandle accept() override;
     Result<void> close() override;
-    bool isListening() const override { return _listening.load(std::memory_order_acquire); }
+    bool isListening() const override {
+        return _listening.load(std::memory_order_acquire);
+    }
 
     // XPC-specific: set optional peer validator using peer pid
     using PeerValidator = std::function<bool(pid_t)>;
@@ -86,7 +91,9 @@ public:
     }
 
     // EntropyObject interface
-    const char* className() const noexcept override { return "XPCServer"; }
+    const char* className() const noexcept override {
+        return "XPCServer";
+    }
     uint64_t classHash() const noexcept override;
     std::string toString() const override;
 
@@ -111,6 +118,6 @@ private:
     void handleNewConnection(xpc_connection_t connection);
 };
 
-#endif // __APPLE__
+#endif  // __APPLE__
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking

@@ -9,11 +9,13 @@
 
 #pragma once
 
-#include <cstdint>
 #include <chrono>
+#include <cstdint>
 
-namespace EntropyEngine {
-namespace Networking {
+namespace EntropyEngine
+{
+namespace Networking
+{
 
 /**
  * @brief Get current timestamp in microseconds since epoch
@@ -26,9 +28,9 @@ namespace Networking {
  */
 inline uint64_t getCurrentTimestampMicros() {
     return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
 }
 
-} // namespace Networking
-} // namespace EntropyEngine
+}  // namespace Networking
+}  // namespace EntropyEngine

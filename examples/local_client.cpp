@@ -2,16 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "../src/Networking/Transport/ConnectionManager.h"
-#include "../src/Networking/Session/SessionManager.h"
-#include "../src/Networking/Core/ConnectionTypes.h"
 #include <Logging/Logger.h>
-#include <thread>
-#include <chrono>
+
 #include <atomic>
-#include <mutex>
+#include <chrono>
 #include <condition_variable>
 #include <format>
+#include <mutex>
+#include <thread>
+
+#include "../src/Networking/Core/ConnectionTypes.h"
+#include "../src/Networking/Session/SessionManager.h"
+#include "../src/Networking/Transport/ConnectionManager.h"
 
 using namespace std;
 using namespace EntropyEngine::Networking;
@@ -79,7 +81,7 @@ int main() {
         // Wait for connection using condition variable (more efficient than polling)
         {
             unique_lock<mutex> lock(connMutex);
-            if (!connCV.wait_for(lock, chrono::seconds(5), [&]{ return isConnected || connectionFailed; })) {
+            if (!connCV.wait_for(lock, chrono::seconds(5), [&] { return isConnected || connectionFailed; })) {
                 ENTROPY_LOG_ERROR("Connection timeout");
                 return 1;
             }
@@ -96,12 +98,8 @@ int main() {
         this_thread::sleep_for(chrono::milliseconds(500));
 
         // Send test messages
-        vector<string> messages = {
-            "Hello from local client!",
-            "Testing Unix socket communication",
-            "This is a local connection",
-            "Fast and reliable IPC"
-        };
+        vector<string> messages = {"Hello from local client!", "Testing Unix socket communication",
+                                   "This is a local connection", "Fast and reliable IPC"};
 
         for (const auto& msg : messages) {
             ENTROPY_LOG_INFO(std::format("Sending: {}", msg));

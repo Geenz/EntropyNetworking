@@ -7,16 +7,18 @@
  * This file is part of the Entropy Networking project.
  */
 
+#include <EntropyCore.h>
 #include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "../src/Networking/Core/ComponentSchema.h"
+#include "../src/Networking/Core/ComponentSchemaRegistry.h"
+#include "../src/Networking/Session/SessionManager.h"
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/LocalServer.h"
-#include "../src/Networking/Session/SessionManager.h"
-#include "../src/Networking/Core/ComponentSchemaRegistry.h"
-#include "../src/Networking/Core/ComponentSchema.h"
-#include <thread>
-#include <chrono>
-#include <atomic>
-#include <EntropyCore.h>
 
 using namespace EntropyEngine::Networking;
 using namespace EntropyEngine::Core;
@@ -32,7 +34,8 @@ using namespace EntropyEngine::Core;
  * - Schema registry integration with SessionManager
  */
 
-class SchemaIntegrationTests : public ::testing::Test {
+class SchemaIntegrationTests : public ::testing::Test
+{
 protected:
     void SetUp() override {
         endpoint = "/tmp/entropy_schema_test_" + std::to_string(getTestCounter()) + ".sock";
@@ -126,12 +129,11 @@ protected:
 
     bool performHandshake() {
         // Client initiates handshake
-        auto result = clientSessMgr->setHandshakeCallback(clientSession,
-            [](const std::string&, const std::string&) {});
+        auto result = clientSessMgr->setHandshakeCallback(clientSession, [](const std::string&, const std::string&) {});
 
         // Get underlying NetworkSession and perform handshake
         auto& clientReg = clientSession.getPropertyRegistry();
-        auto* clientNetSession = reinterpret_cast<NetworkSession*>(&clientReg) - 1; // Hack to get NetworkSession
+        auto* clientNetSession = reinterpret_cast<NetworkSession*>(&clientReg) - 1;  // Hack to get NetworkSession
 
         // Actually, we need to trigger handshake properly via the session
         // For now, wait for auto-handshake to complete
@@ -153,18 +155,11 @@ protected:
 
 // Helper to create a test schema
 ComponentSchema createTestSchema(const std::string& name, int version) {
-    std::vector<PropertyDefinition> props = {
-        {"position", PropertyType::Vec3, 0, sizeof(Vec3)},
-        {"rotation", PropertyType::Quat, sizeof(Vec3), sizeof(Quat)}
-    };
+    std::vector<PropertyDefinition> props = {{"position", PropertyType::Vec3, 0, sizeof(Vec3)},
+                                             {"rotation", PropertyType::Quat, sizeof(Vec3), sizeof(Quat)}};
 
-    auto result = ComponentSchema::create(
-        "TestSchemaApp",
-        name,
-        version,
-        props,
-        sizeof(Vec3) + sizeof(Quat),
-        false  // Start private
+    auto result = ComponentSchema::create("TestSchemaApp", name, version, props, sizeof(Vec3) + sizeof(Quat),
+                                          false  // Start private
     );
 
     EXPECT_TRUE(result.success()) << result.errorMessage;
@@ -203,16 +198,9 @@ TEST_F(SchemaIntegrationTests, SchemaCallbackInvocation) {
 
     // Set callbacks BEFORE registering schemas
     schemaRegistry->setSchemaPublishedCallback(
-        [&publishCount](ComponentTypeHash, const ComponentSchema&) {
-            publishCount++;
-        }
-    );
+        [&publishCount](ComponentTypeHash, const ComponentSchema&) { publishCount++; });
 
-    schemaRegistry->setSchemaUnpublishedCallback(
-        [&unpublishCount](ComponentTypeHash) {
-            unpublishCount++;
-        }
-    );
+    schemaRegistry->setSchemaUnpublishedCallback([&unpublishCount](ComponentTypeHash) { unpublishCount++; });
 
     // Create and register schema (starts private)
     auto schema = createTestSchema("CallbackTest", 1);
@@ -242,12 +230,10 @@ TEST_F(SchemaIntegrationTests, BroadcastOnPublish) {
     std::atomic<int> broadcastCount{0};
 
     // Hook broadcast via schema registry callback
-    schemaRegistry->setSchemaPublishedCallback(
-        [&broadcastCount](ComponentTypeHash, const ComponentSchema&) {
-            broadcastCount++;
-            // SessionManager's broadcast method is called here
-        }
-    );
+    schemaRegistry->setSchemaPublishedCallback([&broadcastCount](ComponentTypeHash, const ComponentSchema&) {
+        broadcastCount++;
+        // SessionManager's broadcast method is called here
+    });
 
     // Create schema
     auto schema = createTestSchema("BroadcastTest", 1);

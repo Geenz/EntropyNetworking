@@ -8,19 +8,22 @@
  */
 
 #include "XPCServer.h"
-#include "XPCConnection.h"
-#include "ConnectionManager.h"
-#include <sstream>
+
 #include <Logging/Logger.h>
+#include <TargetConditionals.h>
+
+#include <sstream>
+
+#include "ConnectionManager.h"
+#include "XPCConnection.h"
 
 #if defined(__APPLE__)
 
-namespace EntropyEngine::Networking {
+namespace EntropyEngine::Networking
+{
 
 XPCServer::XPCServer(ConnectionManager* connMgr, std::string serviceName)
-    : _connMgr(connMgr)
-    , _serviceName(std::move(serviceName))
-{
+    : _connMgr(connMgr), _serviceName(std::move(serviceName)) {
     // Create serial queue for XPC events
     _queue = dispatch_queue_create("com.entropyengine.xpc.server", DISPATCH_QUEUE_SERIAL);
 }
@@ -60,7 +63,6 @@ ConnectionHandle XPCServer::accept() {
         // Wait for a connection with timeout for responsiveness
         if (_queueCV.wait_for(lock, std::chrono::milliseconds(500),
                               [this] { return !_pendingConnections.empty() || !_listening; })) {
-
             // Check if we should stop
             if (!_listening.load(std::memory_order_acquire)) {
                 break;
@@ -119,12 +121,13 @@ Result<void> XPCServer::close() {
 }
 
 void XPCServer::setupListener() {
+#if TARGET_OS_IPHONE
+    // xpc_connection_create_mach_service is not available on iOS.
+    // iOS XPC services use NSXPCConnection or xpc_connection_create with a named endpoint.
+    ENTROPY_LOG_WARNING("XPC Mach service listener not available on iOS");
+#else
     // Create Mach service listener
-    _listener = xpc_connection_create_mach_service(
-        _serviceName.c_str(),
-        _queue,
-        XPC_CONNECTION_MACH_SERVICE_LISTENER
-    );
+    _listener = xpc_connection_create_mach_service(_serviceName.c_str(), _queue, XPC_CONNECTION_MACH_SERVICE_LISTENER);
 
     if (!_listener) {
         return;
@@ -132,23 +135,24 @@ void XPCServer::setupListener() {
 
     // Set up event handler for incoming connections
     xpc_connection_set_event_handler(_listener, ^(xpc_object_t event) {
-        if (_shouldStop.load(std::memory_order_acquire)) {
-            return;
-        }
+      if (_shouldStop.load(std::memory_order_acquire)) {
+          return;
+      }
 
-        xpc_type_t type = xpc_get_type(event);
+      xpc_type_t type = xpc_get_type(event);
 
-        if (type == XPC_TYPE_CONNECTION) {
-            // New incoming connection
-            handleNewConnection((xpc_connection_t)event);
-        } else if (type == XPC_TYPE_ERROR) {
-            // Listener error - log it
-            ENTROPY_LOG_WARNING("XPC listener error event");
-        }
+      if (type == XPC_TYPE_CONNECTION) {
+          // New incoming connection
+          handleNewConnection((xpc_connection_t)event);
+      } else if (type == XPC_TYPE_ERROR) {
+          // Listener error - log it
+          ENTROPY_LOG_WARNING("XPC listener error event");
+      }
     });
 
     // Activate the listener
     xpc_connection_resume(_listener);
+#endif
 }
 
 void XPCServer::handleNewConnection(xpc_connection_t connection) {
@@ -156,12 +160,17 @@ void XPCServer::handleNewConnection(xpc_connection_t connection) {
 
     // If validator is set, obtain peer pid and validate
     if (_peerValidator) {
+#if TARGET_OS_IPHONE
+        // xpc_connection_get_pid is not available on iOS — skip PID validation
+        ENTROPY_LOG_DEBUG("XPC peer PID validation skipped (iOS)");
+#else
         pid_t pid = xpc_connection_get_pid(connection);
         if (!_peerValidator(pid)) {
             // Reject connection
             xpc_connection_cancel(connection);
             return;
         }
+#endif
     }
 
     // Retain the connection
@@ -178,20 +187,17 @@ void XPCServer::handleNewConnection(xpc_connection_t connection) {
 }
 
 uint64_t XPCServer::classHash() const noexcept {
-    static const uint64_t hash = static_cast<uint64_t>(
-        Core::TypeSystem::createTypeId<XPCServer>().id
-    );
+    static const uint64_t hash = static_cast<uint64_t>(Core::TypeSystem::createTypeId<XPCServer>().id);
     return hash;
 }
 
 std::string XPCServer::toString() const {
     std::ostringstream oss;
-    oss << className() << "@" << static_cast<const void*>(this)
-        << "(service=" << _serviceName
+    oss << className() << "@" << static_cast<const void*>(this) << "(service=" << _serviceName
         << ", listening=" << (isListening() ? "true" : "false") << ")";
     return oss.str();
 }
 
-} // namespace EntropyEngine::Networking
+}  // namespace EntropyEngine::Networking
 
-#endif // __APPLE__
+#endif  // __APPLE__

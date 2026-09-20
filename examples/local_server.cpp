@@ -2,13 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include <Logging/Logger.h>
+
+#include <atomic>
+#include <csignal>
+#include <format>
+
+#include "../src/Networking/Core/ConnectionTypes.h"
 #include "../src/Networking/Transport/ConnectionManager.h"
 #include "../src/Networking/Transport/LocalServer.h"
-#include "../src/Networking/Core/ConnectionTypes.h"
-#include <Logging/Logger.h>
-#include <csignal>
-#include <atomic>
-#include <format>
 
 using namespace std;
 using namespace EntropyEngine::Networking;
